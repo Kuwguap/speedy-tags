@@ -351,11 +351,12 @@ app.get("/api/admin/stats", authMiddleware, async (req, res) => {
 });
 
 // Serve static frontend + SPA fallback (for Render single-service deploy)
-const distPath = join(__dirname, "..", "dist");
+const distPath = existsSync(join(process.cwd(), "dist"))
+  ? join(process.cwd(), "dist")
+  : join(__dirname, "..", "dist");
 if (existsSync(distPath)) {
-  app.use(express.static(distPath, { index: false }));
-  app.get("*", (req, res, next) => {
-    if (req.path.startsWith("/api")) return next();
+  app.use(express.static(distPath, { fallthrough: true }));
+  app.get(/^\/(?!api\/)/, (req, res, next) => {
     res.sendFile(join(distPath, "index.html"), (err) => {
       if (err) next(err);
     });
