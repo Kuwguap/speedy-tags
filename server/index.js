@@ -218,6 +218,9 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: "5mb" }));
 
+// Health check (no DB/Telegram - always 200)
+app.get("/api/health", (req, res) => res.json({ ok: true }));
+
 // Public: Services
 app.get("/api/services", async (req, res) => {
   try {
@@ -347,13 +350,15 @@ app.get("/api/admin/stats", authMiddleware, async (req, res) => {
   }
 });
 
-// Serve static frontend (for Render single-service deploy)
+// Serve static frontend + SPA fallback (for Render single-service deploy)
 const distPath = join(__dirname, "..", "dist");
 if (existsSync(distPath)) {
-  app.use(express.static(distPath));
+  app.use(express.static(distPath, { index: false }));
   app.get("*", (req, res, next) => {
     if (req.path.startsWith("/api")) return next();
-    res.sendFile(join(distPath, "index.html"));
+    res.sendFile(join(distPath, "index.html"), (err) => {
+      if (err) next(err);
+    });
   });
 }
 
