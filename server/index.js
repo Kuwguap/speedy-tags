@@ -45,8 +45,11 @@ function saveJson(path, data) {
 async function loadServices() {
   if (useSupabase()) {
     const { data, error } = await supabase.from("services").select("*").order("id");
-    if (error) throw error;
-    return data || defaultServices;
+    if (error) {
+      console.warn("Supabase services error:", error.message);
+      return defaultServices;
+    }
+    return data && data.length ? data : defaultServices;
   }
   return loadJson(SERVICES_FILE, defaultServices);
 }
@@ -54,7 +57,10 @@ async function loadServices() {
 async function loadOrders() {
   if (useSupabase()) {
     const { data, error } = await supabase.from("orders").select("*").order("created_at", { ascending: false });
-    if (error) throw error;
+    if (error) {
+      console.warn("Supabase orders error:", error.message);
+      return [];
+    }
     return data || [];
   }
   return loadJson(ORDERS_FILE, []);
@@ -124,7 +130,11 @@ async function appendActivity(type, payload) {
 
 async function loadActivity() {
   if (useSupabase()) {
-    const { data } = await supabase.from("activity").select("type, payload, created_at").order("created_at", { ascending: false });
+    const { data, error } = await supabase.from("activity").select("type, payload, created_at").order("created_at", { ascending: false });
+    if (error) {
+      console.warn("Supabase activity error:", error.message);
+      return { dataIn: [], dataOut: [], payments: [] };
+    }
     const out = { dataIn: [], dataOut: [], payments: [] };
     (data || []).forEach((r) => {
       if (out[r.type]) out[r.type].push({ ...(r.payload || {}), at: r.payload?.at || r.created_at });
