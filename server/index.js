@@ -15,7 +15,7 @@ const ORDERS_FILE = join(DATA_DIR, "orders.json");
 const ACTIVITY_FILE = join(DATA_DIR, "activity.json");
 
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
-const JWT_SECRET = process.env.JWT_SECRET || "quicktags-secret-change-in-production";
+const JWT_SECRET = process.env.JWT_SECRET || "speedy-tags-secret-change-in-production";
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_IDS = (process.env.TELEGRAM_CHAT_IDS || "")
   .split(",")

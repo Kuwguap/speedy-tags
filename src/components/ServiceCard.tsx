@@ -29,9 +29,9 @@ export function ServiceCard({ service }: { service: ServiceRecord }) {
           <Button
             onClick={() => navigate(`/checkout/${service.id}`)}
             size="sm"
-            className="rounded-lg gap-1.5"
+            className="rounded-lg gap-1.5 font-semibold"
           >
-            Get Started
+            BUY IT NOW
             <ArrowRight className="h-4 w-4" />
           </Button>
         </div>

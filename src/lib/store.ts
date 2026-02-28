@@ -28,20 +28,27 @@ const ORDERS_KEY = "cartags_orders";
 const defaultServices: Service[] = [
   {
     id: "1",
+    title: "Same Day NJ Temporary Tag",
+    description: "Temp plate + registration + insurance card. 30-day validity. Processed through NJ MVC. Instant email or 1-hour local delivery.",
+    price: 150.0,
+    image: "",
+  },
+  {
+    id: "2",
     title: "30-Day Temporary Tag",
     description: "Standard temporary registration valid for 30 days. Perfect for newly purchased vehicles awaiting permanent plates.",
     price: 29.99,
     image: "",
   },
   {
-    id: "2",
+    id: "3",
     title: "60-Day Temporary Tag",
     description: "Extended temporary registration valid for 60 days. Ideal for out-of-state transfers and extended processing times.",
     price: 49.99,
     image: "",
   },
   {
-    id: "3",
+    id: "4",
     title: "Transit Permit",
     description: "One-trip transit permit for moving unregistered vehicles. Valid for a single trip to your destination.",
     price: 19.99,

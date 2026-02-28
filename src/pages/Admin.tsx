@@ -153,7 +153,7 @@ export default function Admin() {
             <div className="h-8 w-8 flex items-center justify-center rounded-lg bg-sidebar-primary">
               <Car className="h-4 w-4 text-sidebar-primary-foreground" />
             </div>
-            <span className="font-display text-lg font-bold text-sidebar-primary-foreground">QuickTags</span>
+            <span className="font-display text-lg font-bold text-sidebar-primary-foreground">Speedy Tags</span>
           </Link>
         </div>
         <nav className="flex-1 p-3 space-y-1">
