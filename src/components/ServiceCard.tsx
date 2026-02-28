@@ -2,7 +2,7 @@ import { useNavigate } from "react-router-dom";
 import type { ServiceRecord } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Tag, ArrowRight } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 
 export function ServiceCard({ service }: { service: ServiceRecord }) {
   const navigate = useNavigate();
@@ -17,7 +17,7 @@ export function ServiceCard({ service }: { service: ServiceRecord }) {
             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
           />
         ) : (
-          <Tag className="h-20 w-20 text-primary/20" />
+          <img src="/placeholder.svg" alt="" className="w-24 h-24 object-contain opacity-40" />
         )}
         <div className="absolute inset-0 bg-gradient-to-t from-foreground/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
       </div>
