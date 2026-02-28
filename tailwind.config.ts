@@ -89,11 +89,17 @@ export default {
           from: { opacity: "0", transform: "translateY(10px)" },
           to: { opacity: "1", transform: "translateY(0)" },
         },
+        "car-drive-off": {
+          "0%": { transform: "translateX(0) scale(1)", opacity: "1" },
+          "70%": { transform: "translateX(90vw) scale(0.7)", opacity: "0.6" },
+          "100%": { transform: "translateX(120vw) scale(0.35)", opacity: "0" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
         "fade-in": "fade-in 0.5s ease-out forwards",
+        "car-drive-off": "car-drive-off 10s cubic-bezier(0.22, 0.61, 0.36, 1) forwards",
       },
     },
   },
