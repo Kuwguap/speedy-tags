@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, CheckCircle2 } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { z } from "zod";
 
 const schema = z.object({
@@ -34,7 +34,6 @@ export default function Checkout() {
     deliveryAddress: "", vin: "", carMakeModel: "", color: "",
   });
   const [errors, setErrors] = useState<Partial<Record<keyof FormData, string>>>({});
-  const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -68,7 +67,7 @@ export default function Checkout() {
     const data = result.data;
     setSubmitting(true);
     try {
-      await api.createOrder({
+      const { url } = await api.createCheckoutSession({
         firstName: data.firstName,
         lastName: data.lastName,
         phone: data.phone,
@@ -81,37 +80,19 @@ export default function Checkout() {
         serviceTitle: service.title,
         price: service.price,
       });
-      setSubmitted(true);
-      toast({ title: "Order placed!", description: "A driver will call in 1–5 minutes to confirm delivery details." });
+      if (url) window.location.href = url;
+      else throw new Error("No checkout URL received");
     } catch (err) {
       toast({
-        title: "Order failed",
+        title: "Checkout failed",
         description: err instanceof Error ? err.message : "Please try again.",
         variant: "destructive",
       });
-    } finally {
       setSubmitting(false);
     }
   };
 
   if (!service) return null;
-
-  if (submitted) {
-    return (
-      <div className="min-h-screen bg-background">
-        <Header />
-        <div className="container max-w-lg py-24 text-center animate-fade-in">
-          <div className="inline-flex h-20 w-20 items-center justify-center rounded-2xl bg-success/10 mb-8">
-            <CheckCircle2 className="h-12 w-12 text-success" />
-          </div>
-          <h1 className="font-display text-3xl md:text-4xl font-bold text-foreground mb-4">Order Confirmed!</h1>
-          <p className="text-muted-foreground mb-4 text-lg">Your temporary tag for <strong className="text-foreground">{service.title}</strong> is being processed.</p>
-          <p className="text-muted-foreground mb-10 text-lg">A driver will call you in the next <strong className="text-foreground">1–5 minutes</strong> to confirm delivery details.</p>
-          <Button onClick={() => navigate("/")} size="lg" className="rounded-xl">Back to Home</Button>
-        </div>
-      </div>
-    );
-  }
 
   const fields: { key: keyof FormData; label: string; placeholder: string; half?: boolean }[] = [
     { key: "firstName", label: "First Name", placeholder: "John", half: true },
@@ -157,7 +138,7 @@ export default function Checkout() {
                 ))}
               </div>
               <Button type="submit" className="w-full" size="lg" disabled={submitting}>
-                {submitting ? "Placing order..." : `Place Order — $${service.price.toFixed(2)}`}
+                {submitting ? "Redirecting to payment..." : `Pay with Card — $${service.price.toFixed(2)}`}
               </Button>
             </form>
           </CardContent>

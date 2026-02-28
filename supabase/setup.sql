@@ -28,8 +28,14 @@ CREATE TABLE IF NOT EXISTS orders (
   created_at TIMESTAMPTZ DEFAULT NOW(),
   telegram_sent BOOLEAN DEFAULT FALSE,
   telegram_recipients JSONB DEFAULT '[]',
-  telegram_errors JSONB DEFAULT '[]'
+  telegram_errors JSONB DEFAULT '[]',
+  stripe_session_id TEXT UNIQUE,
+  payment_status TEXT DEFAULT 'pending'
 );
+
+-- Add columns if upgrading existing DB (safe to run)
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS stripe_session_id TEXT UNIQUE;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_status TEXT DEFAULT 'pending';
 
 -- 3. Activity log
 CREATE TABLE IF NOT EXISTS activity (

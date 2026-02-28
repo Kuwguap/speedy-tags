@@ -6,6 +6,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import jwt from "jsonwebtoken";
+import Stripe from "stripe";
 import { supabase, useSupabase } from "./db.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -16,6 +17,9 @@ const ACTIVITY_FILE = join(DATA_DIR, "activity.json");
 
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 const JWT_SECRET = process.env.JWT_SECRET || "speedy-tags-secret-change-in-production";
+const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
+const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || "http://localhost:8080";
+const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_IDS = (process.env.TELEGRAM_CHAT_IDS || "")
   .split(",")
@@ -66,6 +70,16 @@ async function loadOrders() {
   return loadJson(ORDERS_FILE, []);
 }
 
+async function findOrderByStripeSessionId(sessionId) {
+  if (useSupabase()) {
+    const { data, error } = await supabase.from("orders").select("*").eq("stripe_session_id", sessionId).single();
+    if (error && error.code !== "PGRST116") return null;
+    return data;
+  }
+  const orders = loadJson(ORDERS_FILE, []);
+  return orders.find((o) => o.stripeSessionId === sessionId) || null;
+}
+
 async function saveOrder(order) {
   if (useSupabase()) {
     const row = {
@@ -85,6 +99,8 @@ async function saveOrder(order) {
       telegram_sent: order.telegramSent || false,
       telegram_recipients: JSON.stringify(order.telegramRecipients || []),
       telegram_errors: JSON.stringify(order.telegramErrors || []),
+      stripe_session_id: order.stripeSessionId || null,
+      payment_status: order.paymentStatus || "paid",
     };
     const { error } = await supabase.from("orders").insert(row);
     if (error) throw error;
@@ -165,6 +181,8 @@ function orderRowToApi(row) {
     telegramSent: row.telegram_sent,
     telegramRecipients: typeof row.telegram_recipients === "string" ? JSON.parse(row.telegram_recipients || "[]") : (row.telegram_recipients || []),
     telegramErrors: typeof row.telegram_errors === "string" ? JSON.parse(row.telegram_errors || "[]") : (row.telegram_errors || []),
+    stripeSessionId: row.stripe_session_id,
+    paymentStatus: row.payment_status,
   };
 }
 
@@ -241,37 +259,100 @@ app.get("/api/services", async (req, res) => {
   }
 });
 
-// Public: Create order
-app.post("/api/orders", async (req, res) => {
+// Stripe Checkout: create session and redirect to payment
+app.post("/api/checkout/create-session", async (req, res) => {
+  if (!stripe) return res.status(503).json({ error: "Stripe is not configured. Set STRIPE_SECRET_KEY in environment." });
   const body = req.body;
   const required = ["serviceId", "serviceTitle", "firstName", "lastName", "phone", "address", "deliveryAddress", "vin", "carMakeModel", "color", "price"];
   for (const k of required) {
     if (body[k] == null || body[k] === "") return res.status(400).json({ error: `Missing field: ${k}` });
   }
-  const order = {
-    id: randomUUID(),
-    ...body,
-    price: parseFloat(body.price),
-    createdAt: new Date().toISOString(),
-    paymentStatus: "pending",
-    telegramSent: false,
-    telegramRecipients: [],
-    telegramErrors: [],
-  };
-
-  await appendActivity("dataIn", { type: "order", orderId: order.id, serviceTitle: order.serviceTitle, price: order.price });
-  await appendActivity("payments", { type: "order", orderId: order.id, amount: order.price, status: "pending" });
-
-  const telegramResults = await sendToTelegram(formatOrderMessage(order));
-  order.telegramSent = telegramResults.every((r) => r.ok);
-  order.telegramRecipients = telegramResults.filter((r) => r.ok).map((r) => r.chatId);
-  order.telegramErrors = telegramResults.filter((r) => !r.ok).map((r) => ({ chatId: r.chatId, error: r.error }));
-
+  const price = parseFloat(body.price);
+  if (isNaN(price) || price <= 0) return res.status(400).json({ error: "Invalid price" });
+  const baseUrl = APP_URL.replace(/\/$/, "");
   try {
+    const session = await stripe.checkout.sessions.create({
+      mode: "payment",
+      payment_method_types: ["card"],
+      line_items: [
+        {
+          price_data: {
+            currency: "usd",
+            unit_amount: Math.round(price * 100),
+            product_data: { name: body.serviceTitle, description: `Temporary tag - ${body.serviceTitle}` },
+          },
+          quantity: 1,
+        },
+      ],
+      success_url: `${baseUrl}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${baseUrl}/checkout/${body.serviceId}`,
+      customer_email: body.email || undefined,
+      metadata: {
+        serviceId: String(body.serviceId),
+        serviceTitle: String(body.serviceTitle).slice(0, 200),
+        firstName: String(body.firstName).slice(0, 100),
+        lastName: String(body.lastName).slice(0, 100),
+        phone: String(body.phone).slice(0, 50),
+        address: String(body.address).slice(0, 200),
+        deliveryAddress: String(body.deliveryAddress).slice(0, 200),
+        vin: String(body.vin).slice(0, 20),
+        carMakeModel: String(body.carMakeModel).slice(0, 100),
+        color: String(body.color).slice(0, 30),
+      },
+    });
+    res.json({ url: session.url });
+  } catch (e) {
+    console.error("Stripe create-session error:", e);
+    res.status(500).json({ error: e.message || "Failed to create checkout session" });
+  }
+});
+
+// Verify Stripe payment and create order (server-side verification - never trust client)
+app.get("/api/checkout/verify", async (req, res) => {
+  if (!stripe) return res.status(503).json({ error: "Stripe is not configured." });
+  const sessionId = req.query.session_id;
+  if (!sessionId || typeof sessionId !== "string") return res.status(400).json({ error: "Missing session_id" });
+  try {
+    const session = await stripe.checkout.sessions.retrieve(sessionId, { expand: ["payment_intent"] });
+    if (session.payment_status !== "paid") {
+      return res.status(400).json({ error: "Payment not completed", paymentStatus: session.payment_status });
+    }
+    const meta = session.metadata || {};
+    const existing = await findOrderByStripeSessionId(sessionId);
+    if (existing) {
+      return res.json(useSupabase() ? orderRowToApi(existing) : existing);
+    }
+    const order = {
+      id: randomUUID(),
+      serviceId: meta.serviceId || "unknown",
+      serviceTitle: meta.serviceTitle || "Temporary Tag",
+      firstName: meta.firstName || "",
+      lastName: meta.lastName || "",
+      phone: meta.phone || "",
+      address: meta.address || "",
+      deliveryAddress: meta.deliveryAddress || "",
+      vin: meta.vin || "",
+      carMakeModel: meta.carMakeModel || "",
+      color: meta.color || "",
+      price: (session.amount_total || 0) / 100,
+      createdAt: new Date().toISOString(),
+      stripeSessionId: sessionId,
+      paymentStatus: "paid",
+      telegramSent: false,
+      telegramRecipients: [],
+      telegramErrors: [],
+    };
+    await appendActivity("dataIn", { type: "order", orderId: order.id, serviceTitle: order.serviceTitle, price: order.price, stripeSessionId: sessionId });
+    await appendActivity("payments", { type: "order", orderId: order.id, amount: order.price, status: "paid", stripeSessionId: sessionId });
+    const telegramResults = await sendToTelegram(formatOrderMessage(order));
+    order.telegramSent = telegramResults.every((r) => r.ok);
+    order.telegramRecipients = telegramResults.filter((r) => r.ok).map((r) => r.chatId);
+    order.telegramErrors = telegramResults.filter((r) => !r.ok).map((r) => ({ chatId: r.chatId, error: r.error }));
     await saveOrder(order);
     res.json(order);
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    console.error("Stripe verify error:", e);
+    res.status(500).json({ error: e.message || "Failed to verify payment" });
   }
 });
 
@@ -377,6 +458,7 @@ const PORT = parseInt(process.env.PORT || "3001", 10);
 const server = app.listen(PORT, () => {
   console.log(`Server running on port ${server.address().port}`);
   if (!ADMIN_PASSWORD) console.warn("WARNING: ADMIN_PASSWORD not set");
+  if (!STRIPE_SECRET_KEY) console.warn("WARNING: STRIPE_SECRET_KEY not set - checkout will fail");
   if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_IDS.length) console.warn("WARNING: Telegram not configured");
   if (useSupabase()) console.log("Using Supabase"); else console.log("Using file storage");
 });

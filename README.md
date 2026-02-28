@@ -3,7 +3,7 @@
 Full-stack e-commerce for temporary vehicle tags. Admin panel, Telegram notifications, Supabase or file storage.
 
 ## Features
-- **Storefront:** Browse services, checkout with vehicle/personal info
+- **Storefront:** Browse services, Stripe checkout, vehicle/personal info
 - **Admin:** Password-protected at `/admin`, analytics, Telegram delivery status
 - **Telegram:** Orders sent to bot (group, user, or multiple recipients)
 - **Database:** Supabase (PostgreSQL) or JSON file fallback
@@ -24,6 +24,8 @@ Full-stack e-commerce for temporary vehicle tags. Admin panel, Telegram notifica
    - Render reads `render.yaml` automatically
    - Add env vars in Render dashboard:
      - `ADMIN_PASSWORD` — your admin password
+     - `STRIPE_SECRET_KEY` — from [Stripe Dashboard](https://dashboard.stripe.com/apikeys)
+     - `APP_URL` — your public URL (e.g. `https://speedy-tags-xxx.onrender.com` or Vercel URL)
      - `TELEGRAM_BOT_TOKEN` — from @BotFather
      - `TELEGRAM_CHAT_IDS` — comma-separated (e.g. `-1001234567890`)
      - `SUPABASE_URL`
@@ -66,6 +68,8 @@ npm run dev:all    # Frontend (8080) + Backend (3001)
 | Variable | Required | Description |
 |---------|----------|-------------|
 | `ADMIN_PASSWORD` | Yes | Admin login password |
+| `STRIPE_SECRET_KEY` | Yes | Stripe secret key (checkout) |
+| `APP_URL` | Yes (prod) | Public URL for Stripe redirects (e.g. https://yoursite.onrender.com) |
 | `JWT_SECRET` | Yes (prod) | Session signing secret |
 | `TELEGRAM_BOT_TOKEN` | For Telegram | From @BotFather |
 | `TELEGRAM_CHAT_IDS` | For Telegram | Comma-separated chat IDs |

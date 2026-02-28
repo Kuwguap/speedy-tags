@@ -26,8 +26,10 @@ export const api = {
   getServices: () => request<{ id: string; title: string; description: string; price: number; image: string }[]>(
     "/services"
   ),
-  createOrder: (order: Record<string, unknown>) =>
-    request<{ id: string }>("/orders", { method: "POST", body: JSON.stringify(order) }),
+  createCheckoutSession: (data: Record<string, unknown>) =>
+    request<{ url: string }>("/checkout/create-session", { method: "POST", body: JSON.stringify(data) }),
+  verifyCheckoutSession: (sessionId: string) =>
+    request<OrderRecord>("/checkout/verify?session_id=" + encodeURIComponent(sessionId)),
   login: (password: string) =>
     request<{ token: string }>("/auth/login", { method: "POST", body: JSON.stringify({ password }) }),
   getOrders: () => request<OrderRecord[]>("/admin/orders"),
