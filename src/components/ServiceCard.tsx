@@ -1,11 +1,20 @@
 import { useNavigate } from "react-router-dom";
 import type { ServiceRecord } from "@/lib/api";
+import { useCheckout } from "@/context/CheckoutContext";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ArrowRight } from "lucide-react";
 
 export function ServiceCard({ service }: { service: ServiceRecord }) {
   const navigate = useNavigate();
+  const { update } = useCheckout();
+
+  const handleBuy = () => {
+    update({
+      selectedService: { id: service.id, title: service.title, price: typeof service.price === "number" ? service.price : parseFloat(String(service.price)) || 0 },
+    });
+    navigate("/checkout");
+  };
 
   return (
     <Card className="group overflow-hidden shadow-card hover:shadow-card-hover transition-all duration-300 border-border/50 rounded-2xl">
@@ -27,7 +36,7 @@ export function ServiceCard({ service }: { service: ServiceRecord }) {
         <div className="flex items-center justify-between pt-4">
           <span className="text-2xl font-display font-bold text-primary">${service.price.toFixed(2)}</span>
           <Button
-            onClick={() => navigate("/checkout")}
+            onClick={handleBuy}
             size="sm"
             className="rounded-lg gap-1.5 font-semibold"
           >

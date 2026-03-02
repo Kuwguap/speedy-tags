@@ -4,7 +4,14 @@ export type DeliveryMethod = "email" | "driver" | "overnight_fedex";
 export type DeliverySlot = "1hr" | "2hr" | "scheduled";
 export type ProductChoice = "tag_only" | "insurance_monthly" | "insurance_yearly";
 
+export interface SelectedService {
+  id: string;
+  title: string;
+  price: number;
+}
+
 export interface CheckoutState {
+  selectedService: SelectedService | null;
   deliveryMethod: DeliveryMethod;
   deliveryEmail: string;
   deliverySlot: DeliverySlot;
@@ -17,6 +24,7 @@ export interface CheckoutState {
 const STORAGE_KEY = "tristatetags_checkout";
 
 const defaultState: CheckoutState = {
+  selectedService: null,
   deliveryMethod: "email",
   deliveryEmail: "",
   deliverySlot: "1hr",

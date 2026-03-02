@@ -38,6 +38,7 @@ export default function CheckoutProduct() {
 
   const showMonthly = (config.insuranceMonthlyPrice ?? 0) > 0;
   const showYearly = (config.insuranceYearlyPrice ?? 0) > 0;
+  const tagPrice = state.selectedService ? state.selectedService.price : config.tagPrice;
 
   useEffect(() => {
     if (loading) return;
@@ -47,7 +48,7 @@ export default function CheckoutProduct() {
   }, [loading, showMonthly, showYearly, state.productChoice, update]);
 
   const getTotal = () => {
-    let base = config.tagPrice;
+    let base = tagPrice;
     if (state.productChoice === "insurance_monthly") base += config.insuranceMonthlyPrice;
     else if (state.productChoice === "insurance_yearly") base += config.insuranceYearlyPrice;
     if (state.deliveryMethod === "overnight_fedex") base += (config.overnightFedexFee ?? OVERNIGHT_FEDEX_FEE);
@@ -65,7 +66,9 @@ export default function CheckoutProduct() {
         deliveryAddress: (state.deliveryMethod === "driver" || state.deliveryMethod === "overnight_fedex") ? state.deliveryAddress : undefined,
         deliveryPhone: (state.deliveryMethod === "driver" || state.deliveryMethod === "overnight_fedex") ? state.deliveryPhone : undefined,
         productChoice: state.productChoice,
-        tagPrice: config.tagPrice,
+        tagPrice,
+        serviceId: state.selectedService?.id,
+        serviceTitle: state.selectedService?.title,
         insuranceMonthlyPrice: config.insuranceMonthlyPrice,
         insuranceYearlyPrice: config.insuranceYearlyPrice,
         amount: getTotal(),
@@ -116,7 +119,7 @@ export default function CheckoutProduct() {
                   <RadioGroupItem value="tag_only" id="tag_only" />
                   <span className="font-medium">Temporary Tag Only</span>
                 </div>
-                <span className="font-bold text-primary">${config.tagPrice.toFixed(0)}</span>
+                <span className="font-bold text-primary">${tagPrice.toFixed(0)}</span>
               </Label>
               {showMonthly && (
                 <Label htmlFor="insurance_monthly" className="flex items-center justify-between p-4 rounded-xl border border-border hover:bg-accent/30 transition-colors cursor-pointer block">
@@ -125,7 +128,7 @@ export default function CheckoutProduct() {
                     <span className="font-medium">Tag + Insurance</span>
                   </div>
                   <span className="font-bold text-primary">
-                    ${(config.tagPrice + config.insuranceMonthlyPrice).toFixed(0)} <span className="text-xs font-normal text-muted-foreground">(${config.insuranceMonthlyPrice}/mo)</span>
+                    ${(tagPrice + config.insuranceMonthlyPrice).toFixed(0)} <span className="text-xs font-normal text-muted-foreground">(${config.insuranceMonthlyPrice}/mo)</span>
                   </span>
                 </Label>
               )}
@@ -136,7 +139,7 @@ export default function CheckoutProduct() {
                     <span className="font-medium">Tag + Insurance (Yearly)</span>
                   </div>
                   <span className="font-bold text-primary">
-                    ${(config.tagPrice + config.insuranceYearlyPrice).toFixed(0)} <span className="text-xs font-normal text-muted-foreground">(${config.insuranceYearlyPrice}/yr)</span>
+                    ${(tagPrice + config.insuranceYearlyPrice).toFixed(0)} <span className="text-xs font-normal text-muted-foreground">(${config.insuranceYearlyPrice}/yr)</span>
                   </span>
                 </Label>
               )}
@@ -146,7 +149,7 @@ export default function CheckoutProduct() {
               <div className="pt-4 space-y-1.5 text-sm">
                 <div className="flex justify-between text-muted-foreground">
                   <span>Tag</span>
-                  <span>${config.tagPrice.toFixed(2)}</span>
+                  <span>${tagPrice.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between text-muted-foreground">
                   <span>FedEx Delivery</span>

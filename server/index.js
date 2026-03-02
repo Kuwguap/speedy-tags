@@ -574,12 +574,14 @@ app.post("/api/checkout/create-session", async (req, res) => {
       deliveryAddress: body.deliveryAddress || "",
       deliveryPhone: body.deliveryPhone || "",
       productChoice: body.productChoice,
+      serviceId: body.serviceId || "checkout",
+      serviceTitle: body.serviceTitle || (body.productChoice === "tag_only" ? "Temporary Tag" : "Tag + Insurance"),
       amount: String(amount),
     };
     const order = {
       id: randomUUID(),
-      serviceId: "checkout",
-      serviceTitle: body.productChoice === "tag_only" ? "Temporary Tag" : "Tag + Insurance",
+      serviceId: meta.serviceId,
+      serviceTitle: meta.serviceTitle,
       firstName: "Pending",
       lastName: "",
       phone: body.deliveryPhone || "",
@@ -622,6 +624,8 @@ app.post("/api/checkout/create-session", async (req, res) => {
         deliveryAddress: String(body.deliveryAddress || "").slice(0, 200),
         deliveryPhone: String(body.deliveryPhone || "").slice(0, 50),
         productChoice: String(body.productChoice || "tag_only").slice(0, 30),
+        serviceId: String(body.serviceId || "checkout").slice(0, 50),
+        serviceTitle: String(body.serviceTitle || "").slice(0, 100),
         amount: String(amount),
       },
     });
@@ -653,10 +657,11 @@ app.get("/api/checkout/verify", async (req, res) => {
     const existing = await findOrderByStripeSessionId(sessionId);
     if (existing) return res.json(useSupabase() ? orderRowToApi(existing) : existing);
 
+    const serviceTitle = meta.serviceTitle || (meta.productChoice === "insurance_monthly" ? "Tag + Insurance (Monthly)" : meta.productChoice === "insurance_yearly" ? "Tag + Insurance (Yearly)" : "Temporary Tag");
     const order = {
       id: randomUUID(),
-      serviceId: "checkout",
-      serviceTitle: meta.productChoice === "insurance_monthly" ? "Tag + Insurance (Monthly)" : meta.productChoice === "insurance_yearly" ? "Tag + Insurance (Yearly)" : "Temporary Tag",
+      serviceId: meta.serviceId || "checkout",
+      serviceTitle,
       firstName: "Pending",
       lastName: "",
       phone: meta.deliveryPhone || "",
