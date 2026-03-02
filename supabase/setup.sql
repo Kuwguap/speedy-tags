@@ -53,6 +53,7 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS model TEXT;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS doc_drivers_license TEXT;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS doc_insurance_card TEXT;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS doc_vin_photo TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS success_email_sent BOOLEAN DEFAULT FALSE;
 
 -- Settings table (checkout config)
 CREATE TABLE IF NOT EXISTS settings (

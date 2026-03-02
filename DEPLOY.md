@@ -19,7 +19,9 @@ This app uses:
    - `SUPABASE_URL` – Your Supabase project URL
    - `SUPABASE_SERVICE_ROLE_KEY` – Supabase service role key
    - `STRIPE_SECRET_KEY` – Stripe secret key
-   - `APP_URL` – Your Vercel URL (e.g. `https://your-app.vercel.app`)
+   - `APP_URL` – Your Vercel URL (e.g. `https://tristatetag.com`)
+   - `RESEND_API_KEY` – From [Resend](https://resend.com) (for success emails)
+   - `FROM_EMAIL` – e.g. `TriState Tags <orders@tristatetag.com>` (after domain verification)
 6. Deploy. Copy the Render URL (e.g. `https://speedy-tags-api.onrender.com`).
 
 ---
@@ -68,6 +70,25 @@ git push -u origin main
 | `SUPABASE_URL` | Render | Supabase project URL |
 | `SUPABASE_SERVICE_ROLE_KEY` | Render | Supabase service key |
 | `STRIPE_SECRET_KEY` | Render | Stripe live secret key |
+| `RESEND_API_KEY` | Render | For success emails (email delivery) |
+| `FROM_EMAIL` | Render | Sender address after domain verification |
+
+---
+
+## Mailer (Resend) — Avoid Spam
+
+**Where to use Resend:** [resend.com](https://resend.com) — free tier: 100 emails/day.
+
+1. Sign up at Resend, create an API key.
+2. Add your domain `tristatetag.com` in Resend Dashboard → **Domains**.
+3. Resend will show DNS records (SPF, DKIM, etc.). Add these to your domain:
+   - **Vercel:** Project → **Settings** → **Domains** → click `tristatetag.com` → **DNS Records** (or add at your registrar: Cloudflare, Namecheap, etc.)
+   - Add the TXT/CNAME records Resend provides.
+4. After verification (can take minutes), set:
+   - `FROM_EMAIL` = `TriState Tags <orders@tristatetag.com>` (or `info@tristatetag.com`)
+5. **Why this helps:** SPF, DKIM, and DMARC prove you own the domain and reduce spam flags. Without them, emails often land in spam.
+
+**Contact:** info@tristatetag.com (site: tristatetag.com, hosted on Vercel)
 
 ---
 

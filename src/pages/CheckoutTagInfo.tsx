@@ -129,7 +129,8 @@ export default function CheckoutTagInfo() {
       });
       const isDriver = updated?.deliveryMethod === "driver";
       const isOvernightFedex = updated?.deliveryMethod === "overnight_fedex";
-      navigate(`/checkout/documents?orderId=${order.id}${isDriver ? "&driver=1" : ""}${isOvernightFedex ? "&fedex=1" : ""}`);
+      const isEmail = updated?.deliveryMethod === "email";
+      navigate(`/checkout/documents?orderId=${order.id}${isDriver ? "&driver=1" : ""}${isOvernightFedex ? "&fedex=1" : ""}${isEmail ? "&email=1" : ""}`);
     } catch (err) {
       toast({
         title: "Failed to submit",

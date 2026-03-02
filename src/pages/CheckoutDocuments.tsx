@@ -15,6 +15,8 @@ export default function CheckoutDocuments() {
   const orderId = searchParams.get("orderId");
   const isDriver = searchParams.get("driver") === "1";
   const isFedex = searchParams.get("fedex") === "1";
+  const isEmail = searchParams.get("email") === "1";
+  const doneUrl = () => `/checkout/done?orderId=${orderId}${isDriver ? "&driver=1" : ""}${isFedex ? "&fedex=1" : ""}${isEmail ? "&email=1" : ""}`;
 
   const [driversLicense, setDriversLicense] = useState<File | null>(null);
   const [insuranceCard, setInsuranceCard] = useState<File | null>(null);
@@ -25,7 +27,7 @@ export default function CheckoutDocuments() {
   const vinPhotoRef = useRef<HTMLInputElement>(null);
 
   const handleSkip = () => {
-    navigate(`/checkout/done?orderId=${orderId}${isDriver ? "&driver=1" : ""}${isFedex ? "&fedex=1" : ""}`);
+    navigate(doneUrl());
   };
 
   const handleSubmit = async () => {
@@ -41,7 +43,7 @@ export default function CheckoutDocuments() {
       if (insuranceCard) formData.append("insuranceCard", insuranceCard);
       if (vinPhoto) formData.append("vinPhoto", vinPhoto);
       await api.uploadOrderDocuments(orderId, formData);
-      navigate(`/checkout/done?orderId=${orderId}${isDriver ? "&driver=1" : ""}${isFedex ? "&fedex=1" : ""}`);
+      navigate(doneUrl());
     } catch (err) {
       toast({
         title: "Upload failed",

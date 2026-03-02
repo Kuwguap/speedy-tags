@@ -11,6 +11,7 @@ import {
   Zap,
   FileCheck,
   Mail,
+  Package,
   ChevronDown,
   ChevronUp,
   Star,
@@ -30,7 +31,7 @@ const benefits = [
 const steps = [
   { num: "1", title: "Submit Info", desc: "Fill out our quick online form with vehicle details and contact info." },
   { num: "2", title: "NJ MVC Processing", desc: "We process your order through the official NJ MVC system." },
-  { num: "3", title: "Receive Your Temp Tags", desc: "Get your temp plate, registration, and insurance card via email or 1-hour delivery." },
+  { num: "3", title: "Receive Your Temp Tags", desc: "Get your temp plate, registration, and insurance card via email, 1-hour delivery, or overnight FedEx." },
 ];
 
 const testimonials = [
@@ -42,9 +43,9 @@ const testimonials = [
 const faqs = [
   { q: "Are these legit?", a: "Yes. We are an NJ licensed dealer. All temp tags are processed through the official NJ MVC system and appear in DMV records." },
   { q: "Will police see them?", a: "Yes. When police run your plate, our temp tags show up as valid, DMV-verified registration." },
-  { q: "How fast can I get them?", a: "Same day processing. Instant email delivery or 1-hour local car delivery—your choice." },
+  { q: "How fast can I get them?", a: "Same day processing. Instant email, 1-hour local delivery, or overnight FedEx—your choice." },
   { q: "How long are they valid?", a: "Our standard temp tags are valid for 30 days, giving you time to complete permanent registration." },
-  { q: "Do I need to visit in person?", a: "No. 100% online—submit your info, pay securely, and receive delivery via email or same-day driver." },
+  { q: "Do I need to visit in person?", a: "No. 100% online—submit your info, pay securely, and receive delivery via email, same-day driver, or overnight FedEx." },
 ];
 
 export default function Index() {
@@ -86,7 +87,7 @@ export default function Index() {
           </h1>
           <p className="text-lg text-white/90 max-w-2xl mx-auto mb-6">
             Get legal NJ temporary plates + registration + insurance card.<br className="hidden sm:block" />
-            Instant email or 1-hour local delivery.
+            Instant email, 1-hour local delivery, or overnight FedEx.
           </p>
           <div className="flex flex-col sm:flex-row gap-3 justify-center mb-8">
             <a
@@ -144,7 +145,7 @@ export default function Index() {
           <h2 className="font-display text-2xl md:text-3xl font-bold text-center text-foreground mb-10">
             Delivery Options
           </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-2xl mx-auto">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-3xl mx-auto">
             <div className="flex gap-4 p-6 rounded-xl bg-card border border-border shadow-sm">
               <Mail className="h-10 w-10 text-primary shrink-0" />
               <div>
@@ -157,6 +158,13 @@ export default function Index() {
               <div>
                 <h3 className="font-display font-semibold text-foreground mb-1">1-Hour Local Car Delivery</h3>
                 <p className="text-sm text-muted-foreground">Same-day driver delivery in select NJ areas. Get your physical temp tag in hand.</p>
+              </div>
+            </div>
+            <div className="flex gap-4 p-6 rounded-xl bg-card border border-border shadow-sm">
+              <Package className="h-10 w-10 text-primary shrink-0" />
+              <div>
+                <h3 className="font-display font-semibold text-foreground mb-1">Overnight FedEx</h3>
+                <p className="text-sm text-muted-foreground">Next business day delivery anywhere. Add $50 at checkout.</p>
               </div>
             </div>
           </div>

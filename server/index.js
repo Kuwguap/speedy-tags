@@ -8,6 +8,7 @@ import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import jwt from "jsonwebtoken";
 import Stripe from "stripe";
+import { Resend } from "resend";
 import { supabase, useSupabase } from "./db.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -35,6 +36,9 @@ const TELEGRAM_CHAT_IDS = (process.env.TELEGRAM_CHAT_IDS || "")
   .split(",")
   .map((s) => s.trim())
   .filter(Boolean);
+const RESEND_API_KEY = process.env.RESEND_API_KEY;
+const resend = RESEND_API_KEY ? new Resend(RESEND_API_KEY) : null;
+const FROM_EMAIL = process.env.FROM_EMAIL || "TriState Tags <onboarding@resend.dev>"; // Use your domain after verification
 
 if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
 if (!existsSync(DOCS_DIR)) mkdirSync(DOCS_DIR, { recursive: true });
@@ -220,6 +224,7 @@ async function updateOrder(id, updates) {
     if (updates.docDriversLicense != null) row.doc_drivers_license = updates.docDriversLicense;
     if (updates.docInsuranceCard != null) row.doc_insurance_card = updates.docInsuranceCard;
     if (updates.docVinPhoto != null) row.doc_vin_photo = updates.docVinPhoto;
+    if (updates.successEmailSent != null) row.success_email_sent = updates.successEmailSent;
     if (Object.keys(row).length === 0) return;
     const { error } = await supabase.from("orders").update(row).eq("id", id);
     if (error) throw error;
@@ -245,6 +250,7 @@ async function updateOrder(id, updates) {
     docDriversLicense: updates.docDriversLicense ?? orders[idx].docDriversLicense,
     docInsuranceCard: updates.docInsuranceCard ?? orders[idx].docInsuranceCard,
     docVinPhoto: updates.docVinPhoto ?? orders[idx].docVinPhoto,
+    successEmailSent: updates.successEmailSent ?? orders[idx].successEmailSent,
   });
   saveJson(ORDERS_FILE, orders);
 }
@@ -359,6 +365,78 @@ async function sendDocImagesToTelegram(order) {
         console.error("Telegram sendPhoto error:", err);
       }
     }
+  }
+}
+
+function buildSuccessEmailHtml(order) {
+  const firstName = order.firstName || "Customer";
+  const appUrl = APP_URL.replace(/\/$/, "");
+  return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Order Complete - TriState Tags</title>
+</head>
+<body style="margin:0;padding:0;font-family:'DM Sans',-apple-system,BlinkMacSystemFont,sans-serif;background:#f4f6f8;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="padding:24px 16px;">
+    <tr><td align="center">
+      <table width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,0.06);">
+        <tr>
+          <td style="background:#2d9d78;padding:24px 32px;text-align:center;">
+            <span style="color:#fff;font-size:22px;font-weight:700;letter-spacing:-0.5px;">TriState Tags</span>
+            <p style="color:rgba(255,255,255,0.9);font-size:14px;margin:8px 0 0;">NJ Temporary Tags • DMV Verified</p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:32px;">
+            <h1 style="color:#222;font-size:24px;margin:0 0 16px;font-weight:700;">Order Complete, ${firstName}!</h1>
+            <p style="color:#64748b;font-size:16px;line-height:1.6;margin:0 0 24px;">
+              Thank you for your order. Your temporary tag package has been processed and will be delivered to your email shortly.
+            </p>
+            <div style="background:#f0fdf9;border:1px solid #99f6e4;border-radius:8px;padding:20px;margin-bottom:24px;">
+              <p style="margin:0;color:#0f766e;font-size:14px;font-weight:600;">Order #${(order.id || "").slice(0, 8)}</p>
+              <p style="margin:6px 0 0;color:#0d9488;font-size:14px;">${order.serviceTitle || "Temporary Tag"} — $${(order.price || 0).toFixed(2)}</p>
+            </div>
+            <p style="color:#64748b;font-size:14px;line-height:1.6;margin:0 0 20px;">
+              Check your inbox for your temp tag, registration, and insurance card. Print and you're ready to go.
+            </p>
+            <p style="color:#64748b;font-size:14px;line-height:1.6;margin:0 0 24px;">
+              Questions? Contact us at <a href="mailto:info@tristatetag.com" style="color:#2d9d78;text-decoration:none;font-weight:600;">info@tristatetag.com</a>
+            </p>
+            <a href="${appUrl}" style="display:inline-block;background:#2d9d78;color:#fff;text-decoration:none;padding:14px 28px;border-radius:8px;font-weight:600;font-size:15px;">Back to TriState Tags</a>
+          </td>
+        </tr>
+        <tr>
+          <td style="background:#f8fafc;padding:20px 32px;text-align:center;border-top:1px solid #e2e8f0;">
+            <p style="margin:0;color:#94a3b8;font-size:12px;">© ${new Date().getFullYear()} TriState Tags. All rights reserved.</p>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+}
+
+async function sendSuccessEmail(order) {
+  if (!resend || !order.deliveryEmail) return false;
+  try {
+    const { data, error } = await resend.emails.send({
+      from: FROM_EMAIL,
+      to: order.deliveryEmail,
+      subject: `Order Complete — TriState Tags #${(order.id || "").slice(0, 8)}`,
+      html: buildSuccessEmailHtml(order),
+    });
+    if (error) {
+      console.error("Resend error:", error);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error("Send success email error:", err);
+    return false;
   }
 }
 
@@ -723,6 +801,25 @@ app.get("/api/orders/:id/documents/:type", (req, res) => {
     if (existsSync(p)) return res.sendFile(p);
   }
   res.status(404).end();
+});
+
+// Send success email when order completes (email delivery) - called from done page
+app.post("/api/orders/:id/send-success-email", async (req, res) => {
+  const { id } = req.params;
+  try {
+    const order = await findOrderById(id);
+    if (!order) return res.status(404).json({ error: "Order not found" });
+    const o = useSupabase() ? orderRowToApi(order) : order;
+    const alreadySent = useSupabase() ? order.success_email_sent : order.successEmailSent;
+    if (alreadySent) return res.json({ sent: true });
+    if (o.deliveryMethod !== "email" || !o.deliveryEmail) return res.json({ sent: false });
+    const ok = await sendSuccessEmail(o);
+    if (ok) await updateOrder(id, { successEmailSent: true });
+    res.json({ sent: ok });
+  } catch (e) {
+    console.error("Send success email error:", e);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.post("/api/auth/login", (req, res) => {

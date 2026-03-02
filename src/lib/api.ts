@@ -39,6 +39,8 @@ export const api = {
     request<{ year: string; make: string; model: string }>("/vin/decode?vin=" + encodeURIComponent(vin)),
   uploadOrderDocuments: (orderId: string, formData: FormData) =>
     request<OrderRecord>(`/orders/${encodeURIComponent(orderId)}/documents`, { method: "POST", body: formData }),
+  sendOrderSuccessEmail: (orderId: string) =>
+    request<{ sent: boolean }>(`/orders/${encodeURIComponent(orderId)}/send-success-email`, { method: "POST" }),
   login: (password: string) =>
     request<{ token: string }>("/auth/login", { method: "POST", body: JSON.stringify({ password }) }),
   getOrders: () => request<OrderRecord[]>("/admin/orders"),

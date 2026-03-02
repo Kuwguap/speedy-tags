@@ -1,6 +1,8 @@
+import { useEffect } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { Header } from "@/components/Header";
 import { Button } from "@/components/ui/button";
+import { api } from "@/lib/api";
 import { CheckCircle2 } from "lucide-react";
 
 export default function CheckoutDone() {
@@ -9,6 +11,13 @@ export default function CheckoutDone() {
   const orderId = searchParams.get("orderId");
   const isDriver = searchParams.get("driver") === "1";
   const isFedex = searchParams.get("fedex") === "1";
+  const isEmail = searchParams.get("email") === "1";
+
+  useEffect(() => {
+    if (orderId) {
+      api.sendOrderSuccessEmail(orderId).catch(() => {});
+    }
+  }, [orderId]);
 
   return (
     <div className="min-h-screen bg-background">
@@ -19,8 +28,13 @@ export default function CheckoutDone() {
         </div>
         <h1 className="font-display text-3xl md:text-4xl font-bold text-foreground mb-4">Order Complete!</h1>
         <p className="text-muted-foreground mb-4 text-lg">
-          Your temporary tag will be delivered {isFedex ? "via Overnight FedEx next business day" : "in the time frame you selected"}.
+          Your temporary tag will be delivered {isFedex ? "via Overnight FedEx next business day" : isEmail ? "to your inbox shortly" : "in the time frame you selected"}.
         </p>
+        {isEmail && (
+          <p className="text-muted-foreground mb-6 text-lg">
+            Check your email for your temp tag, registration, and insurance card. Questions? <a href="mailto:info@tristatetag.com" className="text-primary hover:underline">info@tristatetag.com</a>
+          </p>
+        )}
         {isDriver && (
           <p className="text-muted-foreground mb-6 text-lg">
             A driver will call you shortly to confirm delivery details.
