@@ -39,7 +39,7 @@ const TELEGRAM_CHAT_IDS = (process.env.TELEGRAM_CHAT_IDS || "")
   .filter(Boolean);
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const resend = RESEND_API_KEY ? new Resend(RESEND_API_KEY) : null;
-const FROM_EMAIL = process.env.FROM_EMAIL || "TriState Tags <onboarding@resend.dev>"; // Use your domain after verification
+const FROM_EMAIL = process.env.FROM_EMAIL || "TriState Tags <onboarding@resend.dev>"; // Use verified domain (see DEPLOY.md)
 
 if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
 if (!existsSync(DOCS_DIR)) mkdirSync(DOCS_DIR, { recursive: true });
@@ -428,21 +428,30 @@ function buildSuccessEmailHtml(order) {
 }
 
 async function sendSuccessEmail(order) {
-  if (!resend || !order.deliveryEmail) return false;
+  if (!resend) {
+    console.warn("[Email] RESEND_API_KEY not set — skipping send");
+    return false;
+  }
+  const to = order.deliveryEmail?.trim();
+  if (!to || !to.includes("@")) {
+    console.warn("[Email] No valid deliveryEmail on order");
+    return false;
+  }
   try {
     const { data, error } = await resend.emails.send({
       from: FROM_EMAIL,
-      to: order.deliveryEmail,
+      to,
       subject: `Order Complete — TriState Tags #${(order.id || "").slice(0, 8)}`,
       html: buildSuccessEmailHtml(order),
     });
     if (error) {
-      console.error("Resend error:", error);
+      console.error("[Email] Resend error:", error);
       return false;
     }
+    console.log("[Email] Sent to", to, "id:", data?.id);
     return true;
   } catch (err) {
-    console.error("Send success email error:", err);
+    console.error("[Email] Send error:", err);
     return false;
   }
 }
@@ -819,7 +828,10 @@ app.post("/api/orders/:id/send-success-email", async (req, res) => {
     const o = useSupabase() ? orderRowToApi(order) : order;
     const alreadySent = useSupabase() ? order.success_email_sent : order.successEmailSent;
     if (alreadySent) return res.json({ sent: true });
-    if (!o.deliveryEmail || !o.deliveryEmail.includes("@")) return res.json({ sent: false });
+    if (!o.deliveryEmail || !o.deliveryEmail.includes("@")) {
+      console.warn("[Email] Order", id, "has no deliveryEmail:", o.deliveryEmail);
+      return res.json({ sent: false });
+    }
     const ok = await sendSuccessEmail(o);
     if (ok) await updateOrder(id, { successEmailSent: true });
     res.json({ sent: ok });
@@ -962,6 +974,8 @@ const server = app.listen(PORT, () => {
   if (!ADMIN_PASSWORD) console.warn("WARNING: ADMIN_PASSWORD not set");
   if (!STRIPE_SECRET_KEY) console.warn("WARNING: STRIPE_SECRET_KEY not set - checkout will fail");
   if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_IDS.length) console.warn("WARNING: Telegram not configured");
+  if (!resend) console.warn("WARNING: RESEND_API_KEY not set — order completion emails will not send");
+  else console.log("Resend configured:", FROM_EMAIL);
   if (useSupabase()) console.log("Using Supabase"); else console.log("Using file storage");
 });
 

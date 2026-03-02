@@ -148,7 +148,7 @@ export default function CheckoutProduct() {
             </div>
 
             <Button onClick={handlePay} className="w-full" size="lg" disabled={paying}>
-              {paying ? "Redirecting to payment..." : `Pay $${getTotal().toFixed(2)}`}
+              {paying ? "Redirecting..." : "Get My Plate"}
             </Button>
           </CardContent>
         </Card>

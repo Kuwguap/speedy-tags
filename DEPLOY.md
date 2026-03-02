@@ -75,18 +75,21 @@ git push -u origin main
 
 ---
 
-## Mailer (Resend) — Avoid Spam
+## Mailer (Resend) — You Don't Buy Email Addresses
 
-**Where to use Resend:** [resend.com](https://resend.com) — free tier: 100 emails/day.
+**You do NOT buy an email address.** Resend sends from your own domain after you verify it. Free tier: 100 emails/day.
 
-1. Sign up at Resend, create an API key.
-2. Add your domain `tristatetag.com` in Resend Dashboard → **Domains**.
-3. Resend will show DNS records (SPF, DKIM, etc.). Add these to your domain:
-   - **Vercel:** Project → **Settings** → **Domains** → click `tristatetag.com` → **DNS Records** (or add at your registrar: Cloudflare, Namecheap, etc.)
-   - Add the TXT/CNAME records Resend provides.
-4. After verification (can take minutes), set:
-   - `FROM_EMAIL` = `TriState Tags <orders@tristatetag.com>` (or `info@tristatetag.com`)
-5. **Why this helps:** SPF, DKIM, and DMARC prove you own the domain and reduce spam flags. Without them, emails often land in spam.
+1. Sign up at [resend.com](https://resend.com), create an API key.
+2. In Resend Dashboard → **Domains** → **Add Domain** → add `tristatetag.com`.
+3. Resend shows DNS records (SPF, DKIM). Add them where your domain DNS is managed:
+   - **Vercel:** Project → Settings → Domains → tristatetag.com → DNS Records
+   - **Or** your registrar (Cloudflare, Namecheap, GoDaddy, etc.)
+4. Click "Verify" in Resend. Wait 5–15 minutes.
+5. Once verified, set in Render:
+   - `FROM_EMAIL` = `TriState Tags <orders@tristatetag.com>`
+   - `RESEND_API_KEY` = your Resend API key
+
+**If domain isn't verified yet:** Resend will reject sends from `orders@tristatetag.com`. Temporarily use `FROM_EMAIL=TriState Tags <onboarding@resend.dev>` to test (lower deliverability). **Email delivery uses the customer's email** (the one they enter) as the recipient.
 
 **Contact:** info@tristatetag.com (site: tristatetag.com, hosted on Vercel)
 
