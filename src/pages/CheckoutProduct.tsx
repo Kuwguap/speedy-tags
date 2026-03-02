@@ -8,6 +8,8 @@ import { Label } from "@/components/ui/label";
 import { useCheckout, type ProductChoice } from "@/context/CheckoutContext";
 import { OVERNIGHT_FEDEX_FEE } from "@/lib/constants";
 import { api } from "@/lib/api";
+import { getServices } from "@/lib/store";
+import type { ServiceRecord } from "@/lib/api";
 import { Check, ArrowLeft } from "lucide-react";
 
 interface CheckoutConfig {
@@ -26,12 +28,19 @@ export default function CheckoutProduct() {
     insuranceYearlyPrice: 900,
     overnightFedexFee: 50,
   });
+  const [services, setServices] = useState<ServiceRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [paying, setPaying] = useState(false);
 
   useEffect(() => {
-    api.getCheckoutConfig()
-      .then(setConfig)
+    Promise.all([
+      api.getCheckoutConfig(),
+      api.getServices().catch(() => getServices() as ServiceRecord[]),
+    ])
+      .then(([cfg, svc]) => {
+        setConfig(cfg);
+        setServices(svc);
+      })
       .catch(() => setConfig({ tagPrice: 150, insuranceMonthlyPrice: 100, insuranceYearlyPrice: 900, overnightFedexFee: 50 }))
       .finally(() => setLoading(false));
   }, []);
@@ -39,6 +48,11 @@ export default function CheckoutProduct() {
   const showMonthly = (config.insuranceMonthlyPrice ?? 0) > 0;
   const showYearly = (config.insuranceYearlyPrice ?? 0) > 0;
   const tagPrice = state.selectedService ? state.selectedService.price : config.tagPrice;
+
+  const selectService = (s: ServiceRecord) => {
+    const price = typeof s.price === "number" ? s.price : parseFloat(String(s.price)) || 0;
+    update({ selectedService: { id: s.id, title: s.title, price } });
+  };
 
   useEffect(() => {
     if (loading) return;
@@ -103,6 +117,43 @@ export default function CheckoutProduct() {
         >
           <ArrowLeft className="h-4 w-4" /> Back
         </button>
+
+        {/* Service selector - ensures correct price when coming from hero links or different domain */}
+        {services.length > 0 && (
+          <Card className="shadow-card border-border/50 rounded-2xl overflow-hidden mb-6">
+            <CardHeader className="border-b border-border/50 bg-accent/40 py-4">
+              <CardTitle className="font-display text-base">Your Service</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                {state.selectedService
+                  ? `${state.selectedService.title} — $${state.selectedService.price.toFixed(2)}`
+                  : "Choose a service below to see the correct price"}
+              </p>
+            </CardHeader>
+            <CardContent className="p-4">
+              <div className="flex flex-wrap gap-2">
+                {services.map((s) => {
+                  const price = typeof s.price === "number" ? s.price : parseFloat(String(s.price)) || 0;
+                  const isSelected = state.selectedService?.id === s.id;
+                  return (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => selectService(s)}
+                      className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors border ${
+                        isSelected
+                          ? "border-primary bg-primary text-primary-foreground"
+                          : "border-border hover:bg-accent/50"
+                      }`}
+                    >
+                      {s.title} — ${price.toFixed(2)}
+                    </button>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         <Card className="shadow-card border-border/50 rounded-2xl overflow-hidden">
           <CardHeader className="border-b border-border/50 bg-accent/40">
             <CardTitle className="font-display">Choose Your Product</CardTitle>

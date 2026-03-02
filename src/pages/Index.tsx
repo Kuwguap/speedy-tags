@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { Header } from "@/components/Header";
 import { ServiceCard } from "@/components/ServiceCard";
+import { useCheckout } from "@/context/CheckoutContext";
 import { api, type ServiceRecord } from "@/lib/api";
 import { getServices } from "@/lib/store";
 import {
@@ -49,6 +51,8 @@ const faqs = [
 ];
 
 export default function Index() {
+  const navigate = useNavigate();
+  const { update } = useCheckout();
   const [services, setServices] = useState<ServiceRecord[]>([]);
   const [openFaq, setOpenFaq] = useState<number | null>(null);
 
@@ -59,6 +63,15 @@ export default function Index() {
         setServices(getServices() as ServiceRecord[]);
       });
   }, []);
+
+  const handleHeroBuy = () => {
+    const first = services[0];
+    if (first) {
+      const price = typeof first.price === "number" ? first.price : parseFloat(String(first.price)) || 0;
+      update({ selectedService: { id: first.id, title: first.title, price } });
+    }
+    navigate("/checkout");
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -90,19 +103,21 @@ export default function Index() {
             Instant email, 1-hour local delivery, or FedEx delivery.
           </p>
           <div className="flex flex-col sm:flex-row gap-3 justify-center mb-8">
-            <a
-              href="/checkout"
+            <button
+              type="button"
+              onClick={handleHeroBuy}
               className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-8 py-4 font-bold text-primary-foreground hover:bg-primary/90 transition-all text-lg"
             >
               BUY IT NOW
               <ArrowRight className="h-5 w-5" />
-            </a>
-            <a
-              href="/checkout"
+            </button>
+            <button
+              type="button"
+              onClick={handleHeroBuy}
               className="inline-flex items-center justify-center gap-2 rounded-lg border-2 border-white px-8 py-4 font-bold text-white hover:bg-white/10 transition-all text-lg"
             >
               GET MY TEMP TAG
-            </a>
+            </button>
           </div>
           <div className="flex flex-wrap items-center justify-center gap-6 text-sm text-white/80">
             <span>✔ Licensed Dealer</span>
