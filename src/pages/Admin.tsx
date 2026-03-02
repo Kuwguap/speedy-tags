@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { api, type ServiceRecord, type OrderRecord, type AdminStats } from "@/lib/api";
+import { api, type ServiceRecord, type OrderRecord, type AdminStats, type TelegramDispatcher } from "@/lib/api";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -45,6 +45,7 @@ export default function Admin() {
     insuranceYearlyPrice: number;
     overnightFedexFee: number;
     testMode: boolean;
+    telegramDispatchers: TelegramDispatcher[];
   } | null>(null);
   const [settingsSaving, setSettingsSaving] = useState(false);
 
@@ -140,6 +141,7 @@ export default function Admin() {
         insuranceYearlyPrice: settings.insuranceYearlyPrice,
         overnightFedexFee: settings.overnightFedexFee ?? 50,
         testMode: settings.testMode,
+        telegramDispatchers: settings.telegramDispatchers ?? [],
       });
       setSettings(updated);
       toast({ title: "Settings saved!" });
@@ -148,6 +150,28 @@ export default function Admin() {
     } finally {
       setSettingsSaving(false);
     }
+  };
+
+  const addDispatcher = () => {
+    setSettings((s) =>
+      s ? { ...s, telegramDispatchers: [...(s.telegramDispatchers ?? []), { dispatcherId: "", groupId: "", groupName: "" }] } : s
+    );
+  };
+
+  const updateDispatcher = (index: number, field: keyof TelegramDispatcher, value: string) => {
+    setSettings((s) => {
+      if (!s?.telegramDispatchers) return s;
+      const next = [...s.telegramDispatchers];
+      next[index] = { ...next[index], [field]: value };
+      return { ...s, telegramDispatchers: next };
+    });
+  };
+
+  const removeDispatcher = (index: number) => {
+    setSettings((s) => {
+      if (!s?.telegramDispatchers) return s;
+      return { ...s, telegramDispatchers: s.telegramDispatchers.filter((_, i) => i !== index) };
+    });
   };
 
   const navItems = [
@@ -477,6 +501,66 @@ export default function Admin() {
                       {settingsSaving ? "Saving..." : "Save Settings"}
                     </Button>
                   </>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="shadow-card border-border/50">
+              <CardHeader>
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <Send className="h-4 w-4" /> Telegram Dispatchers
+                </CardTitle>
+                <p className="text-sm text-muted-foreground">
+                  First-to-accept mode: each dispatcher receives claim messages. First to accept gets full details in their group. Requires webhook.
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {(settings?.telegramDispatchers ?? []).map((d, i) => (
+                  <div key={i} className="flex flex-wrap gap-3 items-end p-4 rounded-lg bg-muted/40 border border-border/50">
+                    <div className="flex-1 min-w-[140px]">
+                      <Label className="text-xs">Dispatcher ID (Telegram chat)</Label>
+                      <Input
+                        placeholder="-123456789"
+                        value={d.dispatcherId}
+                        onChange={(e) => updateDispatcher(i, "dispatcherId", e.target.value)}
+                        className="font-mono text-sm"
+                      />
+                    </div>
+                    <div className="flex-1 min-w-[140px]">
+                      <Label className="text-xs">Group ID</Label>
+                      <Input
+                        placeholder="-1001234567890"
+                        value={d.groupId}
+                        onChange={(e) => updateDispatcher(i, "groupId", e.target.value)}
+                        className="font-mono text-sm"
+                      />
+                    </div>
+                    <div className="flex-1 min-w-[120px]">
+                      <Label className="text-xs">Group name (for identification)</Label>
+                      <Input
+                        placeholder="Bronx Dispatch"
+                        value={d.groupName}
+                        onChange={(e) => updateDispatcher(i, "groupName", e.target.value)}
+                      />
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => removeDispatcher(i)}
+                      className="text-destructive hover:text-destructive shrink-0"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
+                <Button type="button" variant="outline" size="sm" onClick={addDispatcher} className="gap-2">
+                  <Plus className="h-4 w-4" /> Add dispatcher
+                </Button>
+                {settings && (settings.telegramDispatchers?.length ?? 0) > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    Save Settings above to persist dispatchers. When any dispatchers are configured, new orders use first-to-accept flow instead of TELEGRAM_CHAT_IDS.
+                  </p>
                 )}
               </CardContent>
             </Card>

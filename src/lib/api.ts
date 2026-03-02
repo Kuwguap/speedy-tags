@@ -52,10 +52,16 @@ export const api = {
   getStats: () =>
     request<AdminStats>("/admin/stats"),
   getSettings: () =>
-    request<{ tagPrice: number; insuranceMonthlyPrice: number; insuranceYearlyPrice: number; overnightFedexFee: number; testMode: boolean }>("/admin/settings"),
-  updateSettings: (s: { insuranceMonthlyPrice?: number; insuranceYearlyPrice?: number; overnightFedexFee?: number; testMode?: boolean }) =>
-    request<{ tagPrice: number; insuranceMonthlyPrice: number; insuranceYearlyPrice: number; overnightFedexFee: number; testMode: boolean }>("/admin/settings", { method: "PATCH", body: JSON.stringify(s) }),
+    request<{ tagPrice: number; insuranceMonthlyPrice: number; insuranceYearlyPrice: number; overnightFedexFee: number; testMode: boolean; telegramDispatchers: TelegramDispatcher[] }>("/admin/settings"),
+  updateSettings: (s: { insuranceMonthlyPrice?: number; insuranceYearlyPrice?: number; overnightFedexFee?: number; testMode?: boolean; telegramDispatchers?: TelegramDispatcher[] }) =>
+    request<{ tagPrice: number; insuranceMonthlyPrice: number; insuranceYearlyPrice: number; overnightFedexFee: number; testMode: boolean; telegramDispatchers: TelegramDispatcher[] }>("/admin/settings", { method: "PATCH", body: JSON.stringify(s) }),
 };
+
+export interface TelegramDispatcher {
+  dispatcherId: string;
+  groupId: string;
+  groupName: string;
+}
 
 export interface ServiceRecord {
   id: string;

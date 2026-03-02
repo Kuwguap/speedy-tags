@@ -21,6 +21,12 @@ services:
         sync: false
       - key: TELEGRAM_CHAT_IDS
         sync: false
+      - key: TELEGRAM_DISPATCHERS
+        sync: false
+      - key: ONETIMESECRET_USERNAME
+        sync: false
+      - key: ONETIMESECRET_API_KEY
+        sync: false
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY

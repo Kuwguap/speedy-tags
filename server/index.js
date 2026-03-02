@@ -37,6 +37,34 @@ const TELEGRAM_CHAT_IDS = (process.env.TELEGRAM_CHAT_IDS || "")
   .split(",")
   .map((s) => s.trim())
   .filter(Boolean);
+// Dispatcher mode: stored in settings (dispatcherId, groupId, groupName); env fallback for initial setup
+const TELEGRAM_DISPATCHERS_ENV = parseTelegramDispatchers(process.env.TELEGRAM_DISPATCHERS || "");
+const ONETIMESECRET_USERNAME = process.env.ONETIMESECRET_USERNAME;
+const ONETIMESECRET_API_KEY = process.env.ONETIMESECRET_API_KEY;
+const ONETIMESECRET_REGION = process.env.ONETIMESECRET_REGION || "us";
+const OTS_DISPATCH_PASSPHRASE = "DispatchPassword";
+
+function parseTelegramDispatchers(str) {
+  if (!str || typeof str !== "string") return [];
+  return str.split(",").map((pair) => {
+    const parts = pair.trim().split(":").map((s) => s.trim());
+    const [dispatcherId, groupId] = parts;
+    return dispatcherId && groupId ? { dispatcherId, groupId, groupName: parts[2] || `Group ${groupId.slice(-4)}` } : null;
+  }).filter(Boolean);
+}
+
+async function loadDispatchers() {
+  const s = await loadSettings();
+  const fromSettings = s.telegram_dispatchers;
+  if (Array.isArray(fromSettings) && fromSettings.length > 0) {
+    return fromSettings.filter((d) => d.dispatcherId && d.groupId);
+  }
+  return TELEGRAM_DISPATCHERS_ENV.map((d) => ({
+    dispatcherId: d.dispatcherId,
+    groupId: d.groupId,
+    groupName: d.groupName || `Group ${d.groupId.slice(-4)}`,
+  }));
+}
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const resend = RESEND_API_KEY ? new Resend(RESEND_API_KEY) : null;
 const FROM_EMAIL = process.env.FROM_EMAIL || "TriState Tags <onboarding@resend.dev>"; // Use verified domain (see DEPLOY.md)
@@ -177,11 +205,14 @@ async function loadSettings() {
       if (r.key === "test_mode") out.test_mode = r.value === true || String(r.value) === "true";
       else if (["insurance_monthly_price", "insurance_yearly_price", "overnight_fedex_fee"].includes(r.key))
         out[r.key] = typeof r.value === "number" ? r.value : parseFloat(r.value) || out[r.key];
+      else if (r.key === "telegram_dispatchers") out.telegram_dispatchers = Array.isArray(r.value) ? r.value : (typeof r.value === "string" ? (() => { try { return JSON.parse(r.value); } catch { return []; } })() : []);
     });
     return out;
   }
   const s = loadJson(SETTINGS_FILE, defaultSettings);
-  return { ...defaultSettings, ...s };
+  const out = { ...defaultSettings, ...s };
+  if (!Array.isArray(out.telegram_dispatchers)) out.telegram_dispatchers = [];
+  return out;
 }
 
 async function saveSettings(updates) {
@@ -226,6 +257,9 @@ async function updateOrder(id, updates) {
     if (updates.docInsuranceCard != null) row.doc_insurance_card = updates.docInsuranceCard;
     if (updates.docVinPhoto != null) row.doc_vin_photo = updates.docVinPhoto;
     if (updates.successEmailSent != null) row.success_email_sent = updates.successEmailSent;
+    if (updates.telegramAcceptedBy != null) row.telegram_accepted_by = updates.telegramAcceptedBy;
+    if (updates.telegramAcceptedGroupId != null) row.telegram_accepted_group_id = updates.telegramAcceptedGroupId;
+    if (updates.telegramClaimMessageIds != null) row.telegram_claim_message_ids = typeof updates.telegramClaimMessageIds === "string" ? updates.telegramClaimMessageIds : JSON.stringify(updates.telegramClaimMessageIds || {});
     if (Object.keys(row).length === 0) return;
     const { error } = await supabase.from("orders").update(row).eq("id", id);
     if (error) throw error;
@@ -252,6 +286,9 @@ async function updateOrder(id, updates) {
     docInsuranceCard: updates.docInsuranceCard ?? orders[idx].docInsuranceCard,
     docVinPhoto: updates.docVinPhoto ?? orders[idx].docVinPhoto,
     successEmailSent: updates.successEmailSent ?? orders[idx].successEmailSent,
+    telegramAcceptedBy: updates.telegramAcceptedBy ?? orders[idx].telegramAcceptedBy,
+    telegramAcceptedGroupId: updates.telegramAcceptedGroupId ?? orders[idx].telegramAcceptedGroupId,
+    telegramClaimMessageIds: updates.telegramClaimMessageIds ?? orders[idx].telegramClaimMessageIds,
   });
   saveJson(ORDERS_FILE, orders);
 }
@@ -311,6 +348,9 @@ function orderRowToApi(row) {
     docDriversLicense: row.doc_drivers_license,
     docInsuranceCard: row.doc_insurance_card,
     docVinPhoto: row.doc_vin_photo,
+    telegramAcceptedBy: row.telegram_accepted_by,
+    telegramAcceptedGroupId: row.telegram_accepted_group_id,
+    telegramClaimMessageIds: typeof row.telegram_claim_message_ids === "string" ? JSON.parse(row.telegram_claim_message_ids || "{}") : (row.telegram_claim_message_ids || {}),
   };
 }
 
@@ -330,17 +370,81 @@ function authMiddleware(req, res, next) {
   }
 }
 
-async function sendToTelegram(text) {
-  if (!TELEGRAM_BOT_TOKEN || TELEGRAM_CHAT_IDS.length === 0) return [];
+async function createOneTimeSecretLink(secret) {
+  if (!ONETIMESECRET_USERNAME || !ONETIMESECRET_API_KEY || !secret) return null;
+  const region = ONETIMESECRET_REGION || "us";
+  const auth = Buffer.from(`${ONETIMESECRET_USERNAME}:${ONETIMESECRET_API_KEY}`).toString("base64");
+  try {
+    const body = new URLSearchParams({
+      secret: String(secret).trim(),
+      ttl: "86400",
+      passphrase: OTS_DISPATCH_PASSPHRASE,
+    });
+    const r = await fetch(`https://${region}.onetimesecret.com/api/v1/share`, {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${auth}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: body.toString(),
+    });
+    const data = await r.json();
+    if (data.secret_key) return `https://${region}.onetimesecret.com/secret/${data.secret_key}`;
+    console.warn("[OTS] Create failed:", data);
+    return null;
+  } catch (err) {
+    console.error("[OTS] Error:", err.message);
+    return null;
+  }
+}
+
+function parseAddressParts(addr) {
+  if (!addr || typeof addr !== "string") return { street: "", cityStateZip: "" };
+  const parts = addr.split(",").map((s) => s.trim()).filter(Boolean);
+  if (parts.length >= 2) return { street: parts[0], cityStateZip: parts.slice(1).join(", ") };
+  return { street: addr.trim(), cityStateZip: "" };
+}
+
+function formatDispatchMessage(order, phoneLink) {
+  const o = order;
+  const name = `${(o.firstName || "").trim()} ${(o.lastName || "").trim()}`.trim() || "—";
+  const addr = parseAddressParts(o.address || "");
+  const deliv = parseAddressParts(o.deliveryAddress || "");
+  const addressStreet = addr.street || o.address || "—";
+  const addressCityStateZip = addr.cityStateZip || "—";
+  const deliveryStreet = deliv.street || o.deliveryAddress || "—";
+  const deliveryCityStateZip = deliv.cityStateZip || "—";
+  const car = (o.year && o.make && o.model) ? `${o.year} ${o.make} ${o.model}` : (o.carMakeModel || o.vehicleInfo || "—");
+  const lines = [
+    name,
+    addressStreet || "—",
+    addressCityStateZip || "—",
+    deliveryStreet || "—",
+    deliveryCityStateZip || "—",
+    o.vin || "—",
+    car,
+    o.color || "—",
+    o.insuranceCompany || "—",
+    o.policyNumber || "—",
+    o.notes || "—",
+  ];
+  if (phoneLink) lines.push("", `📞 Phone (one-time link): ${phoneLink}`);
+  return lines.join("\n");
+}
+
+async function sendToTelegram(text, chatIds = TELEGRAM_CHAT_IDS) {
+  if (!TELEGRAM_BOT_TOKEN) return [];
+  const targetIds = Array.isArray(chatIds) ? chatIds : TELEGRAM_CHAT_IDS;
+  if (targetIds.length === 0) return [];
   const results = [];
-  for (const chatId of TELEGRAM_CHAT_IDS) {
+  for (const chatId of targetIds) {
     try {
       const r = await fetch(
         `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
         { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML" }) }
       );
       const json = await r.json();
-      results.push({ chatId, ok: json.ok === true, error: json.description || null });
+      results.push({ chatId, ok: json.ok === true, messageId: json.result?.message_id, error: json.description || null });
     } catch (err) {
       results.push({ chatId, ok: false, error: err.message });
     }
@@ -348,14 +452,64 @@ async function sendToTelegram(text) {
   return results;
 }
 
+async function editTelegramMessage(chatId, messageId, text) {
+  if (!TELEGRAM_BOT_TOKEN) return false;
+  try {
+    const r = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/editMessageText`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, message_id: messageId, text, parse_mode: "HTML" }),
+    });
+    const json = await r.json();
+    return json.ok === true;
+  } catch (err) {
+    console.error("[Telegram] editMessage error:", err.message);
+    return false;
+  }
+}
+
+async function sendClaimMessageToDispatcher(dispatcherChatId, orderId, order) {
+  if (!TELEGRAM_BOT_TOKEN) return { ok: false, messageId: null };
+  const summary = [
+    "🆕 <b>New Order – Accept to Claim</b>",
+    `Order #${(orderId || "").slice(0, 8)}`,
+    `• ${(order?.firstName || "")} ${(order?.lastName || "")}`.trim() || "—",
+    `• ${order?.vin || "—"} | ${order?.carMakeModel || order?.vehicleInfo || "—"}`,
+    "",
+    "Tap <b>Accept</b> to receive full details in your group.",
+  ].join("\n");
+  const payload = {
+    chat_id: dispatcherChatId,
+    text: summary,
+    parse_mode: "HTML",
+    reply_markup: { inline_keyboard: [[{ text: "✅ Accept", callback_data: `accept_${orderId}` }]] },
+  };
+  try {
+    const r = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const json = await r.json();
+    return { ok: json.ok === true, messageId: json.result?.message_id };
+  } catch (err) {
+    return { ok: false, messageId: null };
+  }
+}
+
 async function sendDocImagesToTelegram(order) {
-  if (!TELEGRAM_BOT_TOKEN || TELEGRAM_CHAT_IDS.length === 0) return [];
+  if (!TELEGRAM_BOT_TOKEN) return [];
+  const acceptedGroup = order?.telegramAcceptedGroupId || order?.telegram_accepted_group_id;
+  const targetIds = acceptedGroup
+    ? [acceptedGroup]
+    : TELEGRAM_CHAT_IDS;
+  if (targetIds.length === 0) return [];
   const urls = [];
   if (order.docDriversLicense) urls.push({ url: order.docDriversLicense, caption: "Drivers License" });
   if (order.docInsuranceCard) urls.push({ url: order.docInsuranceCard, caption: "Insurance Card" });
   if (order.docVinPhoto) urls.push({ url: order.docVinPhoto, caption: "VIN Photo" });
   for (const { url, caption } of urls) {
-    for (const chatId of TELEGRAM_CHAT_IDS) {
+    for (const chatId of targetIds) {
       try {
         await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`, {
           method: "POST",
@@ -498,6 +652,93 @@ app.use(express.json({ limit: "5mb" }));
 
 // Health check (no DB/Telegram - always 200)
 app.get("/api/health", (req, res) => res.json({ ok: true }));
+
+// Telegram webhook (for dispatcher Accept button callbacks)
+app.post("/api/telegram/webhook", async (req, res) => {
+  res.status(200).send("");
+  const upd = req.body;
+  const cq = upd?.callback_query;
+  if (!cq?.data?.startsWith("accept_")) return;
+  const orderId = cq.data.replace(/^accept_/, "").trim();
+  if (!orderId) return;
+
+  const fromChatId = String(cq.message?.chat?.id || "");
+  const fromMessageId = cq.message?.message_id;
+
+  try {
+    const orderRow = await findOrderById(orderId);
+    if (!orderRow) return answerCallback(cq.id, "Order not found");
+    const order = useSupabase() ? orderRowToApi(orderRow) : orderRow;
+    const claimIds = typeof order.telegramClaimMessageIds === "object" ? order.telegramClaimMessageIds : (order.telegram_claim_message_ids && typeof order.telegram_claim_message_ids === "string" ? JSON.parse(order.telegram_claim_message_ids || "{}") : {});
+
+    const dispatchers = await loadDispatchers();
+    const dispatcher = dispatchers.find((d) => d.dispatcherId === fromChatId);
+    if (!dispatcher) return answerCallback(cq.id, "Unknown dispatcher");
+
+    const alreadyAccepted = order.telegramAcceptedBy || order.telegram_accepted_by;
+    if (alreadyAccepted) {
+      if (fromMessageId) await editTelegramMessage(fromChatId, fromMessageId, "❌ Already accepted by another dispatcher.");
+      return answerCallback(cq.id, "Already claimed");
+    }
+
+    const won = await tryAcceptOrder(orderId, fromChatId, dispatcher.groupId);
+    if (!won) {
+      if (fromMessageId) await editTelegramMessage(fromChatId, fromMessageId, "❌ Already accepted by another dispatcher.");
+      return answerCallback(cq.id, "Already claimed");
+    }
+
+    const phoneLink = await createOneTimeSecretLink(order.phone || "");
+    const fullOrder = { ...order, deliveryAddress: order.deliveryAddress || order.delivery_address || "" };
+    const dispatchText = formatDispatchMessage(fullOrder, phoneLink);
+    await sendToTelegram(dispatchText, [dispatcher.groupId]);
+
+    const updatedOrder = await findOrderById(orderId);
+    const full = useSupabase() ? orderRowToApi(updatedOrder) : updatedOrder;
+    Object.assign(full, fullOrder);
+    await sendDocImagesToTelegram(full);
+
+    for (const d of dispatchers) {
+      if (d.dispatcherId === fromChatId) continue;
+      const mid = claimIds[d.dispatcherId];
+      if (mid) await editTelegramMessage(d.dispatcherId, mid, "❌ Already accepted by another dispatcher.");
+    }
+
+    answerCallback(cq.id, "✅ Order claimed! Details sent to your group.");
+  } catch (err) {
+    console.error("[Telegram webhook] Error:", err);
+    answerCallback(cq.id, "Error processing accept");
+  }
+});
+
+async function answerCallback(callbackQueryId, text) {
+  if (!TELEGRAM_BOT_TOKEN) return;
+  try {
+    await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/answerCallbackQuery`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ callback_query_id: callbackQueryId, text: text.slice(0, 200) }),
+    });
+  } catch (e) {
+    console.error("[Telegram] answerCallback error:", e.message);
+  }
+}
+
+async function tryAcceptOrder(orderId, acceptorsChatId, groupChatId) {
+  if (useSupabase()) {
+    const { data, error } = await supabase.from("orders").update({
+      telegram_accepted_by: acceptorsChatId,
+      telegram_accepted_group_id: groupChatId,
+    }).eq("id", orderId).is("telegram_accepted_by", null).select("id");
+    return !error && data && data.length > 0;
+  }
+  const orders = loadJson(ORDERS_FILE, []);
+  const idx = orders.findIndex((o) => o.id === orderId && !o.telegramAcceptedBy);
+  if (idx < 0) return false;
+  orders[idx].telegramAcceptedBy = acceptorsChatId;
+  orders[idx].telegramAcceptedGroupId = groupChatId;
+  saveJson(ORDERS_FILE, orders);
+  return true;
+}
 
 // Public: VIN decode (NHTSA API)
 app.get("/api/vin/decode", async (req, res) => {
@@ -729,20 +970,44 @@ app.patch("/api/orders/:id/tag-info", async (req, res) => {
 
     const updated = await findOrderById(id);
     const full = useSupabase() ? { ...orderRowToApi(updated), ...body, vehicleInfo, carMakeModel } : { ...updated, ...body, vehicleInfo, carMakeModel };
-    const telegramResults = await sendToTelegram(formatOrderMessage(full));
+    full.deliveryAddress = full.deliveryAddress || full.delivery_address || "";
+
+    let telegramSent = false;
+    let telegramRecipients = [];
+    let telegramErrors = [];
+    let claimMessageIds = {};
+
+    const dispatchers = await loadDispatchers();
+    if (dispatchers.length > 0 && TELEGRAM_BOT_TOKEN) {
+      for (const d of dispatchers) {
+        const r = await sendClaimMessageToDispatcher(d.dispatcherId, id, full);
+        if (r.ok && r.messageId) claimMessageIds[d.dispatcherId] = r.messageId;
+        if (r.ok) telegramRecipients.push(d.dispatcherId);
+        else telegramErrors.push({ chatId: d.dispatcherId, error: "Failed to send claim" });
+      }
+      telegramSent = telegramRecipients.length === dispatchers.length;
+      await updateOrder(id, { telegramClaimMessageIds: claimMessageIds });
+    } else if (TELEGRAM_CHAT_IDS.length > 0 && TELEGRAM_BOT_TOKEN) {
+      const telegramResults = await sendToTelegram(formatOrderMessage(full));
+      telegramSent = telegramResults.every((r) => r.ok);
+      telegramRecipients = telegramResults.filter((r) => r.ok).map((r) => r.chatId);
+      telegramErrors = telegramResults.filter((r) => !r.ok).map((r) => ({ chatId: r.chatId, error: r.error }));
+    }
+
     if (useSupabase()) {
       await supabase.from("orders").update({
-        telegram_sent: telegramResults.every((r) => r.ok),
-        telegram_recipients: JSON.stringify(telegramResults.filter((r) => r.ok).map((r) => r.chatId)),
-        telegram_errors: JSON.stringify(telegramResults.filter((r) => !r.ok).map((r) => ({ chatId: r.chatId, error: r.error }))),
+        telegram_sent: telegramSent,
+        telegram_recipients: JSON.stringify(telegramRecipients),
+        telegram_errors: JSON.stringify(telegramErrors),
       }).eq("id", id);
     } else {
       const orders = loadJson(ORDERS_FILE, []);
       const idx = orders.findIndex((o) => o.id === id);
       if (idx >= 0) {
-        orders[idx].telegramSent = telegramResults.every((r) => r.ok);
-        orders[idx].telegramRecipients = telegramResults.filter((r) => r.ok).map((r) => r.chatId);
-        orders[idx].telegramErrors = telegramResults.filter((r) => !r.ok).map((r) => ({ chatId: r.chatId, error: r.error }));
+        orders[idx].telegramSent = telegramSent;
+        orders[idx].telegramRecipients = telegramRecipients;
+        orders[idx].telegramErrors = telegramErrors;
+        orders[idx].telegramClaimMessageIds = claimMessageIds;
         Object.assign(orders[idx], { firstName: body.firstName, lastName: body.lastName, phone: body.phone, address: body.address, vin: body.vin, year: body.year, make: body.make, model: body.model, vehicleInfo, carMakeModel, insuranceCompany: body.insuranceCompany, policyNumber: body.policyNumber, notes: body.notes });
         saveJson(ORDERS_FILE, orders);
       }
@@ -908,7 +1173,15 @@ app.get("/api/admin/settings", authMiddleware, async (req, res) => {
     const [s, services] = await Promise.all([loadSettings(), loadServices()]);
     const firstService = services[0];
     const tagPrice = firstService ? (parseFloat(firstService.price) || 150) : 150;
-    res.json({ tagPrice, insuranceMonthlyPrice: s.insurance_monthly_price, insuranceYearlyPrice: s.insurance_yearly_price, overnightFedexFee: s.overnight_fedex_fee ?? 50, testMode: s.test_mode });
+    const telegramDispatchers = Array.isArray(s.telegram_dispatchers) ? s.telegram_dispatchers : [];
+    res.json({
+      tagPrice,
+      insuranceMonthlyPrice: s.insurance_monthly_price,
+      insuranceYearlyPrice: s.insurance_yearly_price,
+      overnightFedexFee: s.overnight_fedex_fee ?? 50,
+      testMode: s.test_mode,
+      telegramDispatchers,
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -922,11 +1195,24 @@ app.patch("/api/admin/settings", authMiddleware, async (req, res) => {
     if (body.insuranceYearlyPrice != null) updates.insurance_yearly_price = parseFloat(body.insuranceYearlyPrice);
     if (body.overnightFedexFee != null) updates.overnight_fedex_fee = parseFloat(body.overnightFedexFee);
     if (body.testMode != null) updates.test_mode = !!body.testMode;
+    if (Array.isArray(body.telegramDispatchers)) {
+      updates.telegram_dispatchers = body.telegramDispatchers
+        .filter((d) => d.dispatcherId && d.groupId)
+        .map((d) => ({ dispatcherId: String(d.dispatcherId).trim(), groupId: String(d.groupId).trim(), groupName: String(d.groupName || "").trim() || `Group ${String(d.groupId).slice(-4)}` }));
+    }
     await saveSettings(updates);
     const [s, services] = await Promise.all([loadSettings(), loadServices()]);
     const firstService = services[0];
     const tagPrice = firstService ? (parseFloat(firstService.price) || 150) : 150;
-    res.json({ tagPrice, insuranceMonthlyPrice: s.insurance_monthly_price, insuranceYearlyPrice: s.insurance_yearly_price, overnightFedexFee: s.overnight_fedex_fee ?? 50, testMode: s.test_mode });
+    const telegramDispatchers = Array.isArray(s.telegram_dispatchers) ? s.telegram_dispatchers : [];
+    res.json({
+      tagPrice,
+      insuranceMonthlyPrice: s.insurance_monthly_price,
+      insuranceYearlyPrice: s.insurance_yearly_price,
+      overnightFedexFee: s.overnight_fedex_fee ?? 50,
+      testMode: s.test_mode,
+      telegramDispatchers,
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

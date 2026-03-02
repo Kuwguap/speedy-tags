@@ -54,6 +54,9 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS doc_drivers_license TEXT;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS doc_insurance_card TEXT;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS doc_vin_photo TEXT;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS success_email_sent BOOLEAN DEFAULT FALSE;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS telegram_accepted_by TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS telegram_accepted_group_id TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS telegram_claim_message_ids JSONB DEFAULT '{}';
 
 -- Settings table (checkout config)
 CREATE TABLE IF NOT EXISTS settings (
