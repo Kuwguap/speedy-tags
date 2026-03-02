@@ -90,14 +90,14 @@ export default function Index() {
           </p>
           <div className="flex flex-col sm:flex-row gap-3 justify-center mb-8">
             <a
-              href="#services"
+              href="/checkout"
               className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-8 py-4 font-bold text-primary-foreground hover:bg-primary/90 transition-all text-lg"
             >
               BUY IT NOW
               <ArrowRight className="h-5 w-5" />
             </a>
             <a
-              href="#services"
+              href="/checkout"
               className="inline-flex items-center justify-center gap-2 rounded-lg border-2 border-white px-8 py-4 font-bold text-white hover:bg-white/10 transition-all text-lg"
             >
               GET MY TEMP TAG
@@ -129,7 +129,7 @@ export default function Index() {
         </div>
         <div className="text-center mt-10">
           <a
-            href="#services"
+            href="/checkout"
             className="inline-flex items-center gap-2 rounded-lg bg-primary px-8 py-3 font-bold text-primary-foreground hover:bg-primary/90 transition-all"
           >
             GET MY PLATE NOW
@@ -203,8 +203,8 @@ export default function Index() {
             ))}
           </div>
           <div className="text-center mt-12">
-            <a
-              href="#services"
+              <a
+              href="/checkout"
               className="inline-flex items-center gap-2 rounded-lg bg-primary px-8 py-3 font-semibold text-primary-foreground hover:bg-primary/90 transition-all"
             >
               GET YOUR PLATE NOW
@@ -254,7 +254,7 @@ export default function Index() {
               ))}
             </ul>
             <a
-              href="#services"
+              href="/checkout"
               className="inline-flex items-center gap-2 rounded-lg bg-primary px-8 py-4 font-bold text-primary-foreground hover:bg-primary/90 transition-all w-full justify-center"
             >
               BUY IT NOW
@@ -280,7 +280,7 @@ export default function Index() {
           </div>
           <div className="text-center mt-12">
             <a
-              href="#services"
+              href="/checkout"
               className="inline-flex items-center gap-2 rounded-lg bg-primary px-8 py-3 font-bold text-primary-foreground hover:bg-primary/90 transition-all"
             >
               INSTANT DELIVERY
@@ -322,14 +322,14 @@ export default function Index() {
           <p className="text-primary-foreground/90 mb-6">Get road legal in minutes.</p>
           <div className="flex flex-col sm:flex-row gap-3 justify-center">
             <a
-              href="#services"
+              href="/checkout"
               className="inline-flex items-center justify-center gap-2 rounded-lg bg-white px-8 py-3 font-bold text-primary hover:bg-white/90 transition-all"
             >
               BUY IT NOW
               <ArrowRight className="h-4 w-4" />
             </a>
             <a
-              href="#services"
+              href="/checkout"
               className="inline-flex items-center justify-center gap-2 rounded-lg border-2 border-white px-8 py-3 font-bold text-white hover:bg-white/10 transition-all"
             >
               GET MY TEMP TAG
@@ -343,7 +343,7 @@ export default function Index() {
         <div className="container">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-8 mb-8">
             <div>
-              <h4 className="font-display font-bold text-lg mb-3">Speedy Tags</h4>
+              <h4 className="font-display font-bold text-lg mb-3">TriStateTags</h4>
               <p className="text-white/80 text-sm">NJ licensed dealer. Same day temp tags, DMV verified.</p>
               <p className="text-xs text-white/60 mt-2">Dealer Info · Compliance</p>
             </div>
@@ -370,7 +370,7 @@ export default function Index() {
             </div>
           </div>
           <div className="pt-8 border-t border-white/20 flex flex-col md:flex-row items-center justify-between gap-4">
-            <p className="text-sm text-white/70">© {new Date().getFullYear()} Speedy Tags. All rights reserved.</p>
+            <p className="text-sm text-white/70">© {new Date().getFullYear()} TriStateTags. All rights reserved.</p>
             <p className="text-xs text-white/60">Licensed NJ dealer. Not affiliated with NJ MVC or government agencies.</p>
           </div>
         </div>

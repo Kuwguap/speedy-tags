@@ -1,6 +1,8 @@
+# Render Blueprint - Backend + Telegram
+# Connect this repo in Render Dashboard: New → Blueprint
 services:
   - type: web
-    name: speedy-tags
+    name: speedy-tags-api
     runtime: node
     plan: free
 

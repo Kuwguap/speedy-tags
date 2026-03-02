@@ -27,7 +27,7 @@ export function ServiceCard({ service }: { service: ServiceRecord }) {
         <div className="flex items-center justify-between pt-4">
           <span className="text-2xl font-display font-bold text-primary">${service.price.toFixed(2)}</span>
           <Button
-            onClick={() => navigate(`/checkout/${service.id}`)}
+            onClick={() => navigate("/checkout")}
             size="sm"
             className="rounded-lg gap-1.5 font-semibold"
           >

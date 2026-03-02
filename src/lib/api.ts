@@ -5,10 +5,11 @@ const API_BASE = import.meta.env.VITE_API_URL
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = localStorage.getItem("admin_token");
   const url = path.startsWith("/") ? `${API_BASE}${path}` : `${API_BASE}/${path}`;
+  const isFormData = options.body instanceof FormData;
   const res = await fetch(url, {
     ...options,
     headers: {
-      "Content-Type": "application/json",
+      ...(!isFormData && { "Content-Type": "application/json" }),
       ...(token && { Authorization: `Bearer ${token}` }),
       ...options.headers,
     },
@@ -26,10 +27,18 @@ export const api = {
   getServices: () => request<{ id: string; title: string; description: string; price: number; image: string }[]>(
     "/services"
   ),
+  getCheckoutConfig: () =>
+    request<{ tagPrice: number; insuranceMonthlyPrice: number; insuranceYearlyPrice: number; testMode: boolean }>("/checkout/config"),
   createCheckoutSession: (data: Record<string, unknown>) =>
     request<{ url: string }>("/checkout/create-session", { method: "POST", body: JSON.stringify(data) }),
-  verifyCheckoutSession: (sessionId: string) =>
-    request<OrderRecord>("/checkout/verify?session_id=" + encodeURIComponent(sessionId)),
+  verifyCheckoutSession: (sessionId: string, isTest?: boolean) =>
+    request<OrderRecord>("/checkout/verify?session_id=" + encodeURIComponent(sessionId) + (isTest ? "&test=1" : "")),
+  submitTagInfo: (orderId: string, data: Record<string, unknown>) =>
+    request<OrderRecord>(`/orders/${encodeURIComponent(orderId)}/tag-info`, { method: "PATCH", body: JSON.stringify(data) }),
+  decodeVin: (vin: string) =>
+    request<{ year: string; make: string; model: string }>("/vin/decode?vin=" + encodeURIComponent(vin)),
+  uploadOrderDocuments: (orderId: string, formData: FormData) =>
+    request<OrderRecord>(`/orders/${encodeURIComponent(orderId)}/documents`, { method: "POST", body: formData }),
   login: (password: string) =>
     request<{ token: string }>("/auth/login", { method: "POST", body: JSON.stringify({ password }) }),
   getOrders: () => request<OrderRecord[]>("/admin/orders"),
@@ -40,6 +49,10 @@ export const api = {
     request<{ ok: boolean }>(`/admin/services/${id}`, { method: "DELETE" }),
   getStats: () =>
     request<AdminStats>("/admin/stats"),
+  getSettings: () =>
+    request<{ tagPrice: number; insuranceMonthlyPrice: number; insuranceYearlyPrice: number; overnightFedexFee: number; testMode: boolean }>("/admin/settings"),
+  updateSettings: (s: { insuranceMonthlyPrice?: number; insuranceYearlyPrice?: number; overnightFedexFee?: number; testMode?: boolean }) =>
+    request<{ tagPrice: number; insuranceMonthlyPrice: number; insuranceYearlyPrice: number; overnightFedexFee: number; testMode: boolean }>("/admin/settings", { method: "PATCH", body: JSON.stringify(s) }),
 };
 
 export interface ServiceRecord {

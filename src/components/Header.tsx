@@ -40,7 +40,7 @@ export function Header() {
             }`}
           >
             <span className="font-display text-xl font-bold text-primary group-hover:text-primary/90 transition-colors">
-              Speedy Tags
+              TriStateTags
             </span>
           </Link>
           <div className={`hidden lg:flex items-center gap-6 text-xs text-muted-foreground shrink-0 transition-all duration-[1200ms] ease-[cubic-bezier(0.25,0.46,0.45,0.94)] ${scrolled ? "opacity-0 w-0 overflow-hidden" : ""}`}>
@@ -57,7 +57,7 @@ export function Header() {
           <a href="#pricing" className="text-sm font-medium text-muted-foreground hover:text-foreground">Pricing</a>
           <a href="#services" className="text-sm font-medium text-muted-foreground hover:text-foreground">Services</a>
           <a href="#faq" className="text-sm font-medium text-muted-foreground hover:text-foreground">FAQ</a>
-          <a href="#services" className="inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-bold text-primary-foreground hover:bg-primary/90 transition-all">
+          <a href="/checkout" className="inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-bold text-primary-foreground hover:bg-primary/90 transition-all">
             BUY IT NOW
           </a>
         </nav>

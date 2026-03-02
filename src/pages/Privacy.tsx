@@ -17,7 +17,7 @@ export default function Privacy() {
         </p>
         <div className="prose prose-sm text-muted-foreground space-y-4">
           <p>
-            Speedy Tags respects your privacy. We collect information necessary to process your temporary
+            TriStateTags respects your privacy. We collect information necessary to process your temporary
             tag orders, including name, contact details, vehicle information, and delivery address.
           </p>
           <p>

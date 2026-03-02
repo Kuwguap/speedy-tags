@@ -17,7 +17,7 @@ export default function Terms() {
         </p>
         <div className="prose prose-sm text-muted-foreground space-y-4">
           <p>
-            Speedy Tags provides temporary vehicle registration tags through our licensed dealer services.
+            TriStateTags provides temporary vehicle registration tags through our licensed dealer services.
             By using our website and services, you agree to these terms.
           </p>
           <p>

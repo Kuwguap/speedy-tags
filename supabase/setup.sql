@@ -36,6 +36,37 @@ CREATE TABLE IF NOT EXISTS orders (
 -- Add columns if upgrading existing DB (safe to run)
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS stripe_session_id TEXT UNIQUE;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_status TEXT DEFAULT 'pending';
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_method TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_email TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_slot TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_scheduled_at TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_address TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_phone TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS product_choice TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS insurance_company TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS policy_number TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS vehicle_info TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS notes TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS year TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS make TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS model TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS doc_drivers_license TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS doc_insurance_card TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS doc_vin_photo TEXT;
+
+-- Settings table (checkout config)
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value JSONB NOT NULL
+);
+INSERT INTO settings (key, value) VALUES
+  ('insurance_monthly_price', '100'::jsonb),
+  ('insurance_yearly_price', '900'::jsonb),
+  ('test_mode', 'false'::jsonb),
+  ('overnight_fedex_fee', '50'::jsonb)
+ON CONFLICT (key) DO NOTHING;
+
+-- Storage bucket for order documents (create in Supabase Dashboard: Storage → New bucket → name: order-documents, Public: yes)
 
 -- 3. Activity log
 CREATE TABLE IF NOT EXISTS activity (

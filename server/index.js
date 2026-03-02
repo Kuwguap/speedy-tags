@@ -1,6 +1,7 @@
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
+import multer from "multer";
 import { randomUUID } from "crypto";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { fileURLToPath } from "url";
@@ -11,12 +12,21 @@ import { supabase, useSupabase } from "./db.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = join(__dirname, "data");
+const DOCS_DIR = join(DATA_DIR, "order-docs");
 const SERVICES_FILE = join(DATA_DIR, "services.json");
 const ORDERS_FILE = join(DATA_DIR, "orders.json");
 const ACTIVITY_FILE = join(DATA_DIR, "activity.json");
+const SETTINGS_FILE = join(DATA_DIR, "settings.json");
+
+const defaultSettings = {
+  insurance_monthly_price: 100,
+  insurance_yearly_price: 900,
+  test_mode: false,
+  overnight_fedex_fee: 50,
+};
 
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
-const JWT_SECRET = process.env.JWT_SECRET || "speedy-tags-secret-change-in-production";
+const JWT_SECRET = process.env.JWT_SECRET || "tristatetags-secret-change-in-production";
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
 const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || "http://localhost:8080";
 const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
@@ -27,6 +37,9 @@ const TELEGRAM_CHAT_IDS = (process.env.TELEGRAM_CHAT_IDS || "")
   .filter(Boolean);
 
 if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
+if (!existsSync(DOCS_DIR)) mkdirSync(DOCS_DIR, { recursive: true });
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 const defaultServices = [
   { id: "1", title: "30-Day Temporary Tag", description: "Standard temporary registration valid for 30 days. Perfect for newly purchased vehicles awaiting permanent plates.", price: 29.99, image: "" },
@@ -84,16 +97,16 @@ async function saveOrder(order) {
   if (useSupabase()) {
     const row = {
       id: order.id,
-      service_id: order.serviceId,
-      service_title: order.serviceTitle,
-      first_name: order.firstName,
-      last_name: order.lastName,
-      phone: order.phone,
-      address: order.address,
-      delivery_address: order.deliveryAddress,
-      vin: order.vin,
-      car_make_model: order.carMakeModel,
-      color: order.color,
+      service_id: order.serviceId || "checkout",
+      service_title: order.serviceTitle || "Temporary Tag",
+      first_name: order.firstName || "Pending",
+      last_name: order.lastName || "",
+      phone: order.phone || "",
+      address: order.address || "",
+      delivery_address: order.deliveryAddress || "",
+      vin: order.vin || "",
+      car_make_model: order.carMakeModel || "",
+      color: order.color || "",
       price: order.price,
       created_at: order.createdAt,
       telegram_sent: order.telegramSent || false,
@@ -101,6 +114,12 @@ async function saveOrder(order) {
       telegram_errors: JSON.stringify(order.telegramErrors || []),
       stripe_session_id: order.stripeSessionId || null,
       payment_status: order.paymentStatus || "paid",
+      delivery_method: order.deliveryMethod || null,
+      delivery_email: order.deliveryEmail || null,
+      delivery_slot: order.deliverySlot || null,
+      delivery_scheduled_at: order.deliveryScheduledAt || null,
+      delivery_phone: order.deliveryPhone || null,
+      product_choice: order.productChoice || null,
     };
     const { error } = await supabase.from("orders").insert(row);
     if (error) throw error;
@@ -144,6 +163,92 @@ async function appendActivity(type, payload) {
   saveJson(ACTIVITY_FILE, a);
 }
 
+async function loadSettings() {
+  if (useSupabase()) {
+    const { data, error } = await supabase.from("settings").select("key, value");
+    if (error) return defaultSettings;
+    const out = { ...defaultSettings };
+    (data || []).forEach((r) => {
+      if (r.key === "test_mode") out.test_mode = r.value === true || String(r.value) === "true";
+      else if (["insurance_monthly_price", "insurance_yearly_price", "overnight_fedex_fee"].includes(r.key))
+        out[r.key] = typeof r.value === "number" ? r.value : parseFloat(r.value) || out[r.key];
+    });
+    return out;
+  }
+  const s = loadJson(SETTINGS_FILE, defaultSettings);
+  return { ...defaultSettings, ...s };
+}
+
+async function saveSettings(updates) {
+  if (useSupabase()) {
+    for (const [key, value] of Object.entries(updates)) {
+      await supabase.from("settings").upsert({ key, value }, { onConflict: "key" });
+    }
+    return;
+  }
+  const s = loadJson(SETTINGS_FILE, defaultSettings);
+  Object.assign(s, updates);
+  saveJson(SETTINGS_FILE, s);
+}
+
+async function findOrderById(id) {
+  if (useSupabase()) {
+    const { data, error } = await supabase.from("orders").select("*").eq("id", id).single();
+    if (error) return null;
+    return data;
+  }
+  const orders = loadJson(ORDERS_FILE, []);
+  return orders.find((o) => o.id === id) || null;
+}
+
+async function updateOrder(id, updates) {
+  if (useSupabase()) {
+    const row = {};
+    if (updates.firstName != null) row.first_name = updates.firstName;
+    if (updates.lastName != null) row.last_name = updates.lastName;
+    if (updates.phone != null) row.phone = updates.phone;
+    if (updates.address != null) row.address = updates.address;
+    if (updates.vin != null) row.vin = updates.vin;
+    if (updates.vehicleInfo != null) row.vehicle_info = updates.vehicleInfo;
+    if (updates.year != null) row.year = updates.year;
+    if (updates.make != null) row.make = updates.make;
+    if (updates.model != null) row.model = updates.model;
+    if (updates.carMakeModel != null) row.car_make_model = updates.carMakeModel;
+    if (updates.insuranceCompany != null) row.insurance_company = updates.insuranceCompany;
+    if (updates.policyNumber != null) row.policy_number = updates.policyNumber;
+    if (updates.notes != null) row.notes = updates.notes;
+    if (updates.docDriversLicense != null) row.doc_drivers_license = updates.docDriversLicense;
+    if (updates.docInsuranceCard != null) row.doc_insurance_card = updates.docInsuranceCard;
+    if (updates.docVinPhoto != null) row.doc_vin_photo = updates.docVinPhoto;
+    if (Object.keys(row).length === 0) return;
+    const { error } = await supabase.from("orders").update(row).eq("id", id);
+    if (error) throw error;
+    return;
+  }
+  const orders = loadJson(ORDERS_FILE, []);
+  const idx = orders.findIndex((o) => o.id === id);
+  if (idx < 0) throw new Error("Order not found");
+  Object.assign(orders[idx], {
+    firstName: updates.firstName ?? orders[idx].firstName,
+    lastName: updates.lastName ?? orders[idx].lastName,
+    phone: updates.phone ?? orders[idx].phone,
+    address: updates.address ?? orders[idx].address,
+    vin: updates.vin ?? orders[idx].vin,
+    vehicleInfo: updates.vehicleInfo ?? orders[idx].vehicleInfo,
+    year: updates.year ?? orders[idx].year,
+    make: updates.make ?? orders[idx].make,
+    model: updates.model ?? orders[idx].model,
+    carMakeModel: updates.carMakeModel ?? orders[idx].carMakeModel,
+    insuranceCompany: updates.insuranceCompany ?? orders[idx].insuranceCompany,
+    policyNumber: updates.policyNumber ?? orders[idx].policyNumber,
+    notes: updates.notes ?? orders[idx].notes,
+    docDriversLicense: updates.docDriversLicense ?? orders[idx].docDriversLicense,
+    docInsuranceCard: updates.docInsuranceCard ?? orders[idx].docInsuranceCard,
+    docVinPhoto: updates.docVinPhoto ?? orders[idx].docVinPhoto,
+  });
+  saveJson(ORDERS_FILE, orders);
+}
+
 async function loadActivity() {
   if (useSupabase()) {
     const { data, error } = await supabase.from("activity").select("type, payload, created_at").order("created_at", { ascending: false });
@@ -176,6 +281,9 @@ function orderRowToApi(row) {
     vin: row.vin,
     carMakeModel: row.car_make_model,
     color: row.color,
+    year: row.year,
+    make: row.make,
+    model: row.model,
     price: parseFloat(row.price),
     createdAt: row.created_at,
     telegramSent: row.telegram_sent,
@@ -183,6 +291,19 @@ function orderRowToApi(row) {
     telegramErrors: typeof row.telegram_errors === "string" ? JSON.parse(row.telegram_errors || "[]") : (row.telegram_errors || []),
     stripeSessionId: row.stripe_session_id,
     paymentStatus: row.payment_status,
+    deliveryMethod: row.delivery_method,
+    deliveryEmail: row.delivery_email,
+    deliverySlot: row.delivery_slot,
+    deliveryScheduledAt: row.delivery_scheduled_at,
+    deliveryPhone: row.delivery_phone,
+    productChoice: row.product_choice,
+    vehicleInfo: row.vehicle_info,
+    insuranceCompany: row.insurance_company,
+    policyNumber: row.policy_number,
+    notes: row.notes,
+    docDriversLicense: row.doc_drivers_license,
+    docInsuranceCard: row.doc_insurance_card,
+    docVinPhoto: row.doc_vin_photo,
   };
 }
 
@@ -220,26 +341,59 @@ async function sendToTelegram(text) {
   return results;
 }
 
+async function sendDocImagesToTelegram(order) {
+  if (!TELEGRAM_BOT_TOKEN || TELEGRAM_CHAT_IDS.length === 0) return [];
+  const urls = [];
+  if (order.docDriversLicense) urls.push({ url: order.docDriversLicense, caption: "Drivers License" });
+  if (order.docInsuranceCard) urls.push({ url: order.docInsuranceCard, caption: "Insurance Card" });
+  if (order.docVinPhoto) urls.push({ url: order.docVinPhoto, caption: "VIN Photo" });
+  for (const { url, caption } of urls) {
+    for (const chatId of TELEGRAM_CHAT_IDS) {
+      try {
+        await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chat_id: chatId, photo: url, caption }),
+        });
+      } catch (err) {
+        console.error("Telegram sendPhoto error:", err);
+      }
+    }
+  }
+}
+
 function formatOrderMessage(order) {
-  return [
+  const vehicle = (order.year && order.make && order.model)
+    ? `${order.year} ${order.make} ${order.model}` + (order.color ? `, ${order.color}` : "")
+    : order.vehicleInfo;
+  const lines = [
     "<b>🆕 New Order</b>",
     "",
     `<b>Order ID:</b> ${order.id}`,
-    `<b>Service:</b> ${order.serviceTitle} — $${order.price.toFixed(2)}`,
-    "",
-    "<b>Customer:</b>",
-    `• ${order.firstName} ${order.lastName}`,
-    `• ${order.phone}`,
-    `• ${order.address}`,
+    `<b>Product:</b> ${order.serviceTitle} — $${(order.price || 0).toFixed(2)}`,
     "",
     "<b>Delivery:</b>",
-    `• ${order.deliveryAddress}`,
+    `• Method: ${order.deliveryMethod || "email"}`,
+    order.deliveryEmail ? `• Email: ${order.deliveryEmail}` : null,
+    order.deliveryAddress ? `• Address: ${order.deliveryAddress}` : null,
+    order.deliverySlot ? `• Slot: ${order.deliverySlot}` : null,
+    order.deliveryScheduledAt ? `• Scheduled: ${order.deliveryScheduledAt}` : null,
+    order.deliveryPhone ? `• Phone: ${order.deliveryPhone}` : null,
     "",
-    "<b>Vehicle:</b>",
-    `• VIN: ${order.vin}`,
-    `• ${order.carMakeModel}`,
-    `• Color: ${order.color}`,
-  ].join("\n");
+    "<b>Customer / Tag Info:</b>",
+    `• ${order.firstName || ""} ${order.lastName || ""}`.trim() || "—",
+    order.phone ? `• Phone: ${order.phone}` : null,
+    order.address ? `• Address: ${order.address}` : null,
+    vehicle ? `• Vehicle: ${vehicle}` : null,
+    order.vin ? `• VIN: ${order.vin}` : null,
+    order.insuranceCompany ? `• Insurance: ${order.insuranceCompany}` : null,
+    order.policyNumber ? `• Policy #: ${order.policyNumber}` : null,
+    order.notes ? `• Notes: ${order.notes}` : null,
+    order.docDriversLicense ? "• 📄 Drivers License: attached" : null,
+    order.docInsuranceCard ? "• 📄 Insurance Card: attached" : null,
+    order.docVinPhoto ? "• 📄 VIN Photo: attached" : null,
+  ];
+  return lines.filter(Boolean).join("\n");
 }
 
 const app = express();
@@ -248,6 +402,28 @@ app.use(express.json({ limit: "5mb" }));
 
 // Health check (no DB/Telegram - always 200)
 app.get("/api/health", (req, res) => res.json({ ok: true }));
+
+// Public: VIN decode (NHTSA API)
+app.get("/api/vin/decode", async (req, res) => {
+  const vin = String(req.query.vin || "").trim().toUpperCase();
+  if (!vin || vin.length < 11 || vin.length > 17) {
+    return res.status(400).json({ error: "VIN must be 11-17 characters" });
+  }
+  try {
+    const r = await fetch(`https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues/${encodeURIComponent(vin)}?format=json`);
+    const data = await r.json();
+    const result = data.Results?.[0];
+    if (!result) return res.status(404).json({ error: "VIN not found" });
+    const year = result.ModelYear || "";
+    const make = result.Make || "";
+    const model = result.Model || "";
+    if (!year && !make && !model) return res.status(404).json({ error: "Could not decode VIN" });
+    res.json({ year, make, model });
+  } catch (e) {
+    console.error("VIN decode error:", e);
+    res.status(500).json({ error: "Failed to decode VIN" });
+  }
+});
 
 // Public: Services
 app.get("/api/services", async (req, res) => {
@@ -259,45 +435,100 @@ app.get("/api/services", async (req, res) => {
   }
 });
 
-// Stripe Checkout: create session and redirect to payment
-app.post("/api/checkout/create-session", async (req, res) => {
-  if (!stripe) return res.status(503).json({ error: "Stripe is not configured. Set STRIPE_SECRET_KEY in environment." });
-  const body = req.body;
-  const required = ["serviceId", "serviceTitle", "firstName", "lastName", "phone", "address", "deliveryAddress", "vin", "carMakeModel", "color", "price"];
-  for (const k of required) {
-    if (body[k] == null || body[k] === "") return res.status(400).json({ error: `Missing field: ${k}` });
+// Public: Checkout config (tag price from first service, insurance from settings, test mode)
+app.get("/api/checkout/config", async (req, res) => {
+  try {
+    const [s, services] = await Promise.all([loadSettings(), loadServices()]);
+    const firstService = services[0];
+    const tagPrice = firstService ? (parseFloat(firstService.price) || 150) : 150;
+    res.json({
+      tagPrice,
+      insuranceMonthlyPrice: s.insurance_monthly_price,
+      insuranceYearlyPrice: s.insurance_yearly_price,
+      overnightFedexFee: s.overnight_fedex_fee ?? 50,
+      testMode: s.test_mode,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
-  const price = parseFloat(body.price);
-  if (isNaN(price) || price <= 0) return res.status(400).json({ error: "Invalid price" });
-  const baseUrl = APP_URL.replace(/\/$/, "");
+});
+
+// Stripe Checkout: create session and redirect to payment (or test URL if test mode)
+app.post("/api/checkout/create-session", async (req, res) => {
+  const body = req.body;
+  const amount = parseFloat(body.amount);
+  if (isNaN(amount) || amount <= 0) return res.status(400).json({ error: "Invalid amount" });
+  // Use request origin for redirect (so localhost works when APP_URL points to prod)
+  let baseUrl = req.get("origin");
+  if (!baseUrl) {
+    try {
+      const ref = req.get("referer");
+      if (ref) baseUrl = new URL(ref).origin;
+    } catch {}
+  }
+  baseUrl = (baseUrl || APP_URL).replace(/\/$/, "");
+
+  const settings = await loadSettings();
+  if (settings.test_mode) {
+    const fakeSessionId = "test_" + randomUUID();
+    const url = `${baseUrl}/checkout/tag-info?session_id=${fakeSessionId}&test=1`;
+    const meta = {
+      deliveryMethod: body.deliveryMethod,
+      deliveryEmail: body.deliveryEmail || "",
+      deliverySlot: body.deliverySlot || "",
+      deliveryScheduledAt: body.deliveryScheduledAt || "",
+      deliveryAddress: body.deliveryAddress || "",
+      deliveryPhone: body.deliveryPhone || "",
+      productChoice: body.productChoice,
+      amount: String(amount),
+    };
+    const order = {
+      id: randomUUID(),
+      serviceId: "checkout",
+      serviceTitle: body.productChoice === "tag_only" ? "Temporary Tag" : "Tag + Insurance",
+      firstName: "Pending",
+      lastName: "",
+      phone: body.deliveryPhone || "",
+      address: body.deliveryAddress || "",
+      deliveryAddress: body.deliveryAddress || "",
+      vin: "",
+      carMakeModel: "",
+      color: "",
+      price: amount,
+      createdAt: new Date().toISOString(),
+      stripeSessionId: fakeSessionId,
+      paymentStatus: "paid",
+      deliveryMethod: meta.deliveryMethod,
+      deliveryEmail: meta.deliveryEmail,
+      deliverySlot: meta.deliverySlot,
+      deliveryScheduledAt: meta.deliveryScheduledAt,
+      deliveryPhone: meta.deliveryPhone,
+      productChoice: meta.productChoice,
+      telegramSent: false,
+      telegramRecipients: [],
+      telegramErrors: [],
+    };
+    await saveOrder(order);
+    return res.json({ url });
+  }
+
+  if (!stripe) return res.status(503).json({ error: "Stripe is not configured." });
   try {
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
       payment_method_types: ["card"],
-      line_items: [
-        {
-          price_data: {
-            currency: "usd",
-            unit_amount: Math.round(price * 100),
-            product_data: { name: body.serviceTitle, description: `Temporary tag - ${body.serviceTitle}` },
-          },
-          quantity: 1,
-        },
-      ],
-      success_url: `${baseUrl}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${baseUrl}/checkout/${body.serviceId}`,
-      customer_email: body.email || undefined,
+      line_items: [{ price_data: { currency: "usd", unit_amount: Math.round(amount * 100), product_data: { name: "Temporary Tag", description: "NJ temp tag" } }, quantity: 1 }],
+      success_url: `${baseUrl}/checkout/tag-info?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${baseUrl}/checkout/product`,
       metadata: {
-        serviceId: String(body.serviceId),
-        serviceTitle: String(body.serviceTitle).slice(0, 200),
-        firstName: String(body.firstName).slice(0, 100),
-        lastName: String(body.lastName).slice(0, 100),
-        phone: String(body.phone).slice(0, 50),
-        address: String(body.address).slice(0, 200),
-        deliveryAddress: String(body.deliveryAddress).slice(0, 200),
-        vin: String(body.vin).slice(0, 20),
-        carMakeModel: String(body.carMakeModel).slice(0, 100),
-        color: String(body.color).slice(0, 30),
+        deliveryMethod: String(body.deliveryMethod || "email").slice(0, 20),
+        deliveryEmail: String(body.deliveryEmail || "").slice(0, 100),
+        deliverySlot: String(body.deliverySlot || "").slice(0, 20),
+        deliveryScheduledAt: String(body.deliveryScheduledAt || "").slice(0, 50),
+        deliveryAddress: String(body.deliveryAddress || "").slice(0, 200),
+        deliveryPhone: String(body.deliveryPhone || "").slice(0, 50),
+        productChoice: String(body.productChoice || "tag_only").slice(0, 30),
+        amount: String(amount),
       },
     });
     res.json({ url: session.url });
@@ -307,53 +538,191 @@ app.post("/api/checkout/create-session", async (req, res) => {
   }
 });
 
-// Verify Stripe payment and create order (server-side verification - never trust client)
+// Verify Stripe payment and create order (server-side verification)
 app.get("/api/checkout/verify", async (req, res) => {
-  if (!stripe) return res.status(503).json({ error: "Stripe is not configured." });
   const sessionId = req.query.session_id;
+  const isTest = req.query.test === "1";
   if (!sessionId || typeof sessionId !== "string") return res.status(400).json({ error: "Missing session_id" });
+
+  if (isTest && sessionId.startsWith("test_")) {
+    const existing = await findOrderByStripeSessionId(sessionId);
+    if (existing) return res.json(useSupabase() ? orderRowToApi(existing) : existing);
+    return res.status(404).json({ error: "Test order not found" });
+  }
+
+  if (!stripe) return res.status(503).json({ error: "Stripe is not configured." });
   try {
-    const session = await stripe.checkout.sessions.retrieve(sessionId, { expand: ["payment_intent"] });
-    if (session.payment_status !== "paid") {
-      return res.status(400).json({ error: "Payment not completed", paymentStatus: session.payment_status });
-    }
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
+    if (session.payment_status !== "paid") return res.status(400).json({ error: "Payment not completed", paymentStatus: session.payment_status });
+
     const meta = session.metadata || {};
     const existing = await findOrderByStripeSessionId(sessionId);
-    if (existing) {
-      return res.json(useSupabase() ? orderRowToApi(existing) : existing);
-    }
+    if (existing) return res.json(useSupabase() ? orderRowToApi(existing) : existing);
+
     const order = {
       id: randomUUID(),
-      serviceId: meta.serviceId || "unknown",
-      serviceTitle: meta.serviceTitle || "Temporary Tag",
-      firstName: meta.firstName || "",
-      lastName: meta.lastName || "",
-      phone: meta.phone || "",
-      address: meta.address || "",
+      serviceId: "checkout",
+      serviceTitle: meta.productChoice === "insurance_monthly" ? "Tag + Insurance (Monthly)" : meta.productChoice === "insurance_yearly" ? "Tag + Insurance (Yearly)" : "Temporary Tag",
+      firstName: "Pending",
+      lastName: "",
+      phone: meta.deliveryPhone || "",
+      address: meta.deliveryAddress || "",
       deliveryAddress: meta.deliveryAddress || "",
-      vin: meta.vin || "",
-      carMakeModel: meta.carMakeModel || "",
-      color: meta.color || "",
+      vin: "",
+      carMakeModel: "",
+      color: "",
       price: (session.amount_total || 0) / 100,
       createdAt: new Date().toISOString(),
       stripeSessionId: sessionId,
       paymentStatus: "paid",
+      deliveryMethod: meta.deliveryMethod,
+      deliveryEmail: meta.deliveryEmail,
+      deliverySlot: meta.deliverySlot,
+      deliveryScheduledAt: meta.deliveryScheduledAt,
+      deliveryPhone: meta.deliveryPhone,
+      productChoice: meta.productChoice,
       telegramSent: false,
       telegramRecipients: [],
       telegramErrors: [],
     };
     await appendActivity("dataIn", { type: "order", orderId: order.id, serviceTitle: order.serviceTitle, price: order.price, stripeSessionId: sessionId });
     await appendActivity("payments", { type: "order", orderId: order.id, amount: order.price, status: "paid", stripeSessionId: sessionId });
-    const telegramResults = await sendToTelegram(formatOrderMessage(order));
-    order.telegramSent = telegramResults.every((r) => r.ok);
-    order.telegramRecipients = telegramResults.filter((r) => r.ok).map((r) => r.chatId);
-    order.telegramErrors = telegramResults.filter((r) => !r.ok).map((r) => ({ chatId: r.chatId, error: r.error }));
     await saveOrder(order);
     res.json(order);
   } catch (e) {
     console.error("Stripe verify error:", e);
     res.status(500).json({ error: e.message || "Failed to verify payment" });
   }
+});
+
+// Submit tag info after payment
+app.patch("/api/orders/:id/tag-info", async (req, res) => {
+  const { id } = req.params;
+  const body = req.body;
+  try {
+    const order = await findOrderById(id);
+    if (!order) return res.status(404).json({ error: "Order not found" });
+    const o = useSupabase() ? orderRowToApi(order) : order;
+    if (o.paymentStatus !== "paid") return res.status(400).json({ error: "Order not paid" });
+
+    const vehicleInfo = body.vehicleInfo || (body.year && body.make && body.model && body.color
+      ? `${body.year} ${body.make} ${body.model}, ${body.color}` : body.vehicleInfo);
+    const carMakeModel = body.year && body.make && body.model
+      ? `${body.year} ${body.make} ${body.model}` : (body.vehicleInfo?.split(",")[0] || "");
+
+    await updateOrder(id, {
+      firstName: body.firstName,
+      lastName: body.lastName,
+      phone: body.phone,
+      address: body.address,
+      vin: body.vin,
+      year: body.year,
+      make: body.make,
+      model: body.model,
+      vehicleInfo,
+      carMakeModel,
+      insuranceCompany: body.insuranceCompany,
+      policyNumber: body.policyNumber,
+      notes: body.notes,
+    });
+
+    const updated = await findOrderById(id);
+    const full = useSupabase() ? { ...orderRowToApi(updated), ...body, vehicleInfo, carMakeModel } : { ...updated, ...body, vehicleInfo, carMakeModel };
+    const telegramResults = await sendToTelegram(formatOrderMessage(full));
+    if (useSupabase()) {
+      await supabase.from("orders").update({
+        telegram_sent: telegramResults.every((r) => r.ok),
+        telegram_recipients: JSON.stringify(telegramResults.filter((r) => r.ok).map((r) => r.chatId)),
+        telegram_errors: JSON.stringify(telegramResults.filter((r) => !r.ok).map((r) => ({ chatId: r.chatId, error: r.error }))),
+      }).eq("id", id);
+    } else {
+      const orders = loadJson(ORDERS_FILE, []);
+      const idx = orders.findIndex((o) => o.id === id);
+      if (idx >= 0) {
+        orders[idx].telegramSent = telegramResults.every((r) => r.ok);
+        orders[idx].telegramRecipients = telegramResults.filter((r) => r.ok).map((r) => r.chatId);
+        orders[idx].telegramErrors = telegramResults.filter((r) => !r.ok).map((r) => ({ chatId: r.chatId, error: r.error }));
+        Object.assign(orders[idx], { firstName: body.firstName, lastName: body.lastName, phone: body.phone, address: body.address, vin: body.vin, year: body.year, make: body.make, model: body.model, vehicleInfo, carMakeModel, insuranceCompany: body.insuranceCompany, policyNumber: body.policyNumber, notes: body.notes });
+        saveJson(ORDERS_FILE, orders);
+      }
+    }
+    const final = await findOrderById(id);
+    res.json(useSupabase() ? orderRowToApi(final) : final);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Upload order documents (after tag info)
+async function uploadDocToStorage(orderId, type, buffer, ext) {
+  if (useSupabase() && supabase) {
+    const path = `${orderId}/${type}${ext}`;
+    const { data, error } = await supabase.storage.from("order-documents").upload(path, buffer, {
+      contentType: ext === ".pdf" ? "application/pdf" : "image/jpeg",
+      upsert: true,
+    });
+    if (error) throw error;
+    const { data: urlData } = supabase.storage.from("order-documents").getPublicUrl(path);
+    return urlData?.publicUrl || null;
+  }
+  const fname = `${orderId}_${type}${ext}`;
+  const filePath = join(DOCS_DIR, fname);
+  writeFileSync(filePath, buffer);
+  return `${APP_URL.replace(/\/$/, "")}/api/orders/${orderId}/documents/${type}`;
+}
+
+app.post("/api/orders/:id/documents", upload.fields([
+  { name: "driversLicense", maxCount: 1 },
+  { name: "insuranceCard", maxCount: 1 },
+  { name: "vinPhoto", maxCount: 1 },
+]), async (req, res) => {
+  const { id } = req.params;
+  const files = req.files || {};
+  try {
+    const order = await findOrderById(id);
+    if (!order) return res.status(404).json({ error: "Order not found" });
+    const o = useSupabase() ? orderRowToApi(order) : order;
+    if (o.paymentStatus !== "paid") return res.status(400).json({ error: "Order not paid" });
+
+    const updates = {};
+    if (files.driversLicense?.[0]) {
+      const buf = files.driversLicense[0].buffer;
+      const ext = (files.driversLicense[0].originalname || "").toLowerCase().endsWith(".pdf") ? ".pdf" : ".jpg";
+      updates.docDriversLicense = await uploadDocToStorage(id, "drivers-license", buf, ext);
+    }
+    if (files.insuranceCard?.[0]) {
+      const buf = files.insuranceCard[0].buffer;
+      const ext = (files.insuranceCard[0].originalname || "").toLowerCase().endsWith(".pdf") ? ".pdf" : ".jpg";
+      updates.docInsuranceCard = await uploadDocToStorage(id, "insurance-card", buf, ext);
+    }
+    if (files.vinPhoto?.[0]) {
+      const buf = files.vinPhoto[0].buffer;
+      updates.docVinPhoto = await uploadDocToStorage(id, "vin-photo", buf, ".jpg");
+    }
+    if (Object.keys(updates).length > 0) {
+      await updateOrder(id, updates);
+      const updated = await findOrderById(id);
+      const full = useSupabase() ? orderRowToApi(updated) : updated;
+      Object.assign(full, updates);
+      await sendDocImagesToTelegram(full);
+    }
+    const final = await findOrderById(id);
+    res.json(useSupabase() ? orderRowToApi(final) : final);
+  } catch (e) {
+    console.error("Documents upload error:", e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get("/api/orders/:id/documents/:type", (req, res) => {
+  const { id, type } = req.params;
+  if (!["drivers-license", "insurance-card", "vin-photo"].includes(type)) return res.status(404).end();
+  const base = `${id}_${type}`;
+  for (const ext of [".jpg", ".jpeg", ".png", ".pdf"]) {
+    const p = join(DOCS_DIR, base + ext);
+    if (existsSync(p)) return res.sendFile(p);
+  }
+  res.status(404).end();
 });
 
 app.post("/api/auth/login", (req, res) => {
@@ -406,6 +775,35 @@ app.delete("/api/admin/services/:id", authMiddleware, async (req, res) => {
     await deleteServiceById(req.params.id);
     await appendActivity("dataOut", { type: "service_delete", serviceId: req.params.id });
     res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get("/api/admin/settings", authMiddleware, async (req, res) => {
+  try {
+    const [s, services] = await Promise.all([loadSettings(), loadServices()]);
+    const firstService = services[0];
+    const tagPrice = firstService ? (parseFloat(firstService.price) || 150) : 150;
+    res.json({ tagPrice, insuranceMonthlyPrice: s.insurance_monthly_price, insuranceYearlyPrice: s.insurance_yearly_price, overnightFedexFee: s.overnight_fedex_fee ?? 50, testMode: s.test_mode });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.patch("/api/admin/settings", authMiddleware, async (req, res) => {
+  const body = req.body;
+  try {
+    const updates = {};
+    if (body.insuranceMonthlyPrice != null) updates.insurance_monthly_price = parseFloat(body.insuranceMonthlyPrice);
+    if (body.insuranceYearlyPrice != null) updates.insurance_yearly_price = parseFloat(body.insuranceYearlyPrice);
+    if (body.overnightFedexFee != null) updates.overnight_fedex_fee = parseFloat(body.overnightFedexFee);
+    if (body.testMode != null) updates.test_mode = !!body.testMode;
+    await saveSettings(updates);
+    const [s, services] = await Promise.all([loadSettings(), loadServices()]);
+    const firstService = services[0];
+    const tagPrice = firstService ? (parseFloat(firstService.price) || 150) : 150;
+    res.json({ tagPrice, insuranceMonthlyPrice: s.insurance_monthly_price, insuranceYearlyPrice: s.insurance_yearly_price, overnightFedexFee: s.overnight_fedex_fee ?? 50, testMode: s.test_mode });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

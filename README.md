@@ -1,4 +1,4 @@
-# Speedy Tags — Temporary Car Tags
+# TriStateTags — Temporary Car Tags
 
 Full-stack e-commerce for temporary vehicle tags. Admin panel, Telegram notifications, Supabase or file storage.
 
@@ -25,14 +25,14 @@ Full-stack e-commerce for temporary vehicle tags. Admin panel, Telegram notifica
    - Add env vars in Render dashboard:
      - `ADMIN_PASSWORD` — your admin password
      - `STRIPE_SECRET_KEY` — from [Stripe Dashboard](https://dashboard.stripe.com/apikeys)
-     - `APP_URL` — your public URL (e.g. `https://speedy-tags-xxx.onrender.com` or Vercel URL)
+     - `APP_URL` — your public URL (e.g. `https://tristatetags-xxx.onrender.com` or Vercel URL)
      - `TELEGRAM_BOT_TOKEN` — from @BotFather
      - `TELEGRAM_CHAT_IDS` — comma-separated (e.g. `-1001234567890`)
      - `SUPABASE_URL`
      - `SUPABASE_SERVICE_ROLE_KEY`
    - Deploy
 
-4. **Result:** One **Web Service** at `https://speedy-tags-xxx.onrender.com` — serves both frontend and API. (Not a background service.)
+4. **Result:** One **Web Service** at `https://tristatetags-xxx.onrender.com` — serves both frontend and API. (Not a background service.)
 
 **If deployment hangs:** Health check must pass. Ensure Supabase tables exist (step 2) or leave SUPABASE_URL/KEY empty to use file storage.
 
@@ -43,7 +43,7 @@ Full-stack e-commerce for temporary vehicle tags. Admin panel, Telegram notifica
 If you want the frontend on Vercel and backend on Render:
 
 1. **Deploy backend on Render first** — it must be live and healthy
-2. In Vercel: Import repo → **Settings → Environment Variables** → add `VITE_API_URL` = `https://speedy-tags-xxx.onrender.com` (no trailing slash)
+2. In Vercel: Import repo → **Settings → Environment Variables** → add `VITE_API_URL` = `https://tristatetags-xxx.onrender.com` (no trailing slash)
 3. Redeploy Vercel so the build picks up the var. API calls from the frontend will go to Render.
 
 ---

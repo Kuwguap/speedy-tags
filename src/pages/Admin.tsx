@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import {
   Car,
@@ -23,6 +24,7 @@ import {
   LogOut,
   CheckCircle2,
   XCircle,
+  Settings as SettingsIcon,
 } from "lucide-react";
 import AdminLogin from "./AdminLogin";
 
@@ -31,12 +33,20 @@ export default function Admin() {
   const { toast } = useToast();
   const [authChecked, setAuthChecked] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [view, setView] = useState<"services" | "orders" | "analytics">("analytics");
+  const [view, setView] = useState<"services" | "orders" | "analytics" | "settings">("analytics");
   const [services, setServices] = useState<ServiceRecord[]>([]);
   const [orders, setOrders] = useState<OrderRecord[]>([]);
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [form, setForm] = useState({ title: "", description: "", price: "", image: "" });
   const [loading, setLoading] = useState(false);
+  const [settings, setSettings] = useState<{
+    tagPrice: number;
+    insuranceMonthlyPrice: number;
+    insuranceYearlyPrice: number;
+    overnightFedexFee: number;
+    testMode: boolean;
+  } | null>(null);
+  const [settingsSaving, setSettingsSaving] = useState(false);
 
   const token = typeof window !== "undefined" ? localStorage.getItem("admin_token") : null;
 
@@ -45,14 +55,16 @@ export default function Admin() {
     if (!t) return;
     setLoading(true);
     try {
-      const [svc, ord, st] = await Promise.all([
+      const [svc, ord, st, sett] = await Promise.all([
         api.getServicesAdmin(),
         api.getOrders(),
         api.getStats(),
+        api.getSettings(),
       ]);
       setServices(svc);
       setOrders(ord);
       setStats(st);
+      setSettings(sett);
       setIsAuthenticated(true);
     } catch (err) {
       if (err instanceof Error && (err.message.includes("401") || err.message.includes("Unauthorized"))) {
@@ -119,10 +131,30 @@ export default function Admin() {
     reader.readAsDataURL(file);
   };
 
+  const handleSaveSettings = async () => {
+    if (!settings) return;
+    setSettingsSaving(true);
+    try {
+      const updated = await api.updateSettings({
+        insuranceMonthlyPrice: settings.insuranceMonthlyPrice,
+        insuranceYearlyPrice: settings.insuranceYearlyPrice,
+        overnightFedexFee: settings.overnightFedexFee ?? 50,
+        testMode: settings.testMode,
+      });
+      setSettings(updated);
+      toast({ title: "Settings saved!" });
+    } catch {
+      toast({ title: "Failed to save settings", variant: "destructive" });
+    } finally {
+      setSettingsSaving(false);
+    }
+  };
+
   const navItems = [
     { key: "analytics" as const, label: "Analytics", icon: BarChart3 },
     { key: "orders" as const, label: "Orders", icon: ShoppingCart },
     { key: "services" as const, label: "Services", icon: LayoutGrid },
+    { key: "settings" as const, label: "Settings", icon: SettingsIcon },
   ];
 
   if (!authChecked) {
@@ -153,7 +185,7 @@ export default function Admin() {
             <div className="h-8 w-8 flex items-center justify-center rounded-lg bg-sidebar-primary">
               <Car className="h-4 w-4 text-sidebar-primary-foreground" />
             </div>
-            <span className="font-display text-lg font-bold text-sidebar-primary-foreground">Speedy Tags</span>
+            <span className="font-display text-lg font-bold text-sidebar-primary-foreground">TriStateTags</span>
           </Link>
         </div>
         <nav className="flex-1 p-3 space-y-1">
@@ -384,6 +416,70 @@ export default function Admin() {
                 </div>
               ))}
             </div>
+          </div>
+        )}
+
+        {view === "settings" && (
+          <div className="max-w-2xl space-y-6">
+            <h1 className="font-display text-2xl font-bold text-foreground">Settings</h1>
+            <Card className="shadow-card border-border/50">
+              <CardHeader>
+                <CardTitle className="text-lg flex items-center gap-2"><SettingsIcon className="h-4 w-4" /> Checkout & Pricing</CardTitle>
+                <p className="text-sm text-muted-foreground">Tag price comes from the first service. Configure insurance options and test mode.</p>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                {settings && (
+                  <>
+                    <p className="text-sm text-muted-foreground">Tag price: ${settings.tagPrice.toFixed(2)} (from first service in Services)</p>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div>
+                        <Label>Insurance Monthly ($/month)</Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={settings.insuranceMonthlyPrice}
+                          onChange={(e) => setSettings((s) => s ? { ...s, insuranceMonthlyPrice: parseFloat(e.target.value) || 0 } : null)}
+                        />
+                      </div>
+                      <div>
+                        <Label>Insurance Yearly ($/year)</Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={settings.insuranceYearlyPrice}
+                          onChange={(e) => setSettings((s) => s ? { ...s, insuranceYearlyPrice: parseFloat(e.target.value) || 0 } : null)}
+                        />
+                      </div>
+                      <div>
+                        <Label>Overnight FedEx Fee ($)</Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={settings.overnightFedexFee ?? 50}
+                          onChange={(e) => setSettings((s) => s ? { ...s, overnightFedexFee: parseFloat(e.target.value) || 0 } : null)}
+                        />
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between p-4 rounded-lg bg-muted/50 border border-border/50">
+                      <div>
+                        <Label className="text-base">Test Mode</Label>
+                        <p className="text-sm text-muted-foreground">Skip real Stripe payment and simulate checkout flow</p>
+                      </div>
+                      <Switch
+                        checked={settings.testMode}
+                        onCheckedChange={(checked) => setSettings((s) => s ? { ...s, testMode: checked } : null)}
+                      />
+                    </div>
+                    <Button onClick={handleSaveSettings} disabled={settingsSaving}>
+                      {settingsSaving ? "Saving..." : "Save Settings"}
+                    </Button>
+                  </>
+                )}
+              </CardContent>
+            </Card>
           </div>
         )}
 
