@@ -74,6 +74,7 @@ export interface OrderRecord {
   phone: string;
   address: string;
   deliveryAddress: string;
+  deliveryMethod?: string;
   vin: string;
   carMakeModel: string;
   color: string;

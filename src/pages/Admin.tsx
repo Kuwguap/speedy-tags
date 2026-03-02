@@ -453,7 +453,7 @@ export default function Admin() {
                         />
                       </div>
                       <div>
-                        <Label>Overnight FedEx Fee ($)</Label>
+                        <Label>FedEx Delivery Fee ($)</Label>
                         <Input
                           type="number"
                           step="0.01"
@@ -491,12 +491,13 @@ export default function Admin() {
             ) : (
               <Card className="shadow-card border-border/50 overflow-hidden">
                 <div className="overflow-x-auto">
-                  <Table>
+                    <Table>
                     <TableHeader>
                       <TableRow>
                         <TableHead>Date</TableHead>
                         <TableHead>Name</TableHead>
                         <TableHead>Service</TableHead>
+                        <TableHead>Delivery</TableHead>
                         <TableHead>VIN</TableHead>
                         <TableHead>Vehicle</TableHead>
                         <TableHead>Color</TableHead>
@@ -511,6 +512,7 @@ export default function Admin() {
                           <TableCell className="text-sm">{new Date(o.createdAt).toLocaleDateString()}</TableCell>
                           <TableCell className="font-medium">{o.firstName} {o.lastName}</TableCell>
                           <TableCell>{o.serviceTitle}</TableCell>
+                          <TableCell>{o.deliveryMethod === "overnight_fedex" ? "FedEx Delivery" : o.deliveryMethod === "driver" ? "Driver" : (o.deliveryMethod === "email" ? "Email" : o.deliveryMethod || "—")}</TableCell>
                           <TableCell className="font-mono text-xs">{o.vin}</TableCell>
                           <TableCell>{o.carMakeModel}</TableCell>
                           <TableCell>{o.color}</TableCell>

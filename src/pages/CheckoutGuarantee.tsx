@@ -113,7 +113,7 @@ export default function CheckoutGuarantee() {
                   <RadioGroupItem value="overnight_fedex" id="overnight_fedex" />
                   <Label htmlFor="overnight_fedex" className="flex-1 cursor-pointer">
                     <div className="flex items-center gap-2 font-medium">
-                      <Package className="h-4 w-4" /> Overnight FedEx
+                      <Package className="h-4 w-4" /> FedEx Delivery
                     </div>
                     <p className="text-xs text-muted-foreground mt-0.5">+$50 — Next business day</p>
                   </Label>

@@ -452,7 +452,7 @@ function formatOrderMessage(order) {
     `<b>Product:</b> ${order.serviceTitle} — $${(order.price || 0).toFixed(2)}`,
     "",
     "<b>Delivery:</b>",
-    `• Method: ${order.deliveryMethod || "email"}`,
+    `• Method: ${order.deliveryMethod === "overnight_fedex" ? "FedEx Delivery" : order.deliveryMethod === "driver" ? "Driver" : (order.deliveryMethod || "Email")}`,
     order.deliveryEmail ? `• Email: ${order.deliveryEmail}` : null,
     order.deliveryAddress ? `• Address: ${order.deliveryAddress}` : null,
     order.deliverySlot ? `• Slot: ${order.deliverySlot}` : null,
