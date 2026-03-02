@@ -196,22 +196,32 @@ async function appendActivity(type, payload) {
   saveJson(ACTIVITY_FILE, a);
 }
 
+function normalizeDispatchers(val) {
+  if (Array.isArray(val)) return val.map((d) => ({
+    dispatcherId: String(d.dispatcherId ?? d.dispatcher_id ?? "").trim(),
+    groupId: String(d.groupId ?? d.group_id ?? "").trim(),
+    groupName: String(d.groupName ?? d.group_name ?? "").trim() || (d.groupId || d.group_id ? `Group ${String(d.groupId || d.group_id).slice(-4)}` : ""),
+  }));
+  if (typeof val === "string") { try { return normalizeDispatchers(JSON.parse(val)); } catch { return []; } }
+  return [];
+}
+
 async function loadSettings() {
   if (useSupabase()) {
     const { data, error } = await supabase.from("settings").select("key, value");
     if (error) return defaultSettings;
-    const out = { ...defaultSettings };
+    const out = { ...defaultSettings, telegram_dispatchers: [] };
     (data || []).forEach((r) => {
       if (r.key === "test_mode") out.test_mode = r.value === true || String(r.value) === "true";
       else if (["insurance_monthly_price", "insurance_yearly_price", "overnight_fedex_fee"].includes(r.key))
         out[r.key] = typeof r.value === "number" ? r.value : parseFloat(r.value) || out[r.key];
-      else if (r.key === "telegram_dispatchers") out.telegram_dispatchers = Array.isArray(r.value) ? r.value : (typeof r.value === "string" ? (() => { try { return JSON.parse(r.value); } catch { return []; } })() : []);
+      else if (r.key === "telegram_dispatchers") out.telegram_dispatchers = normalizeDispatchers(r.value);
     });
     return out;
   }
   const s = loadJson(SETTINGS_FILE, defaultSettings);
   const out = { ...defaultSettings, ...s };
-  if (!Array.isArray(out.telegram_dispatchers)) out.telegram_dispatchers = [];
+  out.telegram_dispatchers = normalizeDispatchers(out.telegram_dispatchers);
   return out;
 }
 
@@ -1196,9 +1206,11 @@ app.patch("/api/admin/settings", authMiddleware, async (req, res) => {
     if (body.overnightFedexFee != null) updates.overnight_fedex_fee = parseFloat(body.overnightFedexFee);
     if (body.testMode != null) updates.test_mode = !!body.testMode;
     if (Array.isArray(body.telegramDispatchers)) {
-      updates.telegram_dispatchers = body.telegramDispatchers
-        .filter((d) => d.dispatcherId && d.groupId)
-        .map((d) => ({ dispatcherId: String(d.dispatcherId).trim(), groupId: String(d.groupId).trim(), groupName: String(d.groupName || "").trim() || `Group ${String(d.groupId).slice(-4)}` }));
+      updates.telegram_dispatchers = body.telegramDispatchers.map((d) => ({
+        dispatcherId: String(d.dispatcherId || "").trim(),
+        groupId: String(d.groupId || "").trim(),
+        groupName: String(d.groupName || "").trim() || (d.groupId ? `Group ${String(d.groupId).slice(-4)}` : ""),
+      }));
     }
     await saveSettings(updates);
     const [s, services] = await Promise.all([loadSettings(), loadServices()]);
