@@ -6,7 +6,6 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { CheckoutProvider } from "@/context/CheckoutContext";
 import Index from "./pages/Index";
 import CheckoutGuarantee from "./pages/CheckoutGuarantee";
-import CheckoutDelivery from "./pages/CheckoutDelivery";
 import CheckoutProduct from "./pages/CheckoutProduct";
 import CheckoutTagInfo from "./pages/CheckoutTagInfo";
 import CheckoutDocuments from "./pages/CheckoutDocuments";
@@ -28,7 +27,6 @@ const App = () => (
           <Routes>
             <Route path="/" element={<Index />} />
             <Route path="/checkout" element={<CheckoutGuarantee />} />
-            <Route path="/checkout/delivery" element={<CheckoutDelivery />} />
             <Route path="/checkout/product" element={<CheckoutProduct />} />
             <Route path="/checkout/tag-info" element={<CheckoutTagInfo />} />
             <Route path="/checkout/documents" element={<CheckoutDocuments />} />

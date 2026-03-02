@@ -85,7 +85,7 @@ export default function CheckoutProduct() {
       <Header />
       <div className="container max-w-xl py-12">
         <button
-          onClick={() => navigate("/checkout/delivery")}
+          onClick={() => navigate("/checkout")}
           className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-8 transition-colors"
         >
           <ArrowLeft className="h-4 w-4" /> Back
