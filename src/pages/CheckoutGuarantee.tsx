@@ -239,7 +239,7 @@ export default function CheckoutGuarantee() {
             )}
 
             <Button onClick={handleContinue} className="w-full" size="lg">
-              Continue to Product Selection
+              {state.deliveryMethod === "email" ? "Email My Tag" : state.deliveryMethod === "driver" ? "Deliver My Tag" : "Ship My Tag"}
             </Button>
           </CardContent>
         </Card>

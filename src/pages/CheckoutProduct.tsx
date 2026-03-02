@@ -142,6 +142,31 @@ export default function CheckoutProduct() {
               )}
             </RadioGroup>
 
+            {state.deliveryMethod === "overnight_fedex" && (
+              <div className="pt-4 space-y-1.5 text-sm">
+                <div className="flex justify-between text-muted-foreground">
+                  <span>Tag</span>
+                  <span>${config.tagPrice.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between text-muted-foreground">
+                  <span>FedEx Delivery</span>
+                  <span>+${(config.overnightFedexFee ?? 50).toFixed(2)}</span>
+                </div>
+                {(state.productChoice === "insurance_monthly" && showMonthly) && (
+                  <div className="flex justify-between text-muted-foreground">
+                    <span>Insurance (monthly)</span>
+                    <span>+${config.insuranceMonthlyPrice.toFixed(2)}</span>
+                  </div>
+                )}
+                {(state.productChoice === "insurance_yearly" && showYearly) && (
+                  <div className="flex justify-between text-muted-foreground">
+                    <span>Insurance (yearly)</span>
+                    <span>+${config.insuranceYearlyPrice.toFixed(2)}</span>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="pt-4 border-t border-border flex items-center justify-between">
               <span className="font-semibold">Total</span>
               <span className="text-xl font-bold text-primary">${getTotal().toFixed(2)}</span>
