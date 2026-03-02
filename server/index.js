@@ -460,8 +460,10 @@ function formatOrderMessage(order) {
   const vehicle = (order.year && order.make && order.model)
     ? `${order.year} ${order.make} ${order.model}` + (order.color ? `, ${order.color}` : "")
     : order.vehicleInfo;
+  const source = process.env.BOLDY_SOURCE || "tristatetags";
   const lines = [
     "<b>🆕 New Order</b>",
+    `<b>Source:</b> ${source}`,
     "",
     `<b>Order ID:</b> ${order.id}`,
     `<b>Product:</b> ${order.serviceTitle} — $${(order.price || 0).toFixed(2)}`,
