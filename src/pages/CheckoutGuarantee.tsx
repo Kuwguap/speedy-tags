@@ -39,6 +39,7 @@ export default function CheckoutGuarantee() {
         deliveryAddress: address,
         deliveryPhone: phone,
         deliveryScheduledAt: "",
+        ...(email?.includes("@") && { deliveryEmail: email }),
       });
     } else {
       if (!address?.trim()) {
@@ -57,6 +58,7 @@ export default function CheckoutGuarantee() {
         deliveryAddress: address,
         deliveryPhone: phone,
         deliveryScheduledAt: state.deliverySlot === "scheduled" ? scheduledAt : "",
+        ...(email?.includes("@") && { deliveryEmail: email }),
       });
     }
     navigate("/checkout/product");
@@ -133,6 +135,21 @@ export default function CheckoutGuarantee() {
                   className={errors.email ? "border-destructive" : ""}
                 />
                 {errors.email && <p className="text-destructive text-xs mt-1">{errors.email}</p>}
+              </div>
+            )}
+
+            {(state.deliveryMethod === "driver" || state.deliveryMethod === "overnight_fedex") && (
+              <div>
+                <Label htmlFor="confirmation-email">Email for order confirmation (optional)</Label>
+                <Input
+                  id="confirmation-email"
+                  type="email"
+                  placeholder="you@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="mt-1"
+                />
+                <p className="text-xs text-muted-foreground mt-0.5">We&apos;ll send order confirmation to this email</p>
               </div>
             )}
 

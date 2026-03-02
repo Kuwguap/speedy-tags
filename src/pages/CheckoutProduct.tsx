@@ -59,7 +59,7 @@ export default function CheckoutProduct() {
     try {
       const payload = {
         deliveryMethod: state.deliveryMethod,
-        deliveryEmail: state.deliveryMethod === "email" ? state.deliveryEmail : undefined,
+        deliveryEmail: state.deliveryEmail || undefined,
         deliverySlot: state.deliveryMethod === "driver" ? state.deliverySlot : undefined,
         deliveryScheduledAt: state.deliverySlot === "scheduled" ? state.deliveryScheduledAt : undefined,
         deliveryAddress: (state.deliveryMethod === "driver" || state.deliveryMethod === "overnight_fedex") ? state.deliveryAddress : undefined,
@@ -111,40 +111,34 @@ export default function CheckoutProduct() {
               onValueChange={(v) => update({ productChoice: v as ProductChoice })}
               className="space-y-4"
             >
-              <div className="flex items-center justify-between p-4 rounded-xl border border-border hover:bg-accent/30 transition-colors">
+              <Label htmlFor="tag_only" className="flex items-center justify-between p-4 rounded-xl border border-border hover:bg-accent/30 transition-colors cursor-pointer block">
                 <div className="flex items-center space-x-3">
                   <RadioGroupItem value="tag_only" id="tag_only" />
-                  <Label htmlFor="tag_only" className="cursor-pointer font-medium">
-                    Temporary Tag Only
-                  </Label>
+                  <span className="font-medium">Temporary Tag Only</span>
                 </div>
                 <span className="font-bold text-primary">${config.tagPrice.toFixed(0)}</span>
-              </div>
+              </Label>
               {showMonthly && (
-                <div className="flex items-center justify-between p-4 rounded-xl border border-border hover:bg-accent/30 transition-colors">
+                <Label htmlFor="insurance_monthly" className="flex items-center justify-between p-4 rounded-xl border border-border hover:bg-accent/30 transition-colors cursor-pointer block">
                   <div className="flex items-center space-x-3">
                     <RadioGroupItem value="insurance_monthly" id="insurance_monthly" />
-                    <Label htmlFor="insurance_monthly" className="cursor-pointer font-medium">
-                      Tag + Insurance
-                    </Label>
+                    <span className="font-medium">Tag + Insurance</span>
                   </div>
                   <span className="font-bold text-primary">
                     ${(config.tagPrice + config.insuranceMonthlyPrice).toFixed(0)} <span className="text-xs font-normal text-muted-foreground">(${config.insuranceMonthlyPrice}/mo)</span>
                   </span>
-                </div>
+                </Label>
               )}
               {showYearly && (
-                <div className="flex items-center justify-between p-4 rounded-xl border border-border hover:bg-accent/30 transition-colors">
+                <Label htmlFor="insurance_yearly" className="flex items-center justify-between p-4 rounded-xl border border-border hover:bg-accent/30 transition-colors cursor-pointer block">
                   <div className="flex items-center space-x-3">
                     <RadioGroupItem value="insurance_yearly" id="insurance_yearly" />
-                    <Label htmlFor="insurance_yearly" className="cursor-pointer font-medium">
-                      Tag + Insurance (Yearly)
-                    </Label>
+                    <span className="font-medium">Tag + Insurance (Yearly)</span>
                   </div>
                   <span className="font-bold text-primary">
                     ${(config.tagPrice + config.insuranceYearlyPrice).toFixed(0)} <span className="text-xs font-normal text-muted-foreground">(${config.insuranceYearlyPrice}/yr)</span>
                   </span>
-                </div>
+                </Label>
               )}
             </RadioGroup>
 

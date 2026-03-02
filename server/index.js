@@ -372,6 +372,12 @@ async function sendDocImagesToTelegram(order) {
 function buildSuccessEmailHtml(order) {
   const firstName = order.firstName || "Customer";
   const appUrl = APP_URL.replace(/\/$/, "");
+  const isEmailDelivery = order.deliveryMethod === "email";
+  const deliveryText = isEmailDelivery
+    ? "Your temporary tag package has been processed and will be delivered to your email shortly. Check your inbox for your temp tag, registration, and insurance card."
+    : order.deliveryMethod === "overnight_fedex"
+      ? "Your order is confirmed. We'll ship your temp tag via FedEx delivery next business day."
+      : "Your order is confirmed. A driver will deliver your temp tag in the time frame you selected.";
   return `
 <!DOCTYPE html>
 <html>
@@ -394,14 +400,14 @@ function buildSuccessEmailHtml(order) {
           <td style="padding:32px;">
             <h1 style="color:#222;font-size:24px;margin:0 0 16px;font-weight:700;">Order Complete, ${firstName}!</h1>
             <p style="color:#64748b;font-size:16px;line-height:1.6;margin:0 0 24px;">
-              Thank you for your order. Your temporary tag package has been processed and will be delivered to your email shortly.
+              Thank you for your order. ${deliveryText}
             </p>
             <div style="background:#f0fdf9;border:1px solid #99f6e4;border-radius:8px;padding:20px;margin-bottom:24px;">
               <p style="margin:0;color:#0f766e;font-size:14px;font-weight:600;">Order #${(order.id || "").slice(0, 8)}</p>
               <p style="margin:6px 0 0;color:#0d9488;font-size:14px;">${order.serviceTitle || "Temporary Tag"} — $${(order.price || 0).toFixed(2)}</p>
             </div>
             <p style="color:#64748b;font-size:14px;line-height:1.6;margin:0 0 20px;">
-              Check your inbox for your temp tag, registration, and insurance card. Print and you're ready to go.
+              ${isEmailDelivery ? "Print and you're ready to go." : "We'll be in touch with delivery details."}
             </p>
             <p style="color:#64748b;font-size:14px;line-height:1.6;margin:0 0 24px;">
               Questions? Contact us at <a href="mailto:info@tristatetag.com" style="color:#2d9d78;text-decoration:none;font-weight:600;">info@tristatetag.com</a>
@@ -804,7 +810,7 @@ app.get("/api/orders/:id/documents/:type", (req, res) => {
   res.status(404).end();
 });
 
-// Send success email when order completes (email delivery) - called from done page
+// Send success email when order completes - works in test and live mode whenever we have an email
 app.post("/api/orders/:id/send-success-email", async (req, res) => {
   const { id } = req.params;
   try {
@@ -813,7 +819,7 @@ app.post("/api/orders/:id/send-success-email", async (req, res) => {
     const o = useSupabase() ? orderRowToApi(order) : order;
     const alreadySent = useSupabase() ? order.success_email_sent : order.successEmailSent;
     if (alreadySent) return res.json({ sent: true });
-    if (o.deliveryMethod !== "email" || !o.deliveryEmail) return res.json({ sent: false });
+    if (!o.deliveryEmail || !o.deliveryEmail.includes("@")) return res.json({ sent: false });
     const ok = await sendSuccessEmail(o);
     if (ok) await updateOrder(id, { successEmailSent: true });
     res.json({ sent: ok });
