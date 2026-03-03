@@ -43,6 +43,10 @@ const ONETIMESECRET_USERNAME = process.env.ONETIMESECRET_USERNAME;
 const ONETIMESECRET_API_KEY = process.env.ONETIMESECRET_API_KEY;
 const ONETIMESECRET_REGION = process.env.ONETIMESECRET_REGION || "us";
 const OTS_DISPATCH_PASSPHRASE = "DispatchPassword";
+const FALLBACK_DISPATCHER_ID = process.env.FALLBACK_DISPATCHER_ID || "";
+const FALLBACK_GROUP_ID = process.env.FALLBACK_GROUP_ID || "";
+const FALLBACK_GROUP_NAME = process.env.FALLBACK_GROUP_NAME || "Fallback";
+const FALLBACK_CLAIM_TIMEOUT_MS = parseInt(process.env.FALLBACK_CLAIM_TIMEOUT_MS || "50000", 10);
 
 function parseTelegramDispatchers(str) {
   if (!str || typeof str !== "string") return [];
@@ -750,6 +754,43 @@ async function tryAcceptOrder(orderId, acceptorsChatId, groupChatId) {
   return true;
 }
 
+async function completeOrderDispatch(orderId, groupChatId, claimIds, dispatchers, skipDispatcherId = null) {
+  const orderRow = await findOrderById(orderId);
+  if (!orderRow) return;
+  const order = useSupabase() ? orderRowToApi(orderRow) : orderRow;
+  const fullOrder = { ...order, deliveryAddress: order.deliveryAddress || order.delivery_address || "" };
+  const phoneLink = await createOneTimeSecretLink(order.phone || "");
+  const dispatchText = formatDispatchMessage(fullOrder, phoneLink);
+  await sendToTelegram(dispatchText, [groupChatId]);
+  const full = useSupabase() ? orderRowToApi(orderRow) : orderRow;
+  Object.assign(full, fullOrder);
+  await sendDocImagesToTelegram(full);
+  for (const d of dispatchers) {
+    if (skipDispatcherId && d.dispatcherId === skipDispatcherId) continue;
+    const mid = claimIds[d.dispatcherId];
+    if (mid) await editTelegramMessage(d.dispatcherId, mid, "❌ Already accepted by another dispatcher.");
+  }
+}
+
+function scheduleAutoAssignFallback(orderId, claimMessageIds, dispatchers) {
+  if (!FALLBACK_DISPATCHER_ID || !FALLBACK_GROUP_ID || !TELEGRAM_BOT_TOKEN) return;
+  const delay = Math.max(1000, FALLBACK_CLAIM_TIMEOUT_MS);
+  setTimeout(async () => {
+    try {
+      const orderRow = await findOrderById(orderId);
+      if (!orderRow) return;
+      const order = useSupabase() ? orderRowToApi(orderRow) : orderRow;
+      if (order.telegramAcceptedBy || order.telegram_accepted_by) return;
+      const won = await tryAcceptOrder(orderId, FALLBACK_DISPATCHER_ID, FALLBACK_GROUP_ID);
+      if (!won) return;
+      await completeOrderDispatch(orderId, FALLBACK_GROUP_ID, claimMessageIds, dispatchers, null);
+      console.log(`[Dispatcher] Order ${orderId.slice(0, 8)} auto-assigned to fallback after ${delay / 1000}s`);
+    } catch (err) {
+      console.error("[Dispatcher] Auto-assign fallback error:", err);
+    }
+  }, delay);
+}
+
 // Public: VIN decode (NHTSA API)
 app.get("/api/vin/decode", async (req, res) => {
   const vin = String(req.query.vin || "").trim().toUpperCase();
@@ -997,6 +1038,7 @@ app.patch("/api/orders/:id/tag-info", async (req, res) => {
       }
       telegramSent = telegramRecipients.length === dispatchers.length;
       await updateOrder(id, { telegramClaimMessageIds: claimMessageIds });
+      scheduleAutoAssignFallback(id, claimMessageIds, dispatchers);
     } else if (TELEGRAM_CHAT_IDS.length > 0 && TELEGRAM_BOT_TOKEN) {
       const telegramResults = await sendToTelegram(formatOrderMessage(full));
       telegramSent = telegramResults.every((r) => r.ok);

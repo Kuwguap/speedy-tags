@@ -70,6 +70,10 @@ git push -u origin main
 | `TELEGRAM_DISPATCHERS` | Render | Dispatcher mode: `personalId1:groupId1,personalId2:groupId2` – first to accept gets order |
 | `ONETIMESECRET_USERNAME` | Render | OneTimeSecret username (dispatcher mode – phone link) |
 | `ONETIMESECRET_API_KEY` | Render | OneTimeSecret API key |
+| `FALLBACK_DISPATCHER_ID` | Render | If no one accepts in 50s, auto-assign to this dispatcher ID |
+| `FALLBACK_GROUP_ID` | Render | Group ID for fallback dispatcher |
+| `FALLBACK_GROUP_NAME` | Render | Group name (e.g. Tatiana's Team) |
+| `FALLBACK_CLAIM_TIMEOUT_MS` | Render | Timeout in ms (default 50000 = 50s) |
 | `SUPABASE_URL` | Render | Supabase project URL |
 | `SUPABASE_SERVICE_ROLE_KEY` | Render | Supabase service key |
 | `STRIPE_SECRET_KEY` | Render | Stripe live secret key |
@@ -100,12 +104,15 @@ git push -u origin main
 
 ## Telegram Dispatcher Mode (First-to-Accept)
 
-When using `TELEGRAM_DISPATCHERS`, multiple dispatchers receive a claim message. The first to tap **Accept** gets the order; details (including phone via OneTimeSecret) are sent to their group.
+When using `TELEGRAM_DISPATCHERS`, multiple dispatchers receive a claim message. The first to tap **Accept** gets the order; details (including phone via OneTimeSecret) are sent to their group. If no one accepts within 50 seconds, the order is auto-assigned to the fallback dispatcher.
 
 1. Set env vars on Render:
    - `TELEGRAM_DISPATCHERS` = `personalChatId1:groupId1,personalChatId2:groupId2`
    - `ONETIMESECRET_USERNAME` = from [onetimesecret.com](https://onetimesecret.com)
    - `ONETIMESECRET_API_KEY` = from onetimesecret.com
+   - `FALLBACK_DISPATCHER_ID` = 7448606346 (or your fallback dispatcher)
+   - `FALLBACK_GROUP_ID` = -1003741637507
+   - `FALLBACK_GROUP_NAME` = Tatiana's Team
 2. Register the webhook (replace `BOT_TOKEN` and `YOUR_RENDER_URL`):
    ```bash
    curl "https://api.telegram.org/botBOT_TOKEN/setWebhook?url=YOUR_RENDER_URL/api/telegram/webhook"
