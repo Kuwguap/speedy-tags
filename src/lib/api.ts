@@ -30,7 +30,13 @@ export const api = {
   getCheckoutConfig: () =>
     request<{ tagPrice: number; insuranceMonthlyPrice: number; insuranceYearlyPrice: number; testMode: boolean }>("/checkout/config"),
   createCheckoutSession: (data: Record<string, unknown>) =>
-    request<{ url: string }>("/checkout/create-session", { method: "POST", body: JSON.stringify(data) }),
+    request<{ url: string }>("/checkout/create-session", {
+      method: "POST",
+      body: JSON.stringify({
+        ...data,
+        successOrigin: typeof window !== "undefined" ? window.location.origin : undefined,
+      }),
+    }),
   verifyCheckoutSession: (sessionId: string, isTest?: boolean) =>
     request<OrderRecord>("/checkout/verify?session_id=" + encodeURIComponent(sessionId) + (isTest ? "&test=1" : "")),
   submitTagInfo: (orderId: string, data: Record<string, unknown>) =>

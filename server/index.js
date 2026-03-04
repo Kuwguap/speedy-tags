@@ -29,8 +29,11 @@ const defaultSettings = {
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 const JWT_SECRET = process.env.JWT_SECRET || "tristatetags-secret-change-in-production";
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
-// Comma-separated = first URL used as fallback (e.g. tristatetag.com,tristatetags.com,speedytags.vercel.app)
-const APP_URL = (process.env.APP_URL || process.env.VITE_APP_URL || "http://localhost:8080").split(",")[0].trim();
+const APP_URLS = (process.env.APP_URL || process.env.VITE_APP_URL || "http://localhost:8080")
+  .split(",")
+  .map((u) => u.trim().replace(/\/$/, ""))
+  .filter(Boolean);
+const APP_URL = APP_URLS[0] || "http://localhost:8080";
 const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_IDS = (process.env.TELEGRAM_CHAT_IDS || "")
@@ -846,8 +849,12 @@ app.post("/api/checkout/create-session", async (req, res) => {
   const body = req.body;
   const amount = parseFloat(body.amount);
   if (isNaN(amount) || amount <= 0) return res.status(400).json({ error: "Invalid amount" });
-  // Use request origin for redirect (so localhost works when APP_URL points to prod)
-  let baseUrl = req.get("origin");
+  let baseUrl = "";
+  if (body.successOrigin && typeof body.successOrigin === "string") {
+    const origin = body.successOrigin.trim().replace(/\/$/, "");
+    if (APP_URLS.some((allowed) => origin === allowed || origin === allowed.replace(/\/$/, ""))) baseUrl = origin;
+  }
+  if (!baseUrl) baseUrl = req.get("origin") || "";
   if (!baseUrl) {
     try {
       const ref = req.get("referer");
