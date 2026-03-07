@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Header } from "@/components/Header";
+import { AddressAutocomplete } from "@/components/AddressAutocomplete";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -188,12 +189,13 @@ export default function CheckoutGuarantee() {
                 )}
                 <div>
                   <Label htmlFor="delivery-address">Delivery Address</Label>
-                  <Input
+                  <p className="text-xs text-muted-foreground mb-1">Start typing to see suggestions, or enter manually</p>
+                  <AddressAutocomplete
                     id="delivery-address"
-                    placeholder="123 Main St, City, State"
                     value={address}
-                    onChange={(e) => setAddress(e.target.value)}
-                    className={errors.address ? "border-destructive" : ""}
+                    onChange={setAddress}
+                    placeholder="123 Main St, City, State ZIP"
+                    error={!!errors.address}
                   />
                   {errors.address && <p className="text-destructive text-xs mt-1">{errors.address}</p>}
                 </div>
@@ -214,13 +216,14 @@ export default function CheckoutGuarantee() {
             {state.deliveryMethod === "overnight_fedex" && (
               <div className="space-y-3">
                 <div>
-                  <Label htmlFor="delivery-address">Shipping Address</Label>
-                  <Input
-                    id="delivery-address"
-                    placeholder="123 Main St, City, State ZIP"
+                  <Label htmlFor="delivery-address-fedex">Shipping Address</Label>
+                  <p className="text-xs text-muted-foreground mb-1">Start typing to see suggestions, or enter manually</p>
+                  <AddressAutocomplete
+                    id="delivery-address-fedex"
                     value={address}
-                    onChange={(e) => setAddress(e.target.value)}
-                    className={errors.address ? "border-destructive" : ""}
+                    onChange={setAddress}
+                    placeholder="123 Main St, City, State ZIP"
+                    error={!!errors.address}
                   />
                   {errors.address && <p className="text-destructive text-xs mt-1">{errors.address}</p>}
                 </div>
