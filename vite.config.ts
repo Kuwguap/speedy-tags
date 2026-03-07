@@ -3,18 +3,9 @@ import react from "@vitejs/plugin-react-swc";
 import path from "path";
 
 // https://vitejs.dev/config/
-export default defineConfig(async ({ mode }) => {
-  const plugins = [react()];
-  if (mode === "development") {
-    try {
-      const { componentTagger } = await import("lovable-tagger");
-      plugins.push(componentTagger());
-    } catch {
-      // lovable-tagger optional, skip if not installed
-    }
-  }
-  return {
-    server: {
+export default defineConfig({
+  plugins: [react()],
+  server: {
     host: "::",
     port: 8080,
     hmr: {
@@ -26,12 +17,10 @@ export default defineConfig(async ({ mode }) => {
         changeOrigin: true,
       },
     },
-    },
-    plugins,
-    resolve: {
+  },
+  resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
     },
-    },
-  };
+  },
 });
