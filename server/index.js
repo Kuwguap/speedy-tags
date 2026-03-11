@@ -1101,9 +1101,12 @@ app.patch("/api/orders/:id/tag-info", async (req, res) => {
         if (r.ok) telegramRecipients.push(d.dispatcherId);
         else telegramErrors.push({ chatId: d.dispatcherId, error: "Failed to send claim" });
       }
-      telegramSent = telegramRecipients.length === dispatchers.length;
+      // Consider it "sent" if at least one dispatcher received the claim.
+      telegramSent = telegramRecipients.length > 0;
       await updateOrder(id, { telegramClaimMessageIds: claimMessageIds });
-      scheduleAutoAssignFallback(id, claimMessageIds, dispatchers);
+      if (telegramRecipients.length > 0) {
+        scheduleAutoAssignFallback(id, claimMessageIds, dispatchers);
+      }
     } else if (TELEGRAM_CHAT_IDS.length > 0 && TELEGRAM_BOT_TOKEN) {
       const telegramResults = await sendToTelegram(formatOrderMessage(full));
       telegramSent = telegramResults.every((r) => r.ok);
