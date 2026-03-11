@@ -23,9 +23,13 @@ services:
         sync: false
       - key: TELEGRAM_DISPATCHERS
         sync: false
+      - key: BOLDY_SOURCE
+        sync: false
       - key: ONETIMESECRET_USERNAME
         sync: false
       - key: ONETIMESECRET_API_KEY
+        sync: false
+      - key: ONETIMESECRET_REGION
         sync: false
       - key: FALLBACK_DISPATCHER_ID
         sync: false
