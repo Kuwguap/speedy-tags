@@ -444,7 +444,15 @@ function formatDispatchMessage(order, phoneLink) {
   const deliveryStreet = deliv.street || o.deliveryAddress || "—";
   const deliveryCityStateZip = deliv.cityStateZip || "—";
   const car = (o.year && o.make && o.model) ? `${o.year} ${o.make} ${o.model}` : (o.carMakeModel || o.vehicleInfo || "—");
+  const deliveryMethodLabel = o.deliveryMethod === "overnight_fedex"
+    ? "FedEx Delivery"
+    : o.deliveryMethod === "driver"
+      ? "Driver Delivery"
+      : "Email Delivery";
   const lines = [
+    "<b>Delivery method:</b> " + deliveryMethodLabel,
+    o.deliveryEmail ? "<b>Delivery email:</b> " + o.deliveryEmail : null,
+    "",
     "<b>Name:</b> " + name,
     "<b>Registration address:</b> " + (addressStreet || "—"),
     "<b>Registration city, state, ZIP:</b> " + (addressCityStateZip || "—"),
@@ -458,7 +466,7 @@ function formatDispatchMessage(order, phoneLink) {
     "<b>Extra info:</b> " + (o.notes || "—"),
   ];
   if (phoneLink) lines.push("", "<b>📞 Phone (one-time link):</b> " + phoneLink);
-  return lines.join("\n");
+  return lines.filter(Boolean).join("\n");
 }
 
 async function sendToTelegram(text, chatIds = TELEGRAM_CHAT_IDS) {
@@ -892,6 +900,9 @@ app.get("/api/checkout/config", async (req, res) => {
 // Stripe Checkout: create session and redirect to payment (or test URL if test mode)
 app.post("/api/checkout/create-session", async (req, res) => {
   const body = req.body;
+  if ((body.deliveryMethod === "email" || !body.deliveryMethod) && (!body.deliveryEmail || !String(body.deliveryEmail).includes("@"))) {
+    return res.status(400).json({ error: "Delivery email is required for email delivery." });
+  }
   const amount = parseFloat(body.amount);
   if (isNaN(amount) || amount <= 0) return res.status(400).json({ error: "Invalid amount" });
   let baseUrl = "";
