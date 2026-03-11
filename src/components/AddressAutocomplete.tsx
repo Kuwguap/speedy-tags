@@ -2,6 +2,8 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
+declare const google: any;
+
 interface AddressAutocompleteProps {
   value: string;
   onChange: (value: string) => void;
@@ -11,28 +13,32 @@ interface AddressAutocompleteProps {
   error?: boolean;
 }
 
-const DEBOUNCE_MS = 500;
-const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search";
+const DEBOUNCE_MS = 300;
 
-async function fetchAddressSuggestions(query: string): Promise<string[]> {
-  const q = query.trim();
-  if (q.length < 3) return [];
-  const params = new URLSearchParams({
-    format: "json",
-    addressdetails: "1",
-    limit: "5",
-    countrycodes: "us",
-    q,
+let placesScriptPromise: Promise<void> | null = null;
+
+function loadGooglePlacesScript(apiKey: string): Promise<void> {
+  if (typeof window === "undefined") return Promise.resolve();
+  if (placesScriptPromise) return placesScriptPromise;
+  if ((window as any).google?.maps?.places) return Promise.resolve();
+
+  placesScriptPromise = new Promise((resolve, reject) => {
+    const existing = document.querySelector<HTMLScriptElement>('script[data-google-places="1"]');
+    if (existing) {
+      existing.addEventListener("load", () => resolve());
+      existing.addEventListener("error", () => reject(new Error("Failed to load Google Places")));
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&libraries=places`;
+    script.async = true;
+    script.defer = true;
+    script.dataset.googlePlaces = "1";
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("Failed to load Google Places"));
+    document.head.appendChild(script);
   });
-  const res = await fetch(`${NOMINATIM_URL}?${params}`, {
-    headers: { "Accept-Language": "en", "User-Agent": "TriStateTags/1.0 (address-autocomplete)" },
-  });
-  if (!res.ok) return [];
-  const data = await res.json();
-  return (data as { display_name?: string }[])
-    .map((r) => r.display_name)
-    .filter(Boolean)
-    .slice(0, 5);
+  return placesScriptPromise;
 }
 
 export function AddressAutocomplete({
@@ -48,25 +54,66 @@ export function AddressAutocomplete({
   const [loading, setLoading] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const placesServiceRef = useRef<any | null>(null);
 
-  const search = useCallback(async (query: string) => {
-    if (query.trim().length < 3) {
-      setSuggestions([]);
-      setOpen(false);
-      return;
-    }
-    setLoading(true);
-    try {
-      const results = await fetchAddressSuggestions(query);
-      setSuggestions(results);
-      setOpen(results.length > 0);
-    } catch {
-      setSuggestions([]);
-      setOpen(false);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const apiKey = import.meta.env.VITE_GOOGLE_PLACES_API_KEY as string | undefined;
+  const hasApiKey = typeof apiKey === "string" && apiKey.trim().length > 0;
+
+  const ensureService = useCallback(async () => {
+    if (!hasApiKey) return null;
+    if (placesServiceRef.current) return placesServiceRef.current;
+    await loadGooglePlacesScript(apiKey!);
+    if (!(window as any).google?.maps?.places) return null;
+    placesServiceRef.current = new google.maps.places.AutocompleteService();
+    return placesServiceRef.current;
+  }, [apiKey, hasApiKey]);
+
+  const search = useCallback(
+    async (query: string) => {
+      const q = query.trim();
+      if (q.length < 3 || !hasApiKey) {
+        setSuggestions([]);
+        setOpen(false);
+        return;
+      }
+      setLoading(true);
+      try {
+        const service = await ensureService();
+        if (!service) {
+          setSuggestions([]);
+          setOpen(false);
+          return;
+        }
+        service.getPlacePredictions(
+          {
+            input: q,
+            types: ["address"],
+            componentRestrictions: { country: "us" },
+          },
+          (predictions: any[], status: string) => {
+            if (status !== google.maps.places.PlacesServiceStatus.OK || !predictions) {
+              setSuggestions([]);
+              setOpen(false);
+              setLoading(false);
+              return;
+            }
+            const list = predictions
+              .map((p) => p.description as string)
+              .filter(Boolean)
+              .slice(0, 5);
+            setSuggestions(list);
+            setOpen(list.length > 0);
+            setLoading(false);
+          },
+        );
+      } catch {
+        setSuggestions([]);
+        setOpen(false);
+        setLoading(false);
+      }
+    },
+    [ensureService, hasApiKey],
+  );
 
   useEffect(() => {
     return () => {
@@ -78,7 +125,7 @@ export function AddressAutocomplete({
     const v = e.target.value;
     onChange(v);
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    if (v.trim().length < 3) {
+    if (!hasApiKey || v.trim().length < 3) {
       setSuggestions([]);
       setOpen(false);
       return;
@@ -134,6 +181,11 @@ export function AddressAutocomplete({
             ))
           )}
         </ul>
+      )}
+      {!hasApiKey && (
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          (Admin note: set <code>VITE_GOOGLE_PLACES_API_KEY</code> for address suggestions)
+        </p>
       )}
     </div>
   );
