@@ -523,11 +523,13 @@ async function deleteTelegramMessage(chatId, messageId) {
 
 async function sendClaimMessageToDispatcher(dispatcherChatId, orderId, order) {
   if (!TELEGRAM_BOT_TOKEN) return { ok: false, messageId: null };
+  const deliveryEmail = (order?.deliveryEmail || order?.delivery_email || "").trim();
   const summary = [
     "🆕 <b>New Order – Accept to Claim</b>",
     `Order #${(orderId || "").slice(0, 8)}`,
     `• ${(order?.firstName || "")} ${(order?.lastName || "")}`.trim() || "—",
     `• ${order?.vin || "—"} | ${order?.carMakeModel || order?.vehicleInfo || "—"}`,
+    deliveryEmail ? `• Email: ${deliveryEmail}` : null,
     "",
     "Tap <b>Accept</b> to receive full details in your group.",
   ].join("\n");
