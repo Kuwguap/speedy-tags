@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { Header } from "@/components/Header";
+import { AddressAutocomplete } from "@/components/AddressAutocomplete";
 import { api } from "@/lib/api";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -195,7 +196,14 @@ export default function CheckoutTagInfo() {
               </div>
               <div>
                 <Label htmlFor="address">Address</Label>
-                <Input id="address" value={form.address} onChange={(e) => update("address", e.target.value)} placeholder="123 Main St, City, State" className={errors.address ? "border-destructive" : ""} />
+                <p className="text-xs text-muted-foreground mb-1">Start typing to see suggestions, or enter manually</p>
+                <AddressAutocomplete
+                  id="address"
+                  value={form.address}
+                  onChange={(v) => update("address", v)}
+                  placeholder="123 Main St, City, State ZIP"
+                  error={!!errors.address}
+                />
                 {errors.address && <p className="text-destructive text-xs mt-1">{errors.address}</p>}
               </div>
 

@@ -46,10 +46,12 @@ const ONETIMESECRET_USERNAME = process.env.ONETIMESECRET_USERNAME;
 const ONETIMESECRET_API_KEY = process.env.ONETIMESECRET_API_KEY;
 const ONETIMESECRET_REGION = process.env.ONETIMESECRET_REGION || "us";
 const OTS_DISPATCH_PASSPHRASE = "DispatchPassword";
-const FALLBACK_DISPATCHER_ID = process.env.FALLBACK_DISPATCHER_ID || "";
-const FALLBACK_GROUP_ID = process.env.FALLBACK_GROUP_ID || "";
-const FALLBACK_GROUP_NAME = process.env.FALLBACK_GROUP_NAME || "Fallback";
-const FALLBACK_CLAIM_TIMEOUT_MS = parseInt(process.env.FALLBACK_CLAIM_TIMEOUT_MS || "50000", 10);
+// Fallback assignment: if nobody accepts in time, auto-assign to this chat/group
+// Defaults match requested values; can be overridden in Render env vars.
+const FALLBACK_DISPATCHER_ID = process.env.FALLBACK_DISPATCHER_ID || "-1003741637507";
+const FALLBACK_GROUP_ID = process.env.FALLBACK_GROUP_ID || "-1003741637507";
+const FALLBACK_GROUP_NAME = process.env.FALLBACK_GROUP_NAME || "Tatiana's Team";
+const FALLBACK_CLAIM_TIMEOUT_MS = parseInt(process.env.FALLBACK_CLAIM_TIMEOUT_MS || "60000", 10);
 
 function parseTelegramDispatchers(str) {
   if (!str || typeof str !== "string") return [];
@@ -66,11 +68,21 @@ async function loadDispatchers() {
   if (Array.isArray(fromSettings) && fromSettings.length > 0) {
     return fromSettings.filter((d) => d.dispatcherId && d.groupId);
   }
-  return TELEGRAM_DISPATCHERS_ENV.map((d) => ({
-    dispatcherId: d.dispatcherId,
-    groupId: d.groupId,
-    groupName: d.groupName || `Group ${d.groupId.slice(-4)}`,
-  }));
+  if (TELEGRAM_DISPATCHERS_ENV.length > 0) {
+    return TELEGRAM_DISPATCHERS_ENV.map((d) => ({
+      dispatcherId: d.dispatcherId,
+      groupId: d.groupId,
+      groupName: d.groupName || `Group ${d.groupId.slice(-4)}`,
+    }));
+  }
+  if (TELEGRAM_CHAT_IDS.length > 0) {
+    return TELEGRAM_CHAT_IDS.map((chatId) => ({
+      dispatcherId: chatId,
+      groupId: chatId,
+      groupName: `Chat ${String(chatId).slice(-6)}`,
+    }));
+  }
+  return [];
 }
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const resend = RESEND_API_KEY ? new Resend(RESEND_API_KEY) : null;
@@ -433,19 +445,19 @@ function formatDispatchMessage(order, phoneLink) {
   const deliveryCityStateZip = deliv.cityStateZip || "—";
   const car = (o.year && o.make && o.model) ? `${o.year} ${o.make} ${o.model}` : (o.carMakeModel || o.vehicleInfo || "—");
   const lines = [
-    name,
-    addressStreet || "—",
-    addressCityStateZip || "—",
-    deliveryStreet || "—",
-    deliveryCityStateZip || "—",
-    o.vin || "—",
-    car,
-    o.color || "—",
-    o.insuranceCompany || "—",
-    o.policyNumber || "—",
-    o.notes || "—",
+    "<b>Name:</b> " + name,
+    "<b>Registration address:</b> " + (addressStreet || "—"),
+    "<b>Registration city, state, ZIP:</b> " + (addressCityStateZip || "—"),
+    "<b>Delivery address:</b> " + (deliveryStreet || "—"),
+    "<b>Delivery city, state, ZIP:</b> " + (deliveryCityStateZip || "—"),
+    "<b>VIN:</b> " + (o.vin || "—"),
+    "<b>Car:</b> " + car,
+    "<b>Color:</b> " + (o.color || "—"),
+    "<b>Insurance company:</b> " + (o.insuranceCompany || "—"),
+    "<b>Insurance policy number:</b> " + (o.policyNumber || "—"),
+    "<b>Extra info:</b> " + (o.notes || "—"),
   ];
-  if (phoneLink) lines.push("", `📞 Phone (one-time link): ${phoneLink}`);
+  if (phoneLink) lines.push("", "<b>📞 Phone (one-time link):</b> " + phoneLink);
   return lines.join("\n");
 }
 
@@ -485,6 +497,22 @@ async function editTelegramMessage(chatId, messageId, text) {
   }
 }
 
+async function deleteTelegramMessage(chatId, messageId) {
+  if (!TELEGRAM_BOT_TOKEN) return false;
+  try {
+    const r = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/deleteMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, message_id: messageId }),
+    });
+    const json = await r.json();
+    return json.ok === true;
+  } catch (err) {
+    console.error("[Telegram] deleteMessage error:", err.message);
+    return false;
+  }
+}
+
 async function sendClaimMessageToDispatcher(dispatcherChatId, orderId, order) {
   if (!TELEGRAM_BOT_TOKEN) return { ok: false, messageId: null };
   const summary = [
@@ -499,7 +527,11 @@ async function sendClaimMessageToDispatcher(dispatcherChatId, orderId, order) {
     chat_id: dispatcherChatId,
     text: summary,
     parse_mode: "HTML",
-    reply_markup: { inline_keyboard: [[{ text: "✅ Accept", callback_data: `accept_${orderId}` }]] },
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: "✅ Accept", callback_data: `accept_${orderId}` }, { text: "❌ Decline", callback_data: `decline_${orderId}` }],
+      ],
+    },
   };
   try {
     const r = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
@@ -670,17 +702,23 @@ app.use(express.json({ limit: "5mb" }));
 // Health check (no DB/Telegram - always 200)
 app.get("/api/health", (req, res) => res.json({ ok: true }));
 
-// Telegram webhook (for dispatcher Accept button callbacks)
+// Telegram webhook (for dispatcher Accept/Decline button callbacks)
 app.post("/api/telegram/webhook", async (req, res) => {
   res.status(200).send("");
   const upd = req.body;
   const cq = upd?.callback_query;
-  if (!cq?.data?.startsWith("accept_")) return;
+  if (!cq?.data) return;
+  const fromMessageId = cq.message?.message_id;
+  const fromChatId = String(cq.message?.chat?.id || "");
+
+  if (cq.data.startsWith("decline_")) {
+    if (fromMessageId) await editTelegramMessage(fromChatId, fromMessageId, "❌ You declined this order.");
+    answerCallback(cq.id, "Declined");
+    return;
+  }
+  if (!cq.data.startsWith("accept_")) return;
   const orderId = cq.data.replace(/^accept_/, "").trim();
   if (!orderId) return;
-
-  const fromChatId = String(cq.message?.chat?.id || "");
-  const fromMessageId = cq.message?.message_id;
 
   try {
     const orderRow = await findOrderById(orderId);
@@ -694,13 +732,13 @@ app.post("/api/telegram/webhook", async (req, res) => {
 
     const alreadyAccepted = order.telegramAcceptedBy || order.telegram_accepted_by;
     if (alreadyAccepted) {
-      if (fromMessageId) await editTelegramMessage(fromChatId, fromMessageId, "❌ Already accepted by another dispatcher.");
+      if (fromMessageId) await editTelegramMessage(fromChatId, fromMessageId, "❌ Taken by another user.");
       return answerCallback(cq.id, "Already claimed");
     }
 
     const won = await tryAcceptOrder(orderId, fromChatId, dispatcher.groupId);
     if (!won) {
-      if (fromMessageId) await editTelegramMessage(fromChatId, fromMessageId, "❌ Already accepted by another dispatcher.");
+      if (fromMessageId) await editTelegramMessage(fromChatId, fromMessageId, "❌ Taken by another user.");
       return answerCallback(cq.id, "Already claimed");
     }
 
@@ -717,7 +755,7 @@ app.post("/api/telegram/webhook", async (req, res) => {
     for (const d of dispatchers) {
       if (d.dispatcherId === fromChatId) continue;
       const mid = claimIds[d.dispatcherId];
-      if (mid) await editTelegramMessage(d.dispatcherId, mid, "❌ Already accepted by another dispatcher.");
+      if (mid) await editTelegramMessage(d.dispatcherId, mid, "❌ Taken by another user.");
     }
 
     answerCallback(cq.id, "✅ Order claimed! Details sent to your group.");
@@ -771,7 +809,7 @@ async function completeOrderDispatch(orderId, groupChatId, claimIds, dispatchers
   for (const d of dispatchers) {
     if (skipDispatcherId && d.dispatcherId === skipDispatcherId) continue;
     const mid = claimIds[d.dispatcherId];
-    if (mid) await editTelegramMessage(d.dispatcherId, mid, "❌ Already accepted by another dispatcher.");
+    if (mid) await editTelegramMessage(d.dispatcherId, mid, "❌ Taken by another user.");
   }
 }
 
@@ -787,6 +825,13 @@ function scheduleAutoAssignFallback(orderId, claimMessageIds, dispatchers) {
       const won = await tryAcceptOrder(orderId, FALLBACK_DISPATCHER_ID, FALLBACK_GROUP_ID);
       if (!won) return;
       await completeOrderDispatch(orderId, FALLBACK_GROUP_ID, claimMessageIds, dispatchers, null);
+      // Remove claim messages from everyone else to prevent “stealing”
+      for (const d of dispatchers) {
+        const mid = claimMessageIds[d.dispatcherId];
+        if (!mid) continue;
+        const ok = await deleteTelegramMessage(d.dispatcherId, mid);
+        if (!ok) await editTelegramMessage(d.dispatcherId, mid, "❌ Taken by another user.");
+      }
       console.log(`[Dispatcher] Order ${orderId.slice(0, 8)} auto-assigned to fallback after ${delay / 1000}s`);
     } catch (err) {
       console.error("[Dispatcher] Auto-assign fallback error:", err);
@@ -1078,16 +1123,33 @@ app.patch("/api/orders/:id/tag-info", async (req, res) => {
   }
 });
 
+const ORDER_DOCUMENTS_BUCKET = "order-documents";
+
+async function ensureOrderDocumentsBucket() {
+  if (!useSupabase() || !supabase) return;
+  try {
+    const { data: buckets } = await supabase.storage.listBuckets();
+    const exists = (buckets || []).some((b) => b.name === ORDER_DOCUMENTS_BUCKET);
+    if (!exists) {
+      const { error } = await supabase.storage.createBucket(ORDER_DOCUMENTS_BUCKET, { public: true });
+      if (error && !String(error.message || "").toLowerCase().includes("already exists")) throw error;
+    }
+  } catch (err) {
+    console.warn("[Supabase] ensureOrderDocumentsBucket:", err.message);
+  }
+}
+
 // Upload order documents (after tag info)
 async function uploadDocToStorage(orderId, type, buffer, ext) {
   if (useSupabase() && supabase) {
+    await ensureOrderDocumentsBucket();
     const path = `${orderId}/${type}${ext}`;
-    const { data, error } = await supabase.storage.from("order-documents").upload(path, buffer, {
+    const { data, error } = await supabase.storage.from(ORDER_DOCUMENTS_BUCKET).upload(path, buffer, {
       contentType: ext === ".pdf" ? "application/pdf" : "image/jpeg",
       upsert: true,
     });
     if (error) throw error;
-    const { data: urlData } = supabase.storage.from("order-documents").getPublicUrl(path);
+    const { data: urlData } = supabase.storage.from(ORDER_DOCUMENTS_BUCKET).getPublicUrl(path);
     return urlData?.publicUrl || null;
   }
   const fname = `${orderId}_${type}${ext}`;
