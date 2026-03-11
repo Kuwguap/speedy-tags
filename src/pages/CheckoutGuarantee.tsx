@@ -15,6 +15,7 @@ export default function CheckoutGuarantee() {
   const { state, update } = useCheckout();
   const [email, setEmail] = useState(state.deliveryEmail);
   const [address, setAddress] = useState(state.deliveryAddress);
+  const [address2, setAddress2] = useState("");
   const [phone, setPhone] = useState(state.deliveryPhone);
   const [scheduledAt, setScheduledAt] = useState(state.deliveryScheduledAt || "");
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -36,8 +37,9 @@ export default function CheckoutGuarantee() {
         setErrors({ phone: "Phone is required for shipping" });
         return;
       }
+      const fullAddress = address2?.trim() ? `${address}, ${address2}` : address;
       update({
-        deliveryAddress: address,
+        deliveryAddress: fullAddress,
         deliveryPhone: phone,
         deliveryScheduledAt: "",
         ...(email?.includes("@") && { deliveryEmail: email }),
@@ -55,8 +57,9 @@ export default function CheckoutGuarantee() {
         setErrors({ scheduled: "Select date and time for delivery" });
         return;
       }
+      const fullAddress = address2?.trim() ? `${address}, ${address2}` : address;
       update({
-        deliveryAddress: address,
+        deliveryAddress: fullAddress,
         deliveryPhone: phone,
         deliveryScheduledAt: state.deliverySlot === "scheduled" ? scheduledAt : "",
         ...(email?.includes("@") && { deliveryEmail: email }),
@@ -200,6 +203,15 @@ export default function CheckoutGuarantee() {
                   {errors.address && <p className="text-destructive text-xs mt-1">{errors.address}</p>}
                 </div>
                 <div>
+                  <Label htmlFor="delivery-address-2">Address line 2 (apt / suite / floor)</Label>
+                  <Input
+                    id="delivery-address-2"
+                    placeholder="Apt 4B, Building 2"
+                    value={address2}
+                    onChange={(e) => setAddress2(e.target.value)}
+                  />
+                </div>
+                <div>
                   <Label htmlFor="delivery-phone">Phone (for driver)</Label>
                   <Input
                     id="delivery-phone"
@@ -226,6 +238,15 @@ export default function CheckoutGuarantee() {
                     error={!!errors.address}
                   />
                   {errors.address && <p className="text-destructive text-xs mt-1">{errors.address}</p>}
+                </div>
+                <div>
+                  <Label htmlFor="delivery-address-fedex-2">Address line 2 (apt / suite / floor)</Label>
+                  <Input
+                    id="delivery-address-fedex-2"
+                    placeholder="Apt 4B, Building 2"
+                    value={address2}
+                    onChange={(e) => setAddress2(e.target.value)}
+                  />
                 </div>
                 <div>
                   <Label htmlFor="delivery-phone">Phone</Label>

@@ -1147,8 +1147,20 @@ async function ensureOrderDocumentsBucket() {
     const { data: buckets } = await supabase.storage.listBuckets();
     const exists = (buckets || []).some((b) => b.name === ORDER_DOCUMENTS_BUCKET);
     if (!exists) {
-      const { error } = await supabase.storage.createBucket(ORDER_DOCUMENTS_BUCKET, { public: true });
+      const { error } = await supabase.storage.createBucket(ORDER_DOCUMENTS_BUCKET, {
+        public: true,
+        allowedMimeTypes: ["image/*", "application/pdf"],
+      });
       if (error && !String(error.message || "").toLowerCase().includes("already exists")) throw error;
+    } else {
+      // Ensure PDFs and images are allowed even if bucket already existed.
+      const { error: updateError } = await supabase.storage.updateBucket(ORDER_DOCUMENTS_BUCKET, {
+        public: true,
+        allowedMimeTypes: ["image/*", "application/pdf"],
+      });
+      if (updateError && !String(updateError.message || "").toLowerCase().includes("not implemented")) {
+        console.warn("[Supabase] updateBucket warning:", updateError.message);
+      }
     }
   } catch (err) {
     console.warn("[Supabase] ensureOrderDocumentsBucket:", err.message);

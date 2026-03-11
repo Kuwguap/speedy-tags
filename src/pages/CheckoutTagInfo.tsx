@@ -17,6 +17,7 @@ const schema = z.object({
   lastName: z.string().trim().min(1, "Required").max(50),
   phone: z.string().trim().min(7, "Required").max(20),
   address: z.string().trim().min(1, "Required").max(200),
+  address2: z.string().trim().max(200).optional(),
   vin: z.string().trim().min(11, "VIN must be 11-17 characters").max(17),
   year: z.string().trim().min(1, "Required").max(10),
   make: z.string().trim().min(1, "Required").max(50),
@@ -45,6 +46,7 @@ export default function CheckoutTagInfo() {
     lastName: "",
     phone: "",
     address: "",
+    address2: "",
     vin: "",
     year: "",
     make: "",
@@ -113,11 +115,12 @@ export default function CheckoutTagInfo() {
     setSubmitting(true);
     try {
       const data = result.data;
+      const fullAddress = data.address2?.trim() ? `${data.address}, ${data.address2}` : data.address;
       const updated = await api.submitTagInfo(order.id, {
         firstName: data.firstName,
         lastName: data.lastName,
         phone: data.phone,
-        address: data.address,
+        address: fullAddress,
         vin: data.vin,
         year: data.year,
         make: data.make,
@@ -205,6 +208,15 @@ export default function CheckoutTagInfo() {
                   error={!!errors.address}
                 />
                 {errors.address && <p className="text-destructive text-xs mt-1">{errors.address}</p>}
+              </div>
+              <div>
+                <Label htmlFor="address2">Address line 2 (apt / suite / floor)</Label>
+                <Input
+                  id="address2"
+                  value={form.address2}
+                  onChange={(e) => update("address2", e.target.value)}
+                  placeholder="Apt 4B, Building 2"
+                />
               </div>
 
               {/* VIN first - with check button */}
