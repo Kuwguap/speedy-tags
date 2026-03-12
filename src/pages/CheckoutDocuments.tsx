@@ -121,7 +121,7 @@ export default function CheckoutDocuments() {
                 <input
                   ref={vinPhotoRef}
                   type="file"
-                  accept="image/*"
+                  accept="image/*,.pdf"
                   className="hidden"
                   onChange={(e) => setVinPhoto(e.target.files?.[0] ?? null)}
                 />

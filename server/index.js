@@ -742,13 +742,13 @@ app.post("/api/telegram/webhook", async (req, res) => {
 
     const alreadyAccepted = order.telegramAcceptedBy || order.telegram_accepted_by;
     if (alreadyAccepted) {
-      if (fromMessageId) await editTelegramMessage(fromChatId, fromMessageId, "❌ Taken by another user.");
+      if (fromMessageId) await editTelegramMessage(fromChatId, fromMessageId, "❌ This message was taken by another team.");
       return answerCallback(cq.id, "Already claimed");
     }
 
     const won = await tryAcceptOrder(orderId, fromChatId, dispatcher.groupId);
     if (!won) {
-      if (fromMessageId) await editTelegramMessage(fromChatId, fromMessageId, "❌ Taken by another user.");
+      if (fromMessageId) await editTelegramMessage(fromChatId, fromMessageId, "❌ This message was taken by another team.");
       return answerCallback(cq.id, "Already claimed");
     }
 
@@ -765,7 +765,7 @@ app.post("/api/telegram/webhook", async (req, res) => {
     for (const d of dispatchers) {
       if (d.dispatcherId === fromChatId) continue;
       const mid = claimIds[d.dispatcherId];
-      if (mid) await editTelegramMessage(d.dispatcherId, mid, "❌ Taken by another user.");
+      if (mid) await editTelegramMessage(d.dispatcherId, mid, "❌ This message was taken by another team.");
     }
 
     answerCallback(cq.id, "✅ Order claimed! Details sent to your group.");
@@ -819,7 +819,7 @@ async function completeOrderDispatch(orderId, groupChatId, claimIds, dispatchers
   for (const d of dispatchers) {
     if (skipDispatcherId && d.dispatcherId === skipDispatcherId) continue;
     const mid = claimIds[d.dispatcherId];
-    if (mid) await editTelegramMessage(d.dispatcherId, mid, "❌ Taken by another user.");
+    if (mid) await editTelegramMessage(d.dispatcherId, mid, "❌ This message was taken by another team.");
   }
 }
 
@@ -840,7 +840,7 @@ function scheduleAutoAssignFallback(orderId, claimMessageIds, dispatchers) {
         const mid = claimMessageIds[d.dispatcherId];
         if (!mid) continue;
         const ok = await deleteTelegramMessage(d.dispatcherId, mid);
-        if (!ok) await editTelegramMessage(d.dispatcherId, mid, "❌ Taken by another user.");
+        if (!ok) await editTelegramMessage(d.dispatcherId, mid, "❌ This message was taken by another team.");
       }
       console.log(`[Dispatcher] Order ${orderId.slice(0, 8)} auto-assigned to fallback after ${delay / 1000}s`);
     } catch (err) {
