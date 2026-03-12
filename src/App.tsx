@@ -17,6 +17,13 @@ import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
 
+const PaymentsRedirect = () => {
+  if (typeof window !== "undefined") {
+    window.location.replace("https://payable.at/tristatetags");
+  }
+  return null;
+};
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
@@ -32,6 +39,7 @@ const App = () => (
             <Route path="/checkout/documents" element={<CheckoutDocuments />} />
             <Route path="/checkout/done" element={<CheckoutDone />} />
             <Route path="/admin" element={<Admin />} />
+            <Route path="/payments" element={<PaymentsRedirect />} />
             <Route path="/terms" element={<Terms />} />
             <Route path="/privacy" element={<Privacy />} />
             <Route path="*" element={<NotFound />} />
