@@ -66,7 +66,19 @@ async function loadDispatchers() {
   const s = await loadSettings();
   const fromSettings = s.telegram_dispatchers;
   if (Array.isArray(fromSettings) && fromSettings.length > 0) {
-    return fromSettings.filter((d) => d.dispatcherId && d.groupId);
+    const normalized = fromSettings
+      .map((d) => ({
+        dispatcherId: String(d?.dispatcherId || "").trim(),
+        groupId: String(d?.groupId || "").trim(),
+        groupName: String(d?.groupName || "").trim(),
+      }))
+      .filter((d) => d.dispatcherId && d.groupId)
+      .map((d) => ({
+        dispatcherId: d.dispatcherId,
+        groupId: d.groupId,
+        groupName: d.groupName || `Group ${d.groupId.slice(-4)}`,
+      }));
+    if (normalized.length > 0) return normalized;
   }
   if (TELEGRAM_DISPATCHERS_ENV.length > 0) {
     return TELEGRAM_DISPATCHERS_ENV.map((d) => ({
