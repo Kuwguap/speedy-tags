@@ -487,11 +487,7 @@ function formatDispatchMessage(order, phoneLink) {
     "<b>Insurance policy number:</b> " + escapeTelegramHtml(o.policyNumber || "—"),
     "<b>Extra info:</b> " + escapeTelegramHtml(o.notes || "—"),
   ];
-  if (phoneLink) {
-    lines.push("", "<b>📞 Phone (one-time link):</b> " + escapeTelegramHtml(phoneLink));
-  } else if (o.phone) {
-    lines.push("", "<b>📞 Phone:</b> " + escapeTelegramHtml(o.phone));
-  }
+  if (phoneLink) lines.push("", "<b>📞 Phone (one-time link):</b> " + escapeTelegramHtml(phoneLink));
   return lines.filter(Boolean).join("\n");
 }
 
