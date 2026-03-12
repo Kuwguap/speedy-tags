@@ -24,6 +24,8 @@ const defaultSettings = {
   insurance_yearly_price: 900,
   test_mode: false,
   overnight_fedex_fee: 50,
+  // Fallback auto-assign timeout in ms (45s default)
+  fallback_claim_timeout_ms: 45000,
 };
 
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
@@ -245,7 +247,7 @@ async function loadSettings() {
     const out = { ...defaultSettings, telegram_dispatchers: [] };
     (data || []).forEach((r) => {
       if (r.key === "test_mode") out.test_mode = r.value === true || String(r.value) === "true";
-      else if (["insurance_monthly_price", "insurance_yearly_price", "overnight_fedex_fee"].includes(r.key))
+      else if (["insurance_monthly_price", "insurance_yearly_price", "overnight_fedex_fee", "fallback_claim_timeout_ms"].includes(r.key))
         out[r.key] = typeof r.value === "number" ? r.value : parseFloat(r.value) || out[r.key];
       else if (r.key === "telegram_dispatchers") out.telegram_dispatchers = normalizeDispatchers(r.value);
     });
@@ -415,16 +417,22 @@ function authMiddleware(req, res, next) {
 }
 
 async function createOneTimeSecretLink(secret) {
-  if (!ONETIMESECRET_USERNAME || !ONETIMESECRET_API_KEY || !secret) return null;
-  const region = ONETIMESECRET_REGION || "us";
+  const trimmed = secret ? String(secret).trim() : "";
+  if (!trimmed) return null;
+  if (!ONETIMESECRET_USERNAME || !ONETIMESECRET_API_KEY) {
+    console.warn("[OTS] Skipped: set ONETIMESECRET_USERNAME and ONETIMESECRET_API_KEY on Render for encrypted phone link.");
+    return null;
+  }
+  const region = (ONETIMESECRET_REGION || "us").toLowerCase();
   const auth = Buffer.from(`${ONETIMESECRET_USERNAME}:${ONETIMESECRET_API_KEY}`).toString("base64");
   try {
     const body = new URLSearchParams({
-      secret: String(secret).trim(),
+      secret: trimmed,
       ttl: "86400",
       passphrase: OTS_DISPATCH_PASSPHRASE,
     });
-    const r = await fetch(`https://${region}.onetimesecret.com/api/v1/share`, {
+    const apiUrl = `https://${region}.onetimesecret.com/api/v1/share`;
+    const r = await fetch(apiUrl, {
       method: "POST",
       headers: {
         Authorization: `Basic ${auth}`,
@@ -433,7 +441,11 @@ async function createOneTimeSecretLink(secret) {
       body: body.toString(),
     });
     const data = await r.json();
-    if (data.secret_key) return `https://${region}.onetimesecret.com/secret/${data.secret_key}`;
+    if (data.secret_key) {
+      // Use main domain for link so it works regardless of API region
+      const link = `https://onetimesecret.com/secret/${data.secret_key}`;
+      return link;
+    }
     console.warn("[OTS] Create failed:", data);
     return null;
   } catch (err) {
@@ -487,7 +499,7 @@ function formatDispatchMessage(order, phoneLink) {
     "<b>Insurance policy number:</b> " + escapeTelegramHtml(o.policyNumber || "—"),
     "<b>Extra info:</b> " + escapeTelegramHtml(o.notes || "—"),
   ];
-  if (phoneLink) lines.push("", "<b>📞 Phone (one-time link):</b> " + escapeTelegramHtml(phoneLink));
+  if (phoneLink) lines.push("", "🔗 <b>Encrypted Link:</b> " + escapeTelegramHtml(phoneLink));
   return lines.filter(Boolean).join("\n");
 }
 
@@ -855,9 +867,11 @@ async function completeOrderDispatch(orderId, groupChatId, claimIds, dispatchers
   }
 }
 
-function scheduleAutoAssignFallback(orderId, claimMessageIds, dispatchers) {
+async function scheduleAutoAssignFallback(orderId, claimMessageIds, dispatchers) {
   if (!FALLBACK_DISPATCHER_ID || !FALLBACK_GROUP_ID || !TELEGRAM_BOT_TOKEN) return;
-  const delay = Math.max(1000, FALLBACK_CLAIM_TIMEOUT_MS);
+  const s = await loadSettings();
+  const configuredMs = parseInt(String(s.fallback_claim_timeout_ms ?? FALLBACK_CLAIM_TIMEOUT_MS), 10);
+  const delay = Math.max(1000, isNaN(configuredMs) ? FALLBACK_CLAIM_TIMEOUT_MS : configuredMs);
   setTimeout(async () => {
     try {
       const orderRow = await findOrderById(orderId);
@@ -1380,6 +1394,7 @@ app.get("/api/admin/settings", authMiddleware, async (req, res) => {
     const firstService = services[0];
     const tagPrice = firstService ? (parseFloat(firstService.price) || 150) : 150;
     const telegramDispatchers = Array.isArray(s.telegram_dispatchers) ? s.telegram_dispatchers : [];
+    const fallbackMs = s.fallback_claim_timeout_ms ?? FALLBACK_CLAIM_TIMEOUT_MS;
     res.json({
       tagPrice,
       insuranceMonthlyPrice: s.insurance_monthly_price,
@@ -1387,6 +1402,7 @@ app.get("/api/admin/settings", authMiddleware, async (req, res) => {
       overnightFedexFee: s.overnight_fedex_fee ?? 50,
       testMode: s.test_mode,
       telegramDispatchers,
+      fallbackClaimTimeoutMs: fallbackMs,
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -1400,6 +1416,10 @@ app.patch("/api/admin/settings", authMiddleware, async (req, res) => {
     if (body.insuranceMonthlyPrice != null) updates.insurance_monthly_price = parseFloat(body.insuranceMonthlyPrice);
     if (body.insuranceYearlyPrice != null) updates.insurance_yearly_price = parseFloat(body.insuranceYearlyPrice);
     if (body.overnightFedexFee != null) updates.overnight_fedex_fee = parseFloat(body.overnightFedexFee);
+    if (body.fallbackClaimTimeoutMs != null) {
+      const v = parseInt(String(body.fallbackClaimTimeoutMs), 10);
+      if (!isNaN(v) && v > 0) updates.fallback_claim_timeout_ms = v;
+    }
     if (body.testMode != null) updates.test_mode = !!body.testMode;
     if (Array.isArray(body.telegramDispatchers)) {
       updates.telegram_dispatchers = body.telegramDispatchers.map((d) => ({
@@ -1413,6 +1433,7 @@ app.patch("/api/admin/settings", authMiddleware, async (req, res) => {
     const firstService = services[0];
     const tagPrice = firstService ? (parseFloat(firstService.price) || 150) : 150;
     const telegramDispatchers = Array.isArray(s.telegram_dispatchers) ? s.telegram_dispatchers : [];
+    const fallbackMs = s.fallback_claim_timeout_ms ?? FALLBACK_CLAIM_TIMEOUT_MS;
     res.json({
       tagPrice,
       insuranceMonthlyPrice: s.insurance_monthly_price,
@@ -1420,6 +1441,7 @@ app.patch("/api/admin/settings", authMiddleware, async (req, res) => {
       overnightFedexFee: s.overnight_fedex_fee ?? 50,
       testMode: s.test_mode,
       telegramDispatchers,
+      fallbackClaimTimeoutMs: fallbackMs,
     });
   } catch (e) {
     res.status(500).json({ error: e.message });

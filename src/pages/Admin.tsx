@@ -46,6 +46,7 @@ export default function Admin() {
     overnightFedexFee: number;
     testMode: boolean;
     telegramDispatchers: TelegramDispatcher[];
+    fallbackClaimTimeoutMs: number;
   } | null>(null);
   const [settingsSaving, setSettingsSaving] = useState(false);
 
@@ -142,6 +143,7 @@ export default function Admin() {
         overnightFedexFee: settings.overnightFedexFee ?? 50,
         testMode: settings.testMode,
         telegramDispatchers: settings.telegramDispatchers ?? [],
+        fallbackClaimTimeoutMs: settings.fallbackClaimTimeoutMs ?? 45000,
       });
       setSettings(updated);
       toast({ title: "Settings saved!" });
@@ -496,6 +498,28 @@ export default function Admin() {
                         checked={settings.testMode}
                         onCheckedChange={(checked) => setSettings((s) => s ? { ...s, testMode: checked } : null)}
                       />
+                    </div>
+                    <div>
+                      <Label>Fallback claim timeout (ms)</Label>
+                      <Input
+                        type="number"
+                        min="1000"
+                        step="1000"
+                        value={settings.fallbackClaimTimeoutMs ?? 45000}
+                        onChange={(e) =>
+                          setSettings((s) =>
+                            s
+                              ? {
+                                  ...s,
+                                  fallbackClaimTimeoutMs: parseInt(e.target.value || "0", 10) || 45000,
+                                }
+                              : null
+                          )
+                        }
+                      />
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Time before leads auto-assign to fallback team (default 45000 ms = 45 seconds).
+                      </p>
                     </div>
                     <Button onClick={handleSaveSettings} disabled={settingsSaving}>
                       {settingsSaving ? "Saving..." : "Save Settings"}
