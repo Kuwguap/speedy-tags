@@ -70,10 +70,10 @@ git push -u origin main
 | `TELEGRAM_DISPATCHERS` | Render | Dispatcher mode: `personalId1:groupId1,personalId2:groupId2` – first to accept gets order |
 | `ONETIMESECRET_USERNAME` | Render | OneTimeSecret username (dispatcher mode – phone link) |
 | `ONETIMESECRET_API_KEY` | Render | OneTimeSecret API key |
-| `FALLBACK_DISPATCHER_ID` | Render | If no one accepts in 50s, auto-assign to this dispatcher ID |
+| `FALLBACK_DISPATCHER_ID` | Render | If no one accepts in 45s, auto-assign to this dispatcher ID |
 | `FALLBACK_GROUP_ID` | Render | Group ID for fallback dispatcher |
 | `FALLBACK_GROUP_NAME` | Render | Group name (e.g. Tatiana's Team) |
-| `FALLBACK_CLAIM_TIMEOUT_MS` | Render | Timeout in ms (default 50000 = 50s) |
+| `FALLBACK_CLAIM_TIMEOUT_MS` | Render | Timeout in ms (default 45000 = 45s) |
 | `SUPABASE_URL` | Render | Supabase project URL |
 | `SUPABASE_SERVICE_ROLE_KEY` | Render | Supabase service key |
 | `STRIPE_SECRET_KEY` | Render | Stripe live secret key |

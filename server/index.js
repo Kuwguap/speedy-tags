@@ -51,7 +51,7 @@ const OTS_DISPATCH_PASSPHRASE = "DispatchPassword";
 const FALLBACK_DISPATCHER_ID = process.env.FALLBACK_DISPATCHER_ID || "-1003741637507";
 const FALLBACK_GROUP_ID = process.env.FALLBACK_GROUP_ID || "-1003741637507";
 const FALLBACK_GROUP_NAME = process.env.FALLBACK_GROUP_NAME || "Tatiana's Team";
-const FALLBACK_CLAIM_TIMEOUT_MS = parseInt(process.env.FALLBACK_CLAIM_TIMEOUT_MS || "60000", 10);
+const FALLBACK_CLAIM_TIMEOUT_MS = parseInt(process.env.FALLBACK_CLAIM_TIMEOUT_MS || "45000", 10);
 
 function parseTelegramDispatchers(str) {
   if (!str || typeof str !== "string") return [];
@@ -771,13 +771,13 @@ app.post("/api/telegram/webhook", async (req, res) => {
 
     const alreadyAccepted = order.telegramAcceptedBy || order.telegram_accepted_by;
     if (alreadyAccepted) {
-      if (fromMessageId) await editTelegramMessage(fromChatId, fromMessageId, "❌ This message was taken by another team.");
+      if (fromMessageId) await editTelegramMessage(fromChatId, fromMessageId, "❌ This tag was taken by another team.");
       return answerCallback(cq.id, "Already claimed");
     }
 
     const won = await tryAcceptOrder(orderId, fromChatId, acceptGroupId);
     if (!won) {
-      if (fromMessageId) await editTelegramMessage(fromChatId, fromMessageId, "❌ This message was taken by another team.");
+      if (fromMessageId) await editTelegramMessage(fromChatId, fromMessageId, "❌ This tag was taken by another team.");
       return answerCallback(cq.id, "Already claimed");
     }
 
@@ -794,7 +794,7 @@ app.post("/api/telegram/webhook", async (req, res) => {
     for (const [chatId, mid] of Object.entries(claimIds || {})) {
       if (!mid) continue;
       if (String(chatId) === String(fromChatId)) continue;
-      await editTelegramMessage(chatId, mid, "❌ This message was taken by another team.");
+      await editTelegramMessage(chatId, mid, "❌ This tag was taken by another team.");
     }
 
     answerCallback(cq.id, "✅ Order claimed! Details sent to your group.");
@@ -848,7 +848,7 @@ async function completeOrderDispatch(orderId, groupChatId, claimIds, dispatchers
   for (const [chatId, mid] of Object.entries(claimIds || {})) {
     if (!mid) continue;
     if (skipChatId && String(chatId) === String(skipChatId)) continue;
-    await editTelegramMessage(chatId, mid, "❌ This message was taken by another team.");
+    await editTelegramMessage(chatId, mid, "❌ This tag was taken by another team.");
   }
 }
 
@@ -868,7 +868,7 @@ function scheduleAutoAssignFallback(orderId, claimMessageIds, dispatchers) {
       for (const [chatId, mid] of Object.entries(claimMessageIds || {})) {
         if (!mid) continue;
         const ok = await deleteTelegramMessage(chatId, mid);
-        if (!ok) await editTelegramMessage(chatId, mid, "❌ This message was taken by another team.");
+        if (!ok) await editTelegramMessage(chatId, mid, "❌ This tag was taken by another team.");
       }
       console.log(`[Dispatcher] Order ${orderId.slice(0, 8)} auto-assigned to fallback after ${delay / 1000}s`);
     } catch (err) {
