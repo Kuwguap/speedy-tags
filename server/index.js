@@ -1112,6 +1112,7 @@ app.patch("/api/orders/:id/tag-info", async (req, res) => {
       year: body.year,
       make: body.make,
       model: body.model,
+      color: body.color,
       vehicleInfo,
       carMakeModel,
       insuranceCompany: body.insuranceCompany,
@@ -1172,7 +1173,22 @@ app.patch("/api/orders/:id/tag-info", async (req, res) => {
         orders[idx].telegramRecipients = telegramRecipients;
         orders[idx].telegramErrors = telegramErrors;
         orders[idx].telegramClaimMessageIds = claimMessageIds;
-        Object.assign(orders[idx], { firstName: body.firstName, lastName: body.lastName, phone: body.phone, address: body.address, vin: body.vin, year: body.year, make: body.make, model: body.model, vehicleInfo, carMakeModel, insuranceCompany: body.insuranceCompany, policyNumber: body.policyNumber, notes: body.notes });
+        Object.assign(orders[idx], {
+          firstName: body.firstName,
+          lastName: body.lastName,
+          phone: body.phone,
+          address: body.address,
+          vin: body.vin,
+          year: body.year,
+          make: body.make,
+          model: body.model,
+          color: body.color,
+          vehicleInfo,
+          carMakeModel,
+          insuranceCompany: body.insuranceCompany,
+          policyNumber: body.policyNumber,
+          notes: body.notes,
+        });
         saveJson(ORDERS_FILE, orders);
       }
     }
