@@ -72,7 +72,8 @@ async function loadDispatchers() {
         groupId: String(d?.groupId || "").trim(),
         groupName: String(d?.groupName || "").trim(),
       }))
-      .filter((d) => d.dispatcherId && d.groupId)
+      // Allow entries with just a groupId (dispatcherId optional); group is where claims/buttons live.
+      .filter((d) => d.groupId)
       .map((d) => ({
         dispatcherId: d.dispatcherId,
         groupId: d.groupId,
@@ -294,6 +295,7 @@ async function updateOrder(id, updates) {
     if (updates.insuranceCompany != null) row.insurance_company = updates.insuranceCompany;
     if (updates.policyNumber != null) row.policy_number = updates.policyNumber;
     if (updates.notes != null) row.notes = updates.notes;
+    if (updates.color != null) row.color = updates.color;
     if (updates.docDriversLicense != null) row.doc_drivers_license = updates.docDriversLicense;
     if (updates.docInsuranceCard != null) row.doc_insurance_card = updates.docInsuranceCard;
     if (updates.docVinPhoto != null) row.doc_vin_photo = updates.docVinPhoto;
@@ -320,6 +322,7 @@ async function updateOrder(id, updates) {
     make: updates.make ?? orders[idx].make,
     model: updates.model ?? orders[idx].model,
     carMakeModel: updates.carMakeModel ?? orders[idx].carMakeModel,
+    color: updates.color ?? orders[idx].color,
     insuranceCompany: updates.insuranceCompany ?? orders[idx].insuranceCompany,
     policyNumber: updates.policyNumber ?? orders[idx].policyNumber,
     notes: updates.notes ?? orders[idx].notes,
@@ -484,7 +487,11 @@ function formatDispatchMessage(order, phoneLink) {
     "<b>Insurance policy number:</b> " + escapeTelegramHtml(o.policyNumber || "—"),
     "<b>Extra info:</b> " + escapeTelegramHtml(o.notes || "—"),
   ];
-  if (phoneLink) lines.push("", "<b>📞 Phone (one-time link):</b> " + escapeTelegramHtml(phoneLink));
+  if (phoneLink) {
+    lines.push("", "<b>📞 Phone (one-time link):</b> " + escapeTelegramHtml(phoneLink));
+  } else if (o.phone) {
+    lines.push("", "<b>📞 Phone:</b> " + escapeTelegramHtml(o.phone));
+  }
   return lines.filter(Boolean).join("\n");
 }
 
