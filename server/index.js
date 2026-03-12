@@ -446,16 +446,23 @@ function parseAddressParts(addr) {
   return { street: addr.trim(), cityStateZip: "" };
 }
 
+function escapeTelegramHtml(val) {
+  return String(val ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
 function formatDispatchMessage(order, phoneLink) {
   const o = order;
-  const name = `${(o.firstName || "").trim()} ${(o.lastName || "").trim()}`.trim() || "—";
+  const name = escapeTelegramHtml(`${(o.firstName || "").trim()} ${(o.lastName || "").trim()}`.trim() || "—");
   const addr = parseAddressParts(o.address || "");
   const deliv = parseAddressParts(o.deliveryAddress || "");
-  const addressStreet = addr.street || o.address || "—";
-  const addressCityStateZip = addr.cityStateZip || "—";
-  const deliveryStreet = deliv.street || o.deliveryAddress || "—";
-  const deliveryCityStateZip = deliv.cityStateZip || "—";
-  const car = (o.year && o.make && o.model) ? `${o.year} ${o.make} ${o.model}` : (o.carMakeModel || o.vehicleInfo || "—");
+  const addressStreet = escapeTelegramHtml(addr.street || o.address || "—");
+  const addressCityStateZip = escapeTelegramHtml(addr.cityStateZip || "—");
+  const deliveryStreet = escapeTelegramHtml(deliv.street || o.deliveryAddress || "—");
+  const deliveryCityStateZip = escapeTelegramHtml(deliv.cityStateZip || "—");
+  const car = escapeTelegramHtml((o.year && o.make && o.model) ? `${o.year} ${o.make} ${o.model}` : (o.carMakeModel || o.vehicleInfo || "—"));
   const deliveryMethodLabel = o.deliveryMethod === "overnight_fedex"
     ? "FedEx Delivery"
     : o.deliveryMethod === "driver"
@@ -463,21 +470,21 @@ function formatDispatchMessage(order, phoneLink) {
       : "Email Delivery";
   const lines = [
     "<b>Delivery method:</b> " + deliveryMethodLabel,
-    o.deliveryEmail ? "<b>Delivery email:</b> " + o.deliveryEmail : null,
+    o.deliveryEmail ? "<b>Delivery email:</b> " + escapeTelegramHtml(o.deliveryEmail) : null,
     "",
     "<b>Name:</b> " + name,
     "<b>Registration address:</b> " + (addressStreet || "—"),
     "<b>Registration city, state, ZIP:</b> " + (addressCityStateZip || "—"),
     "<b>Delivery address:</b> " + (deliveryStreet || "—"),
     "<b>Delivery city, state, ZIP:</b> " + (deliveryCityStateZip || "—"),
-    "<b>VIN:</b> " + (o.vin || "—"),
+    "<b>VIN:</b> " + escapeTelegramHtml(o.vin || "—"),
     "<b>Car:</b> " + car,
-    "<b>Color:</b> " + (o.color || "—"),
-    "<b>Insurance company:</b> " + (o.insuranceCompany || "—"),
-    "<b>Insurance policy number:</b> " + (o.policyNumber || "—"),
-    "<b>Extra info:</b> " + (o.notes || "—"),
+    "<b>Color:</b> " + escapeTelegramHtml(o.color || "—"),
+    "<b>Insurance company:</b> " + escapeTelegramHtml(o.insuranceCompany || "—"),
+    "<b>Insurance policy number:</b> " + escapeTelegramHtml(o.policyNumber || "—"),
+    "<b>Extra info:</b> " + escapeTelegramHtml(o.notes || "—"),
   ];
-  if (phoneLink) lines.push("", "<b>📞 Phone (one-time link):</b> " + phoneLink);
+  if (phoneLink) lines.push("", "<b>📞 Phone (one-time link):</b> " + escapeTelegramHtml(phoneLink));
   return lines.filter(Boolean).join("\n");
 }
 
@@ -580,15 +587,24 @@ async function sendDocImagesToTelegram(order) {
   if (order.docInsuranceCard) urls.push({ url: order.docInsuranceCard, caption: "Insurance Card" });
   if (order.docVinPhoto) urls.push({ url: order.docVinPhoto, caption: "VIN Photo" });
   for (const { url, caption } of urls) {
+    const isPdf = String(url || "").toLowerCase().includes(".pdf");
     for (const chatId of targetIds) {
       try {
-        await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ chat_id: chatId, photo: url, caption }),
-        });
+        if (isPdf) {
+          await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ chat_id: chatId, document: url, caption }),
+          });
+        } else {
+          await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ chat_id: chatId, photo: url, caption }),
+          });
+        }
       } catch (err) {
-        console.error("Telegram sendPhoto error:", err);
+        console.error("Telegram send media error:", err);
       }
     }
   }
@@ -1224,7 +1240,8 @@ app.post("/api/orders/:id/documents", upload.fields([
     }
     if (files.vinPhoto?.[0]) {
       const buf = files.vinPhoto[0].buffer;
-      updates.docVinPhoto = await uploadDocToStorage(id, "vin-photo", buf, ".jpg");
+      const ext = (files.vinPhoto[0].originalname || "").toLowerCase().endsWith(".pdf") ? ".pdf" : ".jpg";
+      updates.docVinPhoto = await uploadDocToStorage(id, "vin-photo", buf, ext);
     }
     if (Object.keys(updates).length > 0) {
       await updateOrder(id, updates);
