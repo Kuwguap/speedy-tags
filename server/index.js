@@ -418,40 +418,43 @@ function authMiddleware(req, res, next) {
 
 async function createOneTimeSecretLink(secret) {
   const trimmed = secret ? String(secret).trim() : "";
-  if (!trimmed) return null;
+  if (!trimmed) {
+    console.warn("[OTS] No phone to share.");
+    return null;
+  }
   if (!ONETIMESECRET_USERNAME || !ONETIMESECRET_API_KEY) {
     console.warn("[OTS] Skipped: set ONETIMESECRET_USERNAME and ONETIMESECRET_API_KEY on Render for encrypted phone link.");
     return null;
   }
   const region = (ONETIMESECRET_REGION || "us").toLowerCase();
   const auth = Buffer.from(`${ONETIMESECRET_USERNAME}:${ONETIMESECRET_API_KEY}`).toString("base64");
-  try {
-    const body = new URLSearchParams({
-      secret: trimmed,
-      ttl: "86400",
-      passphrase: OTS_DISPATCH_PASSPHRASE,
-    });
-    const apiUrl = `https://${region}.onetimesecret.com/api/v1/share`;
-    const r = await fetch(apiUrl, {
-      method: "POST",
-      headers: {
-        Authorization: `Basic ${auth}`,
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: body.toString(),
-    });
-    const data = await r.json();
-    if (data.secret_key) {
-      // Use main domain for link so it works regardless of API region
-      const link = `https://onetimesecret.com/secret/${data.secret_key}`;
-      return link;
+  const body = new URLSearchParams({
+    secret: trimmed,
+    ttl: "86400",
+    passphrase: OTS_DISPATCH_PASSPHRASE,
+  });
+  const apiHosts = [`https://${region}.onetimesecret.com`, "https://onetimesecret.com"];
+  for (const base of apiHosts) {
+    try {
+      const r = await fetch(`${base}/api/v1/share`, {
+        method: "POST",
+        headers: {
+          Authorization: `Basic ${auth}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: body.toString(),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (data.secret_key) {
+        const link = `https://onetimesecret.com/secret/${data.secret_key}`;
+        return link;
+      }
+      if (base === apiHosts[0]) console.warn("[OTS] Create failed:", data);
+    } catch (err) {
+      if (base === apiHosts[0]) console.error("[OTS] Error:", err.message);
     }
-    console.warn("[OTS] Create failed:", data);
-    return null;
-  } catch (err) {
-    console.error("[OTS] Error:", err.message);
-    return null;
   }
+  return null;
 }
 
 function parseAddressParts(addr) {
@@ -773,30 +776,34 @@ app.post("/api/telegram/webhook", async (req, res) => {
   const orderId = cq.data.replace(/^accept_/, "").trim();
   if (!orderId) return;
 
+  // Answer callback immediately so Telegram stops showing loading on the button
+  answerCallback(cq.id, "Processing…");
+
   try {
     const orderRow = await findOrderById(orderId);
-    if (!orderRow) return answerCallback(cq.id, "Order not found");
+    if (!orderRow) return;
     const order = useSupabase() ? orderRowToApi(orderRow) : orderRow;
     const claimIds = typeof order.telegramClaimMessageIds === "object" ? order.telegramClaimMessageIds : (order.telegram_claim_message_ids && typeof order.telegram_claim_message_ids === "string" ? JSON.parse(order.telegram_claim_message_ids || "{}") : {});
 
     const dispatchers = await loadDispatchers();
     const dispatcher = dispatchers.find((d) => d.dispatcherId === fromChatId || d.groupId === fromChatId);
-    if (!dispatcher) return answerCallback(cq.id, "Unknown dispatcher");
-    const acceptGroupId = dispatcher.groupId || fromChatId;
+    if (!dispatcher) return;
 
     const alreadyAccepted = order.telegramAcceptedBy || order.telegram_accepted_by;
     if (alreadyAccepted) {
       if (fromMessageId) await editTelegramMessage(fromChatId, fromMessageId, "❌ This tag was taken by another team.");
-      return answerCallback(cq.id, "Already claimed");
+      return;
     }
 
-    const won = await tryAcceptOrder(orderId, fromChatId, acceptGroupId);
+    const won = await tryAcceptOrder(orderId, fromChatId, dispatcher.groupId || fromChatId);
     if (!won) {
       if (fromMessageId) await editTelegramMessage(fromChatId, fromMessageId, "❌ This tag was taken by another team.");
-      return answerCallback(cq.id, "Already claimed");
+      return;
     }
 
-    const phoneLink = await createOneTimeSecretLink(order.phone || "");
+    const acceptGroupId = dispatcher.groupId || fromChatId;
+    const phone = (order.phone != null && order.phone !== "") ? String(order.phone).trim() : (orderRow.phone != null ? String(orderRow.phone).trim() : "");
+    const phoneLink = await createOneTimeSecretLink(phone);
     const fullOrder = { ...order, deliveryAddress: order.deliveryAddress || order.delivery_address || "" };
     const dispatchText = formatDispatchMessage(fullOrder, phoneLink);
     await sendToTelegram(dispatchText, [acceptGroupId]);
@@ -811,11 +818,8 @@ app.post("/api/telegram/webhook", async (req, res) => {
       if (String(chatId) === String(fromChatId)) continue;
       await editTelegramMessage(chatId, mid, "❌ This tag was taken by another team.");
     }
-
-    answerCallback(cq.id, "✅ Order claimed! Details sent to your group.");
   } catch (err) {
     console.error("[Telegram webhook] Error:", err);
-    answerCallback(cq.id, "Error processing accept");
   }
 });
 
@@ -854,7 +858,8 @@ async function completeOrderDispatch(orderId, groupChatId, claimIds, dispatchers
   if (!orderRow) return;
   const order = useSupabase() ? orderRowToApi(orderRow) : orderRow;
   const fullOrder = { ...order, deliveryAddress: order.deliveryAddress || order.delivery_address || "" };
-  const phoneLink = await createOneTimeSecretLink(order.phone || "");
+  const phone = (order.phone != null && order.phone !== "") ? String(order.phone).trim() : (orderRow.phone != null ? String(orderRow.phone).trim() : "");
+  const phoneLink = await createOneTimeSecretLink(phone);
   const dispatchText = formatDispatchMessage(fullOrder, phoneLink);
   await sendToTelegram(dispatchText, [groupChatId]);
   const full = useSupabase() ? orderRowToApi(orderRow) : orderRow;
