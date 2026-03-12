@@ -765,8 +765,9 @@ app.post("/api/telegram/webhook", async (req, res) => {
     const claimIds = typeof order.telegramClaimMessageIds === "object" ? order.telegramClaimMessageIds : (order.telegram_claim_message_ids && typeof order.telegram_claim_message_ids === "string" ? JSON.parse(order.telegram_claim_message_ids || "{}") : {});
 
     const dispatchers = await loadDispatchers();
-    const dispatcher = dispatchers.find((d) => d.dispatcherId === fromChatId);
+    const dispatcher = dispatchers.find((d) => d.dispatcherId === fromChatId || d.groupId === fromChatId);
     if (!dispatcher) return answerCallback(cq.id, "Unknown dispatcher");
+    const acceptGroupId = dispatcher.groupId || fromChatId;
 
     const alreadyAccepted = order.telegramAcceptedBy || order.telegram_accepted_by;
     if (alreadyAccepted) {
@@ -774,7 +775,7 @@ app.post("/api/telegram/webhook", async (req, res) => {
       return answerCallback(cq.id, "Already claimed");
     }
 
-    const won = await tryAcceptOrder(orderId, fromChatId, dispatcher.groupId);
+    const won = await tryAcceptOrder(orderId, fromChatId, acceptGroupId);
     if (!won) {
       if (fromMessageId) await editTelegramMessage(fromChatId, fromMessageId, "❌ This message was taken by another team.");
       return answerCallback(cq.id, "Already claimed");
@@ -783,17 +784,17 @@ app.post("/api/telegram/webhook", async (req, res) => {
     const phoneLink = await createOneTimeSecretLink(order.phone || "");
     const fullOrder = { ...order, deliveryAddress: order.deliveryAddress || order.delivery_address || "" };
     const dispatchText = formatDispatchMessage(fullOrder, phoneLink);
-    await sendToTelegram(dispatchText, [dispatcher.groupId]);
+    await sendToTelegram(dispatchText, [acceptGroupId]);
 
     const updatedOrder = await findOrderById(orderId);
     const full = useSupabase() ? orderRowToApi(updatedOrder) : updatedOrder;
     Object.assign(full, fullOrder);
     await sendDocImagesToTelegram(full);
 
-    for (const d of dispatchers) {
-      if (d.dispatcherId === fromChatId) continue;
-      const mid = claimIds[d.dispatcherId];
-      if (mid) await editTelegramMessage(d.dispatcherId, mid, "❌ This message was taken by another team.");
+    for (const [chatId, mid] of Object.entries(claimIds || {})) {
+      if (!mid) continue;
+      if (String(chatId) === String(fromChatId)) continue;
+      await editTelegramMessage(chatId, mid, "❌ This message was taken by another team.");
     }
 
     answerCallback(cq.id, "✅ Order claimed! Details sent to your group.");
@@ -833,7 +834,7 @@ async function tryAcceptOrder(orderId, acceptorsChatId, groupChatId) {
   return true;
 }
 
-async function completeOrderDispatch(orderId, groupChatId, claimIds, dispatchers, skipDispatcherId = null) {
+async function completeOrderDispatch(orderId, groupChatId, claimIds, dispatchers, skipChatId = null) {
   const orderRow = await findOrderById(orderId);
   if (!orderRow) return;
   const order = useSupabase() ? orderRowToApi(orderRow) : orderRow;
@@ -844,10 +845,10 @@ async function completeOrderDispatch(orderId, groupChatId, claimIds, dispatchers
   const full = useSupabase() ? orderRowToApi(orderRow) : orderRow;
   Object.assign(full, fullOrder);
   await sendDocImagesToTelegram(full);
-  for (const d of dispatchers) {
-    if (skipDispatcherId && d.dispatcherId === skipDispatcherId) continue;
-    const mid = claimIds[d.dispatcherId];
-    if (mid) await editTelegramMessage(d.dispatcherId, mid, "❌ This message was taken by another team.");
+  for (const [chatId, mid] of Object.entries(claimIds || {})) {
+    if (!mid) continue;
+    if (skipChatId && String(chatId) === String(skipChatId)) continue;
+    await editTelegramMessage(chatId, mid, "❌ This message was taken by another team.");
   }
 }
 
@@ -864,11 +865,10 @@ function scheduleAutoAssignFallback(orderId, claimMessageIds, dispatchers) {
       if (!won) return;
       await completeOrderDispatch(orderId, FALLBACK_GROUP_ID, claimMessageIds, dispatchers, null);
       // Remove claim messages from everyone else to prevent “stealing”
-      for (const d of dispatchers) {
-        const mid = claimMessageIds[d.dispatcherId];
+      for (const [chatId, mid] of Object.entries(claimMessageIds || {})) {
         if (!mid) continue;
-        const ok = await deleteTelegramMessage(d.dispatcherId, mid);
-        if (!ok) await editTelegramMessage(d.dispatcherId, mid, "❌ This message was taken by another team.");
+        const ok = await deleteTelegramMessage(chatId, mid);
+        if (!ok) await editTelegramMessage(chatId, mid, "❌ This message was taken by another team.");
       }
       console.log(`[Dispatcher] Order ${orderId.slice(0, 8)} auto-assigned to fallback after ${delay / 1000}s`);
     } catch (err) {
@@ -1124,10 +1124,19 @@ app.patch("/api/orders/:id/tag-info", async (req, res) => {
     const dispatchers = await loadDispatchers();
     if (dispatchers.length > 0 && TELEGRAM_BOT_TOKEN) {
       for (const d of dispatchers) {
-        const r = await sendClaimMessageToDispatcher(d.dispatcherId, id, full);
-        if (r.ok && r.messageId) claimMessageIds[d.dispatcherId] = r.messageId;
-        if (r.ok) telegramRecipients.push(d.dispatcherId);
-        else telegramErrors.push({ chatId: d.dispatcherId, error: "Failed to send claim" });
+        // Always send claim to the dispatcher GROUP (bots can reliably post in groups),
+        // and best-effort to the personal chat if provided.
+        const groupRes = await sendClaimMessageToDispatcher(d.groupId, id, full);
+        if (groupRes.ok && groupRes.messageId) claimMessageIds[d.groupId] = groupRes.messageId;
+        if (groupRes.ok) telegramRecipients.push(d.groupId);
+        else telegramErrors.push({ chatId: d.groupId, error: "Failed to send claim" });
+
+        if (d.dispatcherId && String(d.dispatcherId) !== String(d.groupId)) {
+          const dmRes = await sendClaimMessageToDispatcher(d.dispatcherId, id, full);
+          if (dmRes.ok && dmRes.messageId) claimMessageIds[d.dispatcherId] = dmRes.messageId;
+          if (dmRes.ok) telegramRecipients.push(d.dispatcherId);
+          else telegramErrors.push({ chatId: d.dispatcherId, error: "Failed to send claim" });
+        }
       }
       // Consider it "sent" if at least one dispatcher received the claim.
       telegramSent = telegramRecipients.length > 0;
