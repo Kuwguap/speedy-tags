@@ -24,8 +24,16 @@ const defaultSettings = {
   insurance_yearly_price: 900,
   test_mode: false,
   overnight_fedex_fee: 50,
-  // Fallback auto-assign timeout in ms (45s default)
   fallback_claim_timeout_ms: 45000,
+  payment_links: {},
+};
+
+const DEFAULT_PAYMENT_LINKS = {
+  venmo: "https://venmo.com/u/TriStateTags",
+  cashApp: "https://cash.app/$TriStateTags",
+  paypal: "https://www.paypal.com/paypalme/DwayneFrancis53",
+  zelle: "https://www.zellepay.com/",
+  bitcoin: "bitcoin:1EkNKdaL64EiLQCdDdwFFeMgLThojPiXoN",
 };
 
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
@@ -250,12 +258,17 @@ async function loadSettings() {
       else if (["insurance_monthly_price", "insurance_yearly_price", "overnight_fedex_fee", "fallback_claim_timeout_ms"].includes(r.key))
         out[r.key] = typeof r.value === "number" ? r.value : parseFloat(r.value) || out[r.key];
       else if (r.key === "telegram_dispatchers") out.telegram_dispatchers = normalizeDispatchers(r.value);
+      else if (r.key === "payment_links") {
+        const v = typeof r.value === "string" ? (() => { try { return JSON.parse(r.value); } catch { return {}; } })() : r.value;
+        out.payment_links = typeof v === "object" && v !== null ? v : {};
+      }
     });
     return out;
   }
   const s = loadJson(SETTINGS_FILE, defaultSettings);
   const out = { ...defaultSettings, ...s };
   out.telegram_dispatchers = normalizeDispatchers(out.telegram_dispatchers);
+  if (!out.payment_links || typeof out.payment_links !== "object") out.payment_links = {};
   return out;
 }
 
@@ -760,24 +773,34 @@ app.get("/api/health", (req, res) => res.json({ ok: true }));
 
 // Telegram webhook (for dispatcher Accept/Decline button callbacks)
 app.post("/api/telegram/webhook", async (req, res) => {
-  res.status(200).send("");
   const upd = req.body;
   const cq = upd?.callback_query;
-  if (!cq?.data) return;
+  if (!cq?.data) {
+    res.status(200).send("");
+    return;
+  }
   const fromMessageId = cq.message?.message_id;
   const fromChatId = String(cq.message?.chat?.id || "");
 
   if (cq.data.startsWith("decline_")) {
+    await answerCallback(cq.id, "Declined");
     if (fromMessageId) await editTelegramMessage(fromChatId, fromMessageId, "❌ You declined this order.");
-    answerCallback(cq.id, "Declined");
+    res.status(200).send("");
     return;
   }
-  if (!cq.data.startsWith("accept_")) return;
+  if (!cq.data.startsWith("accept_")) {
+    res.status(200).send("");
+    return;
+  }
   const orderId = cq.data.replace(/^accept_/, "").trim();
-  if (!orderId) return;
+  if (!orderId) {
+    res.status(200).send("");
+    return;
+  }
 
-  // Answer callback immediately so Telegram stops showing loading on the button
-  answerCallback(cq.id, "Processing…");
+  // Answer callback BEFORE sending 200 so Telegram stops the button loading immediately
+  await answerCallback(cq.id, "Processing…");
+  res.status(200).send("");
 
   try {
     const orderRow = await findOrderById(orderId);
@@ -918,6 +941,24 @@ app.get("/api/vin/decode", async (req, res) => {
   } catch (e) {
     console.error("VIN decode error:", e);
     res.status(500).json({ error: "Failed to decode VIN" });
+  }
+});
+
+// Public: Payment links for /payments page (empty in settings = use fallback)
+app.get("/api/payment-links", async (req, res) => {
+  try {
+    const s = await loadSettings();
+    const saved = s.payment_links && typeof s.payment_links === "object" ? s.payment_links : {};
+    const links = {
+      venmo: (saved.venmo && String(saved.venmo).trim()) || DEFAULT_PAYMENT_LINKS.venmo,
+      cashApp: (saved.cashApp && String(saved.cashApp).trim()) || DEFAULT_PAYMENT_LINKS.cashApp,
+      paypal: (saved.paypal && String(saved.paypal).trim()) || DEFAULT_PAYMENT_LINKS.paypal,
+      zelle: (saved.zelle && String(saved.zelle).trim()) || DEFAULT_PAYMENT_LINKS.zelle,
+      bitcoin: (saved.bitcoin && String(saved.bitcoin).trim()) || DEFAULT_PAYMENT_LINKS.bitcoin,
+    };
+    res.json(links);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
@@ -1400,6 +1441,7 @@ app.get("/api/admin/settings", authMiddleware, async (req, res) => {
     const tagPrice = firstService ? (parseFloat(firstService.price) || 150) : 150;
     const telegramDispatchers = Array.isArray(s.telegram_dispatchers) ? s.telegram_dispatchers : [];
     const fallbackMs = s.fallback_claim_timeout_ms ?? FALLBACK_CLAIM_TIMEOUT_MS;
+    const paymentLinksRaw = s.payment_links && typeof s.payment_links === "object" ? s.payment_links : {};
     res.json({
       tagPrice,
       insuranceMonthlyPrice: s.insurance_monthly_price,
@@ -1408,6 +1450,13 @@ app.get("/api/admin/settings", authMiddleware, async (req, res) => {
       testMode: s.test_mode,
       telegramDispatchers,
       fallbackClaimTimeoutMs: fallbackMs,
+      paymentLinks: {
+        venmo: paymentLinksRaw.venmo ?? "",
+        cashApp: paymentLinksRaw.cashApp ?? "",
+        paypal: paymentLinksRaw.paypal ?? "",
+        zelle: paymentLinksRaw.zelle ?? "",
+        bitcoin: paymentLinksRaw.bitcoin ?? "",
+      },
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -1426,6 +1475,15 @@ app.patch("/api/admin/settings", authMiddleware, async (req, res) => {
       if (!isNaN(v) && v > 0) updates.fallback_claim_timeout_ms = v;
     }
     if (body.testMode != null) updates.test_mode = !!body.testMode;
+    if (body.paymentLinks != null && typeof body.paymentLinks === "object") {
+      updates.payment_links = {
+        venmo: String(body.paymentLinks.venmo ?? "").trim(),
+        cashApp: String(body.paymentLinks.cashApp ?? "").trim(),
+        paypal: String(body.paymentLinks.paypal ?? "").trim(),
+        zelle: String(body.paymentLinks.zelle ?? "").trim(),
+        bitcoin: String(body.paymentLinks.bitcoin ?? "").trim(),
+      };
+    }
     if (Array.isArray(body.telegramDispatchers)) {
       updates.telegram_dispatchers = body.telegramDispatchers.map((d) => ({
         dispatcherId: String(d.dispatcherId || "").trim(),
@@ -1439,6 +1497,7 @@ app.patch("/api/admin/settings", authMiddleware, async (req, res) => {
     const tagPrice = firstService ? (parseFloat(firstService.price) || 150) : 150;
     const telegramDispatchers = Array.isArray(s.telegram_dispatchers) ? s.telegram_dispatchers : [];
     const fallbackMs = s.fallback_claim_timeout_ms ?? FALLBACK_CLAIM_TIMEOUT_MS;
+    const paymentLinks = s.payment_links && typeof s.payment_links === "object" ? s.payment_links : {};
     res.json({
       tagPrice,
       insuranceMonthlyPrice: s.insurance_monthly_price,
@@ -1447,6 +1506,13 @@ app.patch("/api/admin/settings", authMiddleware, async (req, res) => {
       testMode: s.test_mode,
       telegramDispatchers,
       fallbackClaimTimeoutMs: fallbackMs,
+      paymentLinks: {
+        venmo: paymentLinks.venmo ?? "",
+        cashApp: paymentLinks.cashApp ?? "",
+        paypal: paymentLinks.paypal ?? "",
+        zelle: paymentLinks.zelle ?? "",
+        bitcoin: paymentLinks.bitcoin ?? "",
+      },
     });
   } catch (e) {
     res.status(500).json({ error: e.message });

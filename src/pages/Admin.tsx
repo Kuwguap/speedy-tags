@@ -25,6 +25,7 @@ import {
   CheckCircle2,
   XCircle,
   Settings as SettingsIcon,
+  Wallet,
 } from "lucide-react";
 import AdminLogin from "./AdminLogin";
 
@@ -47,6 +48,7 @@ export default function Admin() {
     testMode: boolean;
     telegramDispatchers: TelegramDispatcher[];
     fallbackClaimTimeoutMs: number;
+    paymentLinks: { venmo: string; cashApp: string; paypal: string; zelle: string; bitcoin: string };
   } | null>(null);
   const [settingsSaving, setSettingsSaving] = useState(false);
 
@@ -144,6 +146,7 @@ export default function Admin() {
         testMode: settings.testMode,
         telegramDispatchers: settings.telegramDispatchers ?? [],
         fallbackClaimTimeoutMs: settings.fallbackClaimTimeoutMs ?? 45000,
+        paymentLinks: settings.paymentLinks ?? { venmo: "", cashApp: "", paypal: "", zelle: "", bitcoin: "" },
       });
       setSettings(updated);
       toast({ title: "Settings saved!" });
@@ -526,6 +529,51 @@ export default function Admin() {
                     </Button>
                   </>
                 )}
+              </CardContent>
+            </Card>
+
+            <Card className="shadow-card border-border/50">
+              <CardHeader>
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <Wallet className="h-4 w-4" /> Payment links (/payments page)
+                </CardTitle>
+                <p className="text-sm text-muted-foreground">
+                  Links used on the /payments page. Leave empty to use fallback defaults (Venmo, Cash App, PayPal, Zelle, Bitcoin).
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {["venmo", "cashApp", "paypal", "zelle", "bitcoin"].map((key) => (
+                  <div key={key}>
+                    <Label className="text-xs capitalize">{key === "cashApp" ? "Cash App" : key}</Label>
+                    <Input
+                      placeholder={
+                        key === "venmo" ? "https://venmo.com/u/TriStateTags" :
+                        key === "cashApp" ? "https://cash.app/$TriStateTags" :
+                        key === "paypal" ? "https://www.paypal.com/paypalme/..." :
+                        key === "zelle" ? "https://www.zellepay.com/ or handle" :
+                        "bitcoin:..."
+                      }
+                      value={settings?.paymentLinks?.[key as keyof typeof settings.paymentLinks] ?? ""}
+                      onChange={(e) =>
+                        setSettings((s) =>
+                          s
+                            ? {
+                                ...s,
+                                paymentLinks: {
+                                  ...(s.paymentLinks ?? { venmo: "", cashApp: "", paypal: "", zelle: "", bitcoin: "" }),
+                                  [key]: e.target.value,
+                                },
+                              }
+                            : null
+                        )
+                      }
+                      className="font-mono text-sm"
+                    />
+                  </div>
+                ))}
+                <p className="text-xs text-muted-foreground">
+                  Save Settings above to persist. Empty fields use fallback links.
+                </p>
               </CardContent>
             </Card>
 
