@@ -49,6 +49,7 @@ export default function Admin() {
     telegramDispatchers: TelegramDispatcher[];
     fallbackClaimTimeoutMs: number;
     paymentLinks: { venmo: string; cashApp: string; paypal: string; zelle: string; bitcoin: string };
+    paymentDisplay: { venmo: string; cashApp: string; paypal: string; zelle: string; bitcoin: string };
   } | null>(null);
   const [settingsSaving, setSettingsSaving] = useState(false);
 
@@ -147,6 +148,7 @@ export default function Admin() {
         telegramDispatchers: settings.telegramDispatchers ?? [],
         fallbackClaimTimeoutMs: settings.fallbackClaimTimeoutMs ?? 45000,
         paymentLinks: settings.paymentLinks ?? { venmo: "", cashApp: "", paypal: "", zelle: "", bitcoin: "" },
+        paymentDisplay: settings.paymentDisplay ?? { venmo: "", cashApp: "", paypal: "", zelle: "", bitcoin: "" },
       });
       setSettings(updated);
       toast({ title: "Settings saved!" });
@@ -535,22 +537,22 @@ export default function Admin() {
             <Card className="shadow-card border-border/50">
               <CardHeader>
                 <CardTitle className="text-lg flex items-center gap-2">
-                  <Wallet className="h-4 w-4" /> Payment links (/payments page)
+                  <Wallet className="h-4 w-4" /> Payment links (/payment & /payments)
                 </CardTitle>
                 <p className="text-sm text-muted-foreground">
-                  Links used on the /payments page. Leave empty to use fallback defaults (Venmo, Cash App, PayPal, Zelle, Bitcoin).
+                  Links and display text for the payment page. Both /payment and /payments show the same page. Leave link empty to use fallback. Display is shown under each button (e.g. @TriStateTags); leave empty to auto-derive from link.
                 </p>
               </CardHeader>
               <CardContent className="space-y-4">
                 {["venmo", "cashApp", "paypal", "zelle", "bitcoin"].map((key) => (
-                  <div key={key}>
-                    <Label className="text-xs capitalize">{key === "cashApp" ? "Cash App" : key}</Label>
+                  <div key={key} className="space-y-2 p-3 rounded-lg border border-border/50 bg-muted/20">
+                    <Label className="text-xs capitalize">{key === "cashApp" ? "Cash App" : key} — Link</Label>
                     <Input
                       placeholder={
                         key === "venmo" ? "https://venmo.com/u/TriStateTags" :
                         key === "cashApp" ? "https://cash.app/$TriStateTags" :
                         key === "paypal" ? "https://www.paypal.com/paypalme/..." :
-                        key === "zelle" ? "https://www.zellepay.com/ or handle" :
+                        key === "zelle" ? "https://www.zellepay.com/" :
                         "bitcoin:..."
                       }
                       value={settings?.paymentLinks?.[key as keyof typeof settings.paymentLinks] ?? ""}
@@ -569,10 +571,31 @@ export default function Admin() {
                       }
                       className="font-mono text-sm"
                     />
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Display under button (e.g. @handle, $tag, or email)</Label>
+                      <Input
+                        placeholder={key === "venmo" ? "@TriStateTags" : key === "cashApp" ? "$TriStateTags" : key === "zelle" ? "@TriStateTagsPayment" : ""}
+                        value={settings?.paymentDisplay?.[key as keyof typeof settings.paymentDisplay] ?? ""}
+                        onChange={(e) =>
+                          setSettings((s) =>
+                            s
+                              ? {
+                                  ...s,
+                                  paymentDisplay: {
+                                    ...(s.paymentDisplay ?? { venmo: "", cashApp: "", paypal: "", zelle: "", bitcoin: "" }),
+                                    [key]: e.target.value,
+                                  },
+                                }
+                              : null
+                          )
+                        }
+                        className="font-mono text-sm mt-1"
+                      />
+                    </div>
                   </div>
                 ))}
                 <p className="text-xs text-muted-foreground">
-                  Save Settings above to persist. Empty fields use fallback links.
+                  Save Settings above to persist. Empty link = fallback; empty display = derived from link (or default for Zelle).
                 </p>
               </CardContent>
             </Card>

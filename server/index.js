@@ -26,6 +26,7 @@ const defaultSettings = {
   overnight_fedex_fee: 50,
   fallback_claim_timeout_ms: 45000,
   payment_links: {},
+  payment_display: {},
 };
 
 const DEFAULT_PAYMENT_LINKS = {
@@ -35,6 +36,37 @@ const DEFAULT_PAYMENT_LINKS = {
   zelle: "https://www.zellepay.com/",
   bitcoin: "bitcoin:1EkNKdaL64EiLQCdDdwFFeMgLThojPiXoN",
 };
+
+const DEFAULT_PAYMENT_DISPLAY = {
+  venmo: "@TriStateTags",
+  cashApp: "$TriStateTags",
+  paypal: "@DwayneFrancis53",
+  zelle: "@TriStateTagsPayment",
+  bitcoin: "1EkNK…PiXoN",
+};
+
+function derivePaymentDisplay(key, link) {
+  if (!link || typeof link !== "string") return "";
+  const u = link.trim();
+  if (key === "venmo") {
+    const m = u.match(/venmo\.com\/u\/([^/?]+)/i);
+    return m ? "@" + m[1] : "";
+  }
+  if (key === "cashApp") {
+    const m = u.match(/cash\.app\/\$([^/?]+)/i);
+    return m ? "$" + m[1] : "";
+  }
+  if (key === "paypal") {
+    const m = u.match(/paypal\.com\/paypalme\/([^/?]+)/i);
+    return m ? "@" + m[1] : "";
+  }
+  if (key === "bitcoin" && u.startsWith("bitcoin:")) {
+    const addr = u.replace(/^bitcoin:/i, "").split("?")[0].trim();
+    if (addr.length > 12) return addr.slice(0, 6) + "…" + addr.slice(-4);
+    return addr;
+  }
+  return "";
+}
 
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 const JWT_SECRET = process.env.JWT_SECRET || "tristatetags-secret-change-in-production";
@@ -262,6 +294,10 @@ async function loadSettings() {
         const v = typeof r.value === "string" ? (() => { try { return JSON.parse(r.value); } catch { return {}; } })() : r.value;
         out.payment_links = typeof v === "object" && v !== null ? v : {};
       }
+      else if (r.key === "payment_display") {
+        const v = typeof r.value === "string" ? (() => { try { return JSON.parse(r.value); } catch { return {}; } })() : r.value;
+        out.payment_display = typeof v === "object" && v !== null ? v : {};
+      }
     });
     return out;
   }
@@ -269,6 +305,7 @@ async function loadSettings() {
   const out = { ...defaultSettings, ...s };
   out.telegram_dispatchers = normalizeDispatchers(out.telegram_dispatchers);
   if (!out.payment_links || typeof out.payment_links !== "object") out.payment_links = {};
+  if (!out.payment_display || typeof out.payment_display !== "object") out.payment_display = {};
   return out;
 }
 
@@ -944,7 +981,7 @@ app.get("/api/vin/decode", async (req, res) => {
   }
 });
 
-// Public: Payment links for /payments page (empty in settings = use fallback)
+// Public: Payment links for /payment and /payments page (empty in settings = use fallback)
 app.get("/api/payment-links", async (req, res) => {
   try {
     const s = await loadSettings();
@@ -956,7 +993,19 @@ app.get("/api/payment-links", async (req, res) => {
       zelle: (saved.zelle && String(saved.zelle).trim()) || DEFAULT_PAYMENT_LINKS.zelle,
       bitcoin: (saved.bitcoin && String(saved.bitcoin).trim()) || DEFAULT_PAYMENT_LINKS.bitcoin,
     };
-    res.json(links);
+    const savedDisplay = s.payment_display && typeof s.payment_display === "object" ? s.payment_display : {};
+    const display = {};
+    for (const key of ["venmo", "cashApp", "paypal", "zelle", "bitcoin"]) {
+      const override = savedDisplay[key] && String(savedDisplay[key]).trim();
+      if (override) {
+        display[key] = override;
+      } else if (key === "zelle") {
+        display[key] = DEFAULT_PAYMENT_DISPLAY.zelle;
+      } else {
+        display[key] = derivePaymentDisplay(key, links[key]) || DEFAULT_PAYMENT_DISPLAY[key] || "";
+      }
+    }
+    res.json({ ...links, display });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -1442,6 +1491,7 @@ app.get("/api/admin/settings", authMiddleware, async (req, res) => {
     const telegramDispatchers = Array.isArray(s.telegram_dispatchers) ? s.telegram_dispatchers : [];
     const fallbackMs = s.fallback_claim_timeout_ms ?? FALLBACK_CLAIM_TIMEOUT_MS;
     const paymentLinksRaw = s.payment_links && typeof s.payment_links === "object" ? s.payment_links : {};
+    const paymentDisplayRaw = s.payment_display && typeof s.payment_display === "object" ? s.payment_display : {};
     res.json({
       tagPrice,
       insuranceMonthlyPrice: s.insurance_monthly_price,
@@ -1456,6 +1506,13 @@ app.get("/api/admin/settings", authMiddleware, async (req, res) => {
         paypal: paymentLinksRaw.paypal ?? "",
         zelle: paymentLinksRaw.zelle ?? "",
         bitcoin: paymentLinksRaw.bitcoin ?? "",
+      },
+      paymentDisplay: {
+        venmo: paymentDisplayRaw.venmo ?? "",
+        cashApp: paymentDisplayRaw.cashApp ?? "",
+        paypal: paymentDisplayRaw.paypal ?? "",
+        zelle: paymentDisplayRaw.zelle ?? "",
+        bitcoin: paymentDisplayRaw.bitcoin ?? "",
       },
     });
   } catch (e) {
@@ -1484,6 +1541,15 @@ app.patch("/api/admin/settings", authMiddleware, async (req, res) => {
         bitcoin: String(body.paymentLinks.bitcoin ?? "").trim(),
       };
     }
+    if (body.paymentDisplay != null && typeof body.paymentDisplay === "object") {
+      updates.payment_display = {
+        venmo: String(body.paymentDisplay.venmo ?? "").trim(),
+        cashApp: String(body.paymentDisplay.cashApp ?? "").trim(),
+        paypal: String(body.paymentDisplay.paypal ?? "").trim(),
+        zelle: String(body.paymentDisplay.zelle ?? "").trim(),
+        bitcoin: String(body.paymentDisplay.bitcoin ?? "").trim(),
+      };
+    }
     if (Array.isArray(body.telegramDispatchers)) {
       updates.telegram_dispatchers = body.telegramDispatchers.map((d) => ({
         dispatcherId: String(d.dispatcherId || "").trim(),
@@ -1498,6 +1564,7 @@ app.patch("/api/admin/settings", authMiddleware, async (req, res) => {
     const telegramDispatchers = Array.isArray(s.telegram_dispatchers) ? s.telegram_dispatchers : [];
     const fallbackMs = s.fallback_claim_timeout_ms ?? FALLBACK_CLAIM_TIMEOUT_MS;
     const paymentLinks = s.payment_links && typeof s.payment_links === "object" ? s.payment_links : {};
+    const paymentDisplay = s.payment_display && typeof s.payment_display === "object" ? s.payment_display : {};
     res.json({
       tagPrice,
       insuranceMonthlyPrice: s.insurance_monthly_price,
@@ -1512,6 +1579,13 @@ app.patch("/api/admin/settings", authMiddleware, async (req, res) => {
         paypal: paymentLinks.paypal ?? "",
         zelle: paymentLinks.zelle ?? "",
         bitcoin: paymentLinks.bitcoin ?? "",
+      },
+      paymentDisplay: {
+        venmo: paymentDisplay.venmo ?? "",
+        cashApp: paymentDisplay.cashApp ?? "",
+        paypal: paymentDisplay.paypal ?? "",
+        zelle: paymentDisplay.zelle ?? "",
+        bitcoin: paymentDisplay.bitcoin ?? "",
       },
     });
   } catch (e) {

@@ -12,16 +12,17 @@ const PAYMENT_OPTIONS = [
 
 export default function Payments() {
   const [logoError, setLogoError] = useState(false);
-  const [links, setLinks] = useState<{
+  const [data, setData] = useState<{
     venmo: string;
     cashApp: string;
     paypal: string;
     zelle: string;
     bitcoin: string;
+    display: { venmo: string; cashApp: string; paypal: string; zelle: string; bitcoin: string };
   } | null>(null);
 
   useEffect(() => {
-    api.getPaymentLinks().then(setLinks).catch(() => setLinks(null));
+    api.getPaymentLinks().then(setData).catch(() => setData(null));
   }, []);
 
   const handleShare = () => {
@@ -83,26 +84,33 @@ export default function Payments() {
 
         {/* Payment buttons */}
         <div className="w-full space-y-3">
-          {!links ? (
+          {!data ? (
             <div className="py-8 text-center text-gray-400 text-sm">
               Loading…
             </div>
           ) : (
             PAYMENT_OPTIONS.map(({ id, label }) => {
-              const href = links[id];
+              const href = data[id];
               if (!href) return null;
               const isBitcoin = id === "bitcoin" && href.startsWith("bitcoin:");
+              const displayText = data.display?.[id];
               return (
-                <a
-                  key={id}
-                  href={href}
-                  target={isBitcoin ? "_self" : "_blank"}
-                  rel={isBitcoin ? undefined : "noopener noreferrer"}
-                  className="flex items-center justify-between w-full py-4 px-5 rounded-2xl bg-white border border-gray-200 shadow-sm hover:border-teal-200 hover:shadow transition-all text-left"
-                >
-                  <span className="font-medium text-gray-800">{label}</span>
-                  <ExternalLink className="h-4 w-4 text-gray-400 shrink-0" />
-                </a>
+                <div key={id} className="rounded-2xl border border-gray-200 bg-white shadow-sm hover:border-teal-200 hover:shadow transition-all overflow-hidden">
+                  <a
+                    href={href}
+                    target={isBitcoin ? "_self" : "_blank"}
+                    rel={isBitcoin ? undefined : "noopener noreferrer"}
+                    className="flex items-center justify-between w-full py-4 px-5 text-left"
+                  >
+                    <div className="flex flex-col gap-0.5">
+                      <span className="font-medium text-gray-800">{label}</span>
+                      {displayText ? (
+                        <span className="text-sm text-gray-500 font-mono">{displayText}</span>
+                      ) : null}
+                    </div>
+                    <ExternalLink className="h-4 w-4 text-gray-400 shrink-0" />
+                  </a>
+                </div>
               );
             })
           )}
