@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { api } from "@/lib/api";
-import { Wallet, Share2, ExternalLink } from "lucide-react";
+import { Wallet, Share2, ExternalLink, Copy } from "lucide-react";
 
 const PAYMENT_OPTIONS = [
   { id: "venmo" as const, label: "Venmo" },
@@ -20,9 +20,19 @@ export default function Payments() {
     bitcoin: string;
     display: { venmo: string; cashApp: string; paypal: string; zelle: string; bitcoin: string };
   } | null>(null);
+  const [bitcoinCopied, setBitcoinCopied] = useState(false);
 
   useEffect(() => {
     api.getPaymentLinks().then(setData).catch(() => setData(null));
+  }, []);
+
+  const copyBitcoinAddress = useCallback((href: string) => {
+    const address = href.replace(/^bitcoin:/i, "").split("?")[0].trim();
+    if (!address) return;
+    navigator.clipboard.writeText(address).then(() => {
+      setBitcoinCopied(true);
+      setTimeout(() => setBitcoinCopied(false), 2000);
+    }).catch(() => {});
   }, []);
 
   const handleShare = () => {
@@ -94,12 +104,35 @@ export default function Payments() {
               if (!href) return null;
               const isBitcoin = id === "bitcoin" && href.startsWith("bitcoin:");
               const displayText = data.display?.[id];
+
+              if (isBitcoin) {
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => copyBitcoinAddress(href)}
+                    className="w-full rounded-2xl border border-gray-200 bg-white shadow-sm hover:border-teal-200 hover:shadow transition-all overflow-hidden flex items-center justify-between py-4 px-5 text-left cursor-pointer"
+                  >
+                    <div className="flex flex-col gap-0.5">
+                      <span className="font-medium text-gray-800">{label}</span>
+                      {displayText ? (
+                        <span className="text-sm text-gray-500 font-mono">{displayText}</span>
+                      ) : null}
+                      {bitcoinCopied ? (
+                        <span className="text-xs text-teal-600 font-medium mt-1">Copied!</span>
+                      ) : null}
+                    </div>
+                    <Copy className="h-4 w-4 text-gray-400 shrink-0" aria-hidden />
+                  </button>
+                );
+              }
+
               return (
                 <div key={id} className="rounded-2xl border border-gray-200 bg-white shadow-sm hover:border-teal-200 hover:shadow transition-all overflow-hidden">
                   <a
                     href={href}
-                    target={isBitcoin ? "_self" : "_blank"}
-                    rel={isBitcoin ? undefined : "noopener noreferrer"}
+                    target="_blank"
+                    rel="noopener noreferrer"
                     className="flex items-center justify-between w-full py-4 px-5 text-left"
                   >
                     <div className="flex flex-col gap-0.5">
