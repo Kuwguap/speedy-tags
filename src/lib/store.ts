@@ -29,7 +29,7 @@ const defaultServices: Service[] = [
   {
     id: "1",
     title: "Same Day NJ Temporary Tag",
-    description: "Temp plate + registration + insurance card. 30-day validity. Processed through NJ MVC. Instant email or 1-hour local delivery.",
+    description: "Temp plate + registration. 30-day validity. Processed through NJ MVC. Instant email or 1-hour local delivery.",
     price: 150.0,
     image: "",
   },

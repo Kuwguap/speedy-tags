@@ -16,7 +16,8 @@ export default function CheckoutDocuments() {
   const isDriver = searchParams.get("driver") === "1";
   const isFedex = searchParams.get("fedex") === "1";
   const isEmail = searchParams.get("email") === "1";
-  const doneUrl = () => `/checkout/done?orderId=${orderId}${isDriver ? "&driver=1" : ""}${isFedex ? "&fedex=1" : ""}${isEmail ? "&email=1" : ""}`;
+  const isCod = searchParams.get("cod") === "1";
+  const doneUrl = () => `/checkout/done?orderId=${orderId}${isDriver ? "&driver=1" : ""}${isFedex ? "&fedex=1" : ""}${isEmail ? "&email=1" : ""}${isCod ? "&cod=1" : ""}`;
 
   const [driversLicense, setDriversLicense] = useState<File | null>(null);
   const [insuranceCard, setInsuranceCard] = useState<File | null>(null);

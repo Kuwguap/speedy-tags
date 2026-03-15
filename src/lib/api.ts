@@ -37,6 +37,10 @@ export const api = {
         successOrigin: typeof window !== "undefined" ? window.location.origin : undefined,
       }),
     }),
+  createCodOrder: (data: Record<string, unknown>) =>
+    request<{ orderId: string }>("/checkout/create-cod-order", { method: "POST", body: JSON.stringify(data) }),
+  getCodOrder: (orderId: string) =>
+    request<OrderRecord>("/checkout/cod-order/" + encodeURIComponent(orderId)),
   verifyCheckoutSession: (sessionId: string, isTest?: boolean) =>
     request<OrderRecord>("/checkout/verify?session_id=" + encodeURIComponent(sessionId) + (isTest ? "&test=1" : "")),
   submitTagInfo: (orderId: string, data: Record<string, unknown>) =>

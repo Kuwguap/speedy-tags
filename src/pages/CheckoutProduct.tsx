@@ -69,6 +69,8 @@ export default function CheckoutProduct() {
     return base;
   };
 
+  const isCod = state.deliveryMethod === "cash_on_delivery";
+
   const handlePay = async () => {
     setPaying(true);
     try {
@@ -87,6 +89,11 @@ export default function CheckoutProduct() {
         insuranceYearlyPrice: config.insuranceYearlyPrice,
         amount: getTotal(),
       };
+      if (isCod) {
+        const { orderId } = await api.createCodOrder(payload);
+        navigate(`/checkout/tag-info?orderId=${encodeURIComponent(orderId)}`);
+        return;
+      }
       const { url } = await api.createCheckoutSession(payload);
       if (url) window.location.href = url;
       else throw new Error("No checkout URL");
@@ -179,7 +186,7 @@ export default function CheckoutProduct() {
                     <span className="font-medium">Tag + Insurance</span>
                   </div>
                   <span className="font-bold text-primary">
-                    ${(tagPrice + config.insuranceMonthlyPrice).toFixed(0)} <span className="text-xs font-normal text-muted-foreground">(${config.insuranceMonthlyPrice}/mo)</span>
+                    ${(tagPrice + config.insuranceMonthlyPrice).toFixed(0)}
                   </span>
                 </Label>
               )}
@@ -227,7 +234,7 @@ export default function CheckoutProduct() {
             </div>
 
             <Button onClick={handlePay} className="w-full" size="lg" disabled={paying}>
-              {paying ? "Redirecting..." : "Get My Plate"}
+              {paying ? (isCod ? "Continuing..." : "Redirecting...") : isCod ? "Continue to Details" : "Get My Plate"}
             </Button>
           </CardContent>
         </Card>

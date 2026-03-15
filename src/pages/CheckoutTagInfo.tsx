@@ -35,6 +35,7 @@ export default function CheckoutTagInfo() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const sessionId = searchParams.get("session_id");
+  const orderIdParam = searchParams.get("orderId");
   const isTest = searchParams.get("test") === "1";
   const [order, setOrder] = useState<{ id: string; productChoice?: string } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -61,6 +62,14 @@ export default function CheckoutTagInfo() {
   const needsOwnInsurance = order?.productChoice === "tag_only";
 
   useEffect(() => {
+    if (orderIdParam) {
+      api
+        .getCodOrder(orderIdParam)
+        .then((data) => setOrder(data))
+        .catch((err) => setError(err instanceof Error ? err.message : "Order not found"))
+        .finally(() => setLoading(false));
+      return;
+    }
     if (!sessionId) {
       setError("No session found.");
       setLoading(false);
@@ -71,7 +80,7 @@ export default function CheckoutTagInfo() {
       .then((data) => setOrder(data))
       .catch((err) => setError(err instanceof Error ? err.message : "Verification failed"))
       .finally(() => setLoading(false));
-  }, [sessionId, isTest]);
+  }, [sessionId, orderIdParam, isTest]);
 
   const update = (field: keyof FormData, value: string) => {
     setForm((f) => ({ ...f, [field]: value }));
@@ -134,7 +143,8 @@ export default function CheckoutTagInfo() {
       const isDriver = updated?.deliveryMethod === "driver";
       const isOvernightFedex = updated?.deliveryMethod === "overnight_fedex";
       const isEmail = updated?.deliveryMethod === "email";
-      navigate(`/checkout/documents?orderId=${order.id}${isDriver ? "&driver=1" : ""}${isOvernightFedex ? "&fedex=1" : ""}${isEmail ? "&email=1" : ""}`);
+      const isCod = updated?.deliveryMethod === "cash_on_delivery";
+      navigate(`/checkout/documents?orderId=${order.id}${isDriver ? "&driver=1" : ""}${isOvernightFedex ? "&fedex=1" : ""}${isEmail ? "&email=1" : ""}${isCod ? "&cod=1" : ""}`);
     } catch (err) {
       toast({
         title: "Failed to submit",

@@ -12,6 +12,7 @@ export default function CheckoutDone() {
   const isDriver = searchParams.get("driver") === "1";
   const isFedex = searchParams.get("fedex") === "1";
   const isEmail = searchParams.get("email") === "1";
+  const isCod = searchParams.get("cod") === "1";
 
   useEffect(() => {
     if (orderId) {
@@ -28,11 +29,11 @@ export default function CheckoutDone() {
         </div>
         <h1 className="font-display text-3xl md:text-4xl font-bold text-foreground mb-4">Order Complete!</h1>
         <p className="text-muted-foreground mb-4 text-lg">
-          Your temporary tag will be delivered {isFedex ? "via FedEx delivery next business day" : isEmail ? "to your inbox shortly" : "in the time frame you selected"}.
+          {isCod ? "You'll pay when you receive your tag." : `Your temporary tag will be delivered ${isFedex ? "via FedEx delivery next business day" : isEmail ? "to your inbox shortly" : "in the time frame you selected"}.`}
         </p>
-        {isEmail && (
+        {isEmail && !isCod && (
           <p className="text-muted-foreground mb-6 text-lg">
-            Check your email for your temp tag, registration, and insurance card. Questions? <a href="mailto:info@tristatetag.com" className="text-primary hover:underline">info@tristatetag.com</a>
+            Check your email for your temp tag and registration. Questions? <a href="mailto:info@tristatetag.com" className="text-primary hover:underline">info@tristatetag.com</a>
           </p>
         )}
         {isDriver && (

@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, ReactNode } from "react";
 
-export type DeliveryMethod = "email" | "driver" | "overnight_fedex";
+export type DeliveryMethod = "email" | "driver" | "overnight_fedex" | "cash_on_delivery";
 export type DeliverySlot = "1hr" | "2hr" | "scheduled";
 export type ProductChoice = "tag_only" | "insurance_monthly" | "insurance_yearly";
 

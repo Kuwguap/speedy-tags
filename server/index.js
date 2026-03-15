@@ -610,13 +610,11 @@ async function deleteTelegramMessage(chatId, messageId) {
 
 async function sendClaimMessageToDispatcher(dispatcherChatId, orderId, order) {
   if (!TELEGRAM_BOT_TOKEN) return { ok: false, messageId: null };
-  const deliveryEmail = (order?.deliveryEmail || order?.delivery_email || "").trim();
   const summary = [
     "🆕 <b>New Order – Accept to Claim</b>",
     `Order #${(orderId || "").slice(0, 8)}`,
     `• ${(order?.firstName || "")} ${(order?.lastName || "")}`.trim() || "—",
     `• ${order?.vin || "—"} | ${order?.carMakeModel || order?.vehicleInfo || "—"}`,
-    deliveryEmail ? `• Email: ${deliveryEmail}` : null,
     "",
     "Tap <b>Accept</b> to receive full details in your group.",
   ].join("\n");
@@ -1132,6 +1130,71 @@ app.post("/api/checkout/create-session", async (req, res) => {
   } catch (e) {
     console.error("Stripe create-session error:", e);
     res.status(500).json({ error: e.message || "Failed to create checkout session" });
+  }
+});
+
+// Cash on delivery: create order without payment, return orderId for tag-info
+app.post("/api/checkout/create-cod-order", async (req, res) => {
+  const body = req.body;
+  const amount = parseFloat(body.amount);
+  if (isNaN(amount) || amount < 0) return res.status(400).json({ error: "Invalid amount" });
+  const orderId = randomUUID();
+  const codSessionId = "cod_" + orderId;
+  const meta = {
+    deliveryMethod: "cash_on_delivery",
+    deliveryEmail: String(body.deliveryEmail || "").slice(0, 100),
+    deliverySlot: "",
+    deliveryScheduledAt: "",
+    deliveryAddress: String(body.deliveryAddress || "").slice(0, 200),
+    deliveryPhone: String(body.deliveryPhone || "").slice(0, 50),
+    productChoice: String(body.productChoice || "tag_only").slice(0, 30),
+    serviceId: String(body.serviceId || "checkout").slice(0, 50),
+    serviceTitle: String(body.serviceTitle || "").slice(0, 100) || "Temporary Tag",
+    amount: String(amount),
+  };
+  const order = {
+    id: orderId,
+    serviceId: meta.serviceId,
+    serviceTitle: meta.serviceTitle,
+    firstName: "Pending",
+    lastName: "",
+    phone: meta.deliveryPhone || "",
+    address: meta.deliveryAddress || "",
+    deliveryAddress: meta.deliveryAddress || "",
+    vin: "",
+    carMakeModel: "",
+    color: "",
+    price: amount,
+    createdAt: new Date().toISOString(),
+    stripeSessionId: codSessionId,
+    paymentStatus: "paid",
+    deliveryMethod: meta.deliveryMethod,
+    deliveryEmail: meta.deliveryEmail,
+    deliverySlot: meta.deliverySlot,
+    deliveryScheduledAt: meta.deliveryScheduledAt,
+    deliveryPhone: meta.deliveryPhone,
+    productChoice: meta.productChoice,
+    telegramSent: false,
+    telegramRecipients: [],
+    telegramErrors: [],
+  };
+  await saveOrder(order);
+  await appendActivity("dataIn", { type: "order_cod", orderId: order.id, serviceTitle: order.serviceTitle, price: order.price });
+  res.json({ orderId: order.id });
+});
+
+// Get COD order by id (for tag-info page when loading by orderId)
+app.get("/api/checkout/cod-order/:id", async (req, res) => {
+  const id = req.params.id;
+  if (!id) return res.status(400).json({ error: "Missing order id" });
+  try {
+    const order = await findOrderById(id);
+    if (!order) return res.status(404).json({ error: "Order not found" });
+    const sessionId = order.stripeSessionId || order.stripe_session_id || "";
+    if (!sessionId.startsWith("cod_")) return res.status(404).json({ error: "Order not found" });
+    res.json(useSupabase() ? orderRowToApi(order) : order);
+  } catch (e) {
+    res.status(500).json({ error: e.message || "Failed to load order" });
   }
 });
 

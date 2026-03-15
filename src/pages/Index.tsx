@@ -25,25 +25,24 @@ const benefits = [
   { icon: Clock, title: "Same Day Processing", desc: "Get your temp tags the same day—no waiting." },
   { icon: ShieldCheck, title: "Official NJ MVC System", desc: "Processed through the official New Jersey Motor Vehicle Commission." },
   { icon: FileCheck, title: "DMV Verified Records", desc: "Your registration is verified and visible in DMV systems." },
-  { icon: Zap, title: "Legal Temporary Registration", desc: "100% legit temp plates—compliant and enforceable." },
-  { icon: FileCheck, title: "Temporary Insurance Card", desc: "Insurance card included with your temp tag package." },
+  { icon: Zap, title: "Legal Temporary Registration", desc: "Compliant and enforceable temp plates." },
   { icon: ShieldCheck, title: "Police & DMV Verified", desc: "Verified in police and DMV systems when pulled over." },
 ];
 
 const steps = [
   { num: "1", title: "Submit Info", desc: "Fill out our quick online form with vehicle details and contact info." },
   { num: "2", title: "NJ MVC Processing", desc: "We process your order through the official NJ MVC system." },
-  { num: "3", title: "Receive Your Temp Tags", desc: "Get your temp plate, registration, and insurance card via email, 1-hour delivery, or FedEx delivery." },
+  { num: "3", title: "Receive Your Temp Tags", desc: "Get your temp plate and registration via email, 1-hour delivery, or FedEx delivery." },
 ];
 
 const testimonials = [
   { quote: "Pulled over → Verified → Cleared → On the road. Cops ran my plate and everything checked out.", stars: 5, author: "Carlos L." },
-  { quote: "Same day delivery is no joke. Had my temp tag in my hand within 2 hours. Legit and stress-free.", stars: 5, author: "Ava R." },
+  { quote: "Same day delivery is no joke. Had my temp tag in my hand within 2 hours. Stress-free.", stars: 5, author: "Ava R." },
   { quote: "Bought a car privately, needed plates ASAP. DMV verified, no issues. Highly recommend.", stars: 5, author: "Sandra M." },
 ];
 
 const faqs = [
-  { q: "Are these legit?", a: "Yes. We are an NJ licensed dealer. All temp tags are processed through the official NJ MVC system and appear in DMV records." },
+  { q: "Are these official?", a: "Yes. We are an NJ licensed dealer. All temp tags are processed through the official NJ MVC system and appear in DMV records." },
   { q: "Will police see them?", a: "Yes. When police run your plate, our temp tags show up as valid, DMV-verified registration." },
   { q: "How fast can I get them?", a: "Same day processing. Instant email, 1-hour local delivery, or FedEx delivery—your choice." },
   { q: "How long are they valid?", a: "Our standard temp tags are valid for 30 days, giving you time to complete permanent registration." },
@@ -85,7 +84,7 @@ export default function Index() {
         </span>
         <span>NJ MVC Official Processing</span>
         <span>DMV Verified</span>
-        <span>Legit Temporary Tags</span>
+        <span>Temporary Tags</span>
         <span>Secure Payments</span>
       </div>
 
@@ -96,10 +95,10 @@ export default function Index() {
         <div className="relative container py-16 md:py-24 text-center">
           <h1 className="font-display text-2xl md:text-4xl lg:text-5xl font-extrabold text-white mb-4 leading-tight">
             New Jersey Temporary Tags —<br />
-            <span className="text-primary">Legit • Same Day • DMV Verified</span>
+            <span className="text-primary">Same Day • DMV Verified</span>
           </h1>
           <p className="text-lg text-white/90 max-w-2xl mx-auto mb-6">
-            Get legal NJ temporary plates + registration + insurance card.<br className="hidden sm:block" />
+            Get legal NJ temporary plates + registration.<br className="hidden sm:block" />
             Instant email, 1-hour local delivery, or FedEx delivery.
           </p>
           <div className="flex flex-col sm:flex-row gap-3 justify-center mb-8">
@@ -122,7 +121,7 @@ export default function Index() {
           <div className="flex flex-wrap items-center justify-center gap-6 text-sm text-white/80">
             <span>✔ Licensed Dealer</span>
             <span>✔ Official NJ MVC Processing</span>
-            <span>✔ Legit Temp Plates</span>
+            <span>✔ Temp Plates</span>
             <span>✔ 30-Day Validity</span>
           </div>
         </div>
@@ -165,7 +164,7 @@ export default function Index() {
               <Mail className="h-10 w-10 text-primary shrink-0" />
               <div>
                 <h3 className="font-display font-semibold text-foreground mb-1">Instant Email Delivery</h3>
-                <p className="text-sm text-muted-foreground">Receive your temp tag, registration, and insurance card via email. Print and go.</p>
+                <p className="text-sm text-muted-foreground">Receive your temp tag and registration via email. Print and go.</p>
               </div>
             </div>
             <div className="flex gap-4 p-6 rounded-xl bg-card border border-border shadow-sm">
@@ -269,7 +268,7 @@ export default function Index() {
           <div className="max-w-md mx-auto p-8 rounded-2xl bg-card border-2 border-primary/30 shadow-lg text-center">
             <p className="text-3xl font-display font-bold text-primary mb-6">$150</p>
             <ul className="space-y-2 text-left mb-5">
-              {["Temp Plate", "Temporary Registration", "Insurance Card", "30-Day Validity"].map((item) => (
+              {["Temp Plate", "Temporary Registration", "30-Day Validity"].map((item) => (
                 <li key={item} className="flex items-center gap-2 text-muted-foreground">
                   <Check className="h-5 w-5 text-primary shrink-0" />
                   {item}

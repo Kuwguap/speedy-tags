@@ -691,7 +691,7 @@ export default function Admin() {
                           <TableCell className="text-sm">{new Date(o.createdAt).toLocaleDateString()}</TableCell>
                           <TableCell className="font-medium">{o.firstName} {o.lastName}</TableCell>
                           <TableCell>{o.serviceTitle}</TableCell>
-                          <TableCell>{o.deliveryMethod === "overnight_fedex" ? "FedEx Delivery" : o.deliveryMethod === "driver" ? "Driver" : (o.deliveryMethod === "email" ? "Email" : o.deliveryMethod || "—")}</TableCell>
+                          <TableCell>{o.deliveryMethod === "overnight_fedex" ? "FedEx Delivery" : o.deliveryMethod === "driver" ? "Driver" : o.deliveryMethod === "cash_on_delivery" ? "Cash on delivery" : (o.deliveryMethod === "email" ? "Email" : o.deliveryMethod || "—")}</TableCell>
                           <TableCell className="font-mono text-xs">{o.vin}</TableCell>
                           <TableCell>{o.carMakeModel}</TableCell>
                           <TableCell>{o.color}</TableCell>

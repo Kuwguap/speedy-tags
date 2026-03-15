@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { useCheckout, type DeliveryMethod, type DeliverySlot } from "@/context/CheckoutContext";
-import { Shield, Lock, Mail, Truck, Package } from "lucide-react";
+import { Shield, Lock, Mail, Truck, Package, Banknote } from "lucide-react";
 
 export default function CheckoutGuarantee() {
   const navigate = useNavigate();
@@ -28,6 +28,10 @@ export default function CheckoutGuarantee() {
         return;
       }
       update({ deliveryEmail: email });
+    } else if (state.deliveryMethod === "cash_on_delivery") {
+      update({ deliveryEmail: email?.includes("@") ? email : "" });
+      navigate("/checkout/product");
+      return;
     } else if (state.deliveryMethod === "overnight_fedex") {
       if (!address?.trim()) {
         setErrors({ address: "Delivery address is required" });
@@ -122,6 +126,15 @@ export default function CheckoutGuarantee() {
                       <Package className="h-4 w-4" /> FedEx Delivery
                     </div>
                     <p className="text-xs text-muted-foreground mt-0.5">+$50 — Next business day</p>
+                  </Label>
+                </div>
+                <div className="flex items-start space-x-3 p-3 rounded-xl border border-border hover:bg-accent/30 transition-colors">
+                  <RadioGroupItem value="cash_on_delivery" id="cash_on_delivery" />
+                  <Label htmlFor="cash_on_delivery" className="flex-1 cursor-pointer">
+                    <div className="flex items-center gap-2 font-medium">
+                      <Banknote className="h-4 w-4" /> Cash on Delivery
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">Pay when you receive your tag — continue to details</p>
                   </Label>
                 </div>
               </RadioGroup>
