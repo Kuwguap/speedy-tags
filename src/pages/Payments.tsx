@@ -113,9 +113,11 @@ export default function Payments() {
                     onClick={() => copyBitcoinAddress(href)}
                     className="w-full rounded-2xl border border-gray-200 bg-white shadow-sm hover:border-teal-200 hover:shadow transition-all overflow-hidden flex items-center gap-4 py-4 px-5 text-left cursor-pointer"
                   >
-                    <div className="w-12 h-12 rounded-xl bg-amber-100 flex items-center justify-center text-amber-700 font-bold shrink-0">
-                      B
-                    </div>
+                    <img
+                      src="/bitcoin.png"
+                      alt=""
+                      className="w-12 h-12 rounded-xl object-contain shrink-0"
+                    />
                     <div className="flex flex-col gap-0.5 flex-1 min-w-0">
                       <span className="font-medium text-gray-800">{label}</span>
                       {displayText ? (
@@ -130,6 +132,14 @@ export default function Payments() {
                 );
               }
 
+              const paymentImages: Record<string, string> = {
+                venmo: "/Venmo.png",
+                cashApp: "/cashapp.png",
+                paypal: "/paypal.png",
+                zelle: "/zelle.png",
+              };
+              const imgSrc = paymentImages[id];
+
               return (
                 <div key={id} className="rounded-2xl border border-gray-200 bg-white shadow-sm hover:border-teal-200 hover:shadow transition-all overflow-hidden">
                   <a
@@ -139,9 +149,9 @@ export default function Payments() {
                     className="flex items-center gap-4 w-full py-4 px-5 text-left"
                   >
                     <img
-                      src="/payment-card.png"
+                      src={imgSrc}
                       alt=""
-                      className="w-12 h-12 rounded-xl object-cover shrink-0 bg-[#FBF7F0]"
+                      className="w-12 h-12 rounded-xl object-contain shrink-0 bg-transparent"
                     />
                     <div className="flex flex-col gap-0.5 flex-1 min-w-0">
                       <span className="font-medium text-gray-800">{label}</span>
