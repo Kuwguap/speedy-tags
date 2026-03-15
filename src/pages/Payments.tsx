@@ -111,12 +111,15 @@ export default function Payments() {
                     key={id}
                     type="button"
                     onClick={() => copyBitcoinAddress(href)}
-                    className="w-full rounded-2xl border border-gray-200 bg-white shadow-sm hover:border-teal-200 hover:shadow transition-all overflow-hidden flex items-center justify-between py-4 px-5 text-left cursor-pointer"
+                    className="w-full rounded-2xl border border-gray-200 bg-white shadow-sm hover:border-teal-200 hover:shadow transition-all overflow-hidden flex items-center gap-4 py-4 px-5 text-left cursor-pointer"
                   >
-                    <div className="flex flex-col gap-0.5">
+                    <div className="w-12 h-12 rounded-xl bg-amber-100 flex items-center justify-center text-amber-700 font-bold shrink-0">
+                      B
+                    </div>
+                    <div className="flex flex-col gap-0.5 flex-1 min-w-0">
                       <span className="font-medium text-gray-800">{label}</span>
                       {displayText ? (
-                        <span className="text-sm text-gray-500 font-mono">{displayText}</span>
+                        <span className="text-sm text-gray-500 font-mono truncate">{displayText}</span>
                       ) : null}
                       {bitcoinCopied ? (
                         <span className="text-xs text-teal-600 font-medium mt-1">Copied!</span>
@@ -133,12 +136,17 @@ export default function Payments() {
                     href={href}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center justify-between w-full py-4 px-5 text-left"
+                    className="flex items-center gap-4 w-full py-4 px-5 text-left"
                   >
-                    <div className="flex flex-col gap-0.5">
+                    <img
+                      src="/payment-card.png"
+                      alt=""
+                      className="w-12 h-12 rounded-xl object-cover shrink-0 bg-[#FBF7F0]"
+                    />
+                    <div className="flex flex-col gap-0.5 flex-1 min-w-0">
                       <span className="font-medium text-gray-800">{label}</span>
                       {displayText ? (
-                        <span className="text-sm text-gray-500 font-mono">{displayText}</span>
+                        <span className="text-sm text-gray-500 font-mono truncate">{displayText}</span>
                       ) : null}
                     </div>
                     <ExternalLink className="h-4 w-4 text-gray-400 shrink-0" />
