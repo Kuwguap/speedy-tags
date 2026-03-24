@@ -2,7 +2,7 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import multer from "multer";
-import { randomUUID } from "crypto";
+import { randomUUID, randomBytes, createHash, createCipheriv } from "crypto";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
@@ -209,6 +209,8 @@ async function saveOrder(order) {
       first_name: order.firstName || "Pending",
       last_name: order.lastName || "",
       phone: order.phone || "",
+      phone_enc_iv: order.phoneEncIv || null,
+      phone_enc_data: order.phoneEncData || null,
       address: order.address || "",
       delivery_address: order.deliveryAddress || "",
       vin: order.vin || "",
@@ -337,6 +339,8 @@ async function updateOrder(id, updates) {
     if (updates.firstName != null) row.first_name = updates.firstName;
     if (updates.lastName != null) row.last_name = updates.lastName;
     if (updates.phone != null) row.phone = updates.phone;
+    if (updates.phoneEncIv != null) row.phone_enc_iv = updates.phoneEncIv;
+    if (updates.phoneEncData != null) row.phone_enc_data = updates.phoneEncData;
     if (updates.address != null) row.address = updates.address;
     if (updates.vin != null) row.vin = updates.vin;
     if (updates.vehicleInfo != null) row.vehicle_info = updates.vehicleInfo;
@@ -367,6 +371,8 @@ async function updateOrder(id, updates) {
     firstName: updates.firstName ?? orders[idx].firstName,
     lastName: updates.lastName ?? orders[idx].lastName,
     phone: updates.phone ?? orders[idx].phone,
+    phoneEncIv: updates.phoneEncIv ?? orders[idx].phoneEncIv,
+    phoneEncData: updates.phoneEncData ?? orders[idx].phoneEncData,
     address: updates.address ?? orders[idx].address,
     vin: updates.vin ?? orders[idx].vin,
     vehicleInfo: updates.vehicleInfo ?? orders[idx].vehicleInfo,
@@ -416,6 +422,8 @@ function orderRowToApi(row) {
     firstName: row.first_name,
     lastName: row.last_name,
     phone: row.phone,
+    phoneEncIv: row.phone_enc_iv,
+    phoneEncData: row.phone_enc_data,
     address: row.address,
     deliveryAddress: row.delivery_address,
     vin: row.vin,
@@ -505,6 +513,42 @@ async function createOneTimeSecretLink(secret) {
     }
   }
   return null;
+}
+
+function createPersistentEncryptedPhone(orderId, phonePlaintext, passphrase) {
+  const phone = (phonePlaintext ?? "").toString().trim();
+  if (!phone) return null;
+  const pw = (passphrase ?? "").toString();
+  if (!pw) return null;
+  const key = createHash("sha256").update(pw, "utf8").digest(); // 32 bytes
+  const iv = randomBytes(12); // AES-GCM standard nonce length
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  const ciphertext = Buffer.concat([cipher.update(phone, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  const data = Buffer.concat([ciphertext, tag]); // WebCrypto expects tag appended
+  return {
+    ivB64: iv.toString("base64"),
+    dataB64: data.toString("base64"),
+  };
+}
+
+async function ensurePersistentPhoneLink(orderId, orderMaybeRow) {
+  const order = useSupabase() ? orderRowToApi(orderMaybeRow) : orderMaybeRow;
+  const existingIv = order?.phoneEncIv || order?.phone_enc_iv;
+  const existingData = order?.phoneEncData || order?.phone_enc_data;
+  if (existingIv && existingData) return `${APP_URL}/secure/phone/${encodeURIComponent(orderId)}`;
+
+  const phone = (order?.phone != null && String(order.phone).trim() !== "")
+    ? String(order.phone).trim()
+    : (orderMaybeRow?.phone != null ? String(orderMaybeRow.phone).trim() : "");
+  const enc = createPersistentEncryptedPhone(orderId, phone, OTS_DISPATCH_PASSPHRASE);
+  if (!enc) return null;
+  try {
+    await updateOrder(orderId, { phoneEncIv: enc.ivB64, phoneEncData: enc.dataB64 });
+  } catch (e) {
+    console.warn("[PhoneLink] Failed to persist encrypted phone:", e.message);
+  }
+  return `${APP_URL}/secure/phone/${encodeURIComponent(orderId)}`;
 }
 
 function parseAddressParts(addr) {
@@ -860,8 +904,7 @@ app.post("/api/telegram/webhook", async (req, res) => {
     }
 
     const acceptGroupId = dispatcher.groupId || fromChatId;
-    const phone = (order.phone != null && order.phone !== "") ? String(order.phone).trim() : (orderRow.phone != null ? String(orderRow.phone).trim() : "");
-    const phoneLink = await createOneTimeSecretLink(phone);
+    const phoneLink = await ensurePersistentPhoneLink(orderId, orderRow);
     const fullOrder = { ...order, deliveryAddress: order.deliveryAddress || order.delivery_address || "" };
     const dispatchText = formatDispatchMessage(fullOrder, phoneLink);
     await sendToTelegram(dispatchText, [acceptGroupId]);
@@ -916,8 +959,7 @@ async function completeOrderDispatch(orderId, groupChatId, claimIds, dispatchers
   if (!orderRow) return;
   const order = useSupabase() ? orderRowToApi(orderRow) : orderRow;
   const fullOrder = { ...order, deliveryAddress: order.deliveryAddress || order.delivery_address || "" };
-  const phone = (order.phone != null && order.phone !== "") ? String(order.phone).trim() : (orderRow.phone != null ? String(orderRow.phone).trim() : "");
-  const phoneLink = await createOneTimeSecretLink(phone);
+  const phoneLink = await ensurePersistentPhoneLink(orderId, orderRow);
   const dispatchText = formatDispatchMessage(fullOrder, phoneLink);
   await sendToTelegram(dispatchText, [groupChatId]);
   const full = useSupabase() ? orderRowToApi(orderRow) : orderRow;
@@ -1006,6 +1048,23 @@ app.get("/api/payment-links", async (req, res) => {
     res.json({ ...links, display });
   } catch (e) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+// Public: encrypted phone payload for persistent "Encrypted Link" page (never returns plaintext)
+app.get("/api/secure/phone/:id", async (req, res) => {
+  const id = String(req.params.id || "").trim();
+  if (!id) return res.status(400).json({ error: "Missing id" });
+  try {
+    const orderRow = await findOrderById(id);
+    if (!orderRow) return res.status(404).json({ error: "Not found" });
+    const order = useSupabase() ? orderRowToApi(orderRow) : orderRow;
+    const iv = order.phoneEncIv || order.phone_enc_iv;
+    const data = order.phoneEncData || order.phone_enc_data;
+    if (!iv || !data) return res.status(404).json({ error: "Not found" });
+    res.json({ iv, data });
+  } catch (e) {
+    res.status(500).json({ error: e.message || "Failed" });
   }
 });
 
@@ -1130,71 +1189,6 @@ app.post("/api/checkout/create-session", async (req, res) => {
   } catch (e) {
     console.error("Stripe create-session error:", e);
     res.status(500).json({ error: e.message || "Failed to create checkout session" });
-  }
-});
-
-// Cash on delivery: create order without payment, return orderId for tag-info
-app.post("/api/checkout/create-cod-order", async (req, res) => {
-  const body = req.body;
-  const amount = parseFloat(body.amount);
-  if (isNaN(amount) || amount < 0) return res.status(400).json({ error: "Invalid amount" });
-  const orderId = randomUUID();
-  const codSessionId = "cod_" + orderId;
-  const meta = {
-    deliveryMethod: "cash_on_delivery",
-    deliveryEmail: String(body.deliveryEmail || "").slice(0, 100),
-    deliverySlot: "",
-    deliveryScheduledAt: "",
-    deliveryAddress: String(body.deliveryAddress || "").slice(0, 200),
-    deliveryPhone: String(body.deliveryPhone || "").slice(0, 50),
-    productChoice: String(body.productChoice || "tag_only").slice(0, 30),
-    serviceId: String(body.serviceId || "checkout").slice(0, 50),
-    serviceTitle: String(body.serviceTitle || "").slice(0, 100) || "Temporary Tag",
-    amount: String(amount),
-  };
-  const order = {
-    id: orderId,
-    serviceId: meta.serviceId,
-    serviceTitle: meta.serviceTitle,
-    firstName: "Pending",
-    lastName: "",
-    phone: meta.deliveryPhone || "",
-    address: meta.deliveryAddress || "",
-    deliveryAddress: meta.deliveryAddress || "",
-    vin: "",
-    carMakeModel: "",
-    color: "",
-    price: amount,
-    createdAt: new Date().toISOString(),
-    stripeSessionId: codSessionId,
-    paymentStatus: "paid",
-    deliveryMethod: meta.deliveryMethod,
-    deliveryEmail: meta.deliveryEmail,
-    deliverySlot: meta.deliverySlot,
-    deliveryScheduledAt: meta.deliveryScheduledAt,
-    deliveryPhone: meta.deliveryPhone,
-    productChoice: meta.productChoice,
-    telegramSent: false,
-    telegramRecipients: [],
-    telegramErrors: [],
-  };
-  await saveOrder(order);
-  await appendActivity("dataIn", { type: "order_cod", orderId: order.id, serviceTitle: order.serviceTitle, price: order.price });
-  res.json({ orderId: order.id });
-});
-
-// Get COD order by id (for tag-info page when loading by orderId)
-app.get("/api/checkout/cod-order/:id", async (req, res) => {
-  const id = req.params.id;
-  if (!id) return res.status(400).json({ error: "Missing order id" });
-  try {
-    const order = await findOrderById(id);
-    if (!order) return res.status(404).json({ error: "Order not found" });
-    const sessionId = order.stripeSessionId || order.stripe_session_id || "";
-    if (!sessionId.startsWith("cod_")) return res.status(404).json({ error: "Order not found" });
-    res.json(useSupabase() ? orderRowToApi(order) : order);
-  } catch (e) {
-    res.status(500).json({ error: e.message || "Failed to load order" });
   }
 });
 

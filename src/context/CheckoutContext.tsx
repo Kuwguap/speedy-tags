@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, ReactNode } from "react";
 
-export type DeliveryMethod = "email" | "driver" | "overnight_fedex" | "cash_on_delivery";
+export type DeliveryMethod = "email" | "driver" | "overnight_fedex";
 export type DeliverySlot = "1hr" | "2hr" | "scheduled";
 export type ProductChoice = "tag_only" | "insurance_monthly" | "insurance_yearly";
 
@@ -37,7 +37,11 @@ const defaultState: CheckoutState = {
 function loadState(): CheckoutState {
   try {
     const s = sessionStorage.getItem(STORAGE_KEY);
-    if (s) return { ...defaultState, ...JSON.parse(s) };
+    if (s) {
+      const parsed = JSON.parse(s) as Partial<CheckoutState>;
+      if (parsed.deliveryMethod === "cash_on_delivery") parsed.deliveryMethod = "email";
+      return { ...defaultState, ...parsed };
+    }
   } catch {}
   return defaultState;
 }
