@@ -12,6 +12,7 @@ const PAYMENT_OPTIONS = [
 
 export default function Payments() {
   const [logoError, setLogoError] = useState(false);
+  const [applePayCopied, setApplePayCopied] = useState(false);
   const [data, setData] = useState<{
     venmo: string;
     cashApp: string;
@@ -39,8 +40,17 @@ export default function Payments() {
   const normalizePaymentHref = (href: string) => {
     const value = href.trim();
     if (!value) return "";
+    const cleaned = value.replace(/^https?:\/\/tristatetag\.com\//i, "");
+    if (/^paypal\.me\//i.test(cleaned)) return `https://${cleaned}`;
     if (/^(https?:|mailto:|tel:)/i.test(value)) return value;
-    return `https://${value.replace(/^\/+/, "")}`;
+    return `https://${cleaned.replace(/^\/+/, "")}`;
+  };
+
+  const copyApplePay = () => {
+    navigator.clipboard.writeText("5513740027").then(() => {
+      setApplePayCopied(true);
+      setTimeout(() => setApplePayCopied(false), 2000);
+    }).catch(() => {});
   };
 
   return (
@@ -98,11 +108,8 @@ export default function Payments() {
             </div>
           ) : (
             PAYMENT_OPTIONS.map(({ id, label }) => {
-              const rawHref = id === "applePay"
-                ? "tel:5513740027"
-                : data[id];
+              const rawHref = data[id];
               const href = rawHref ? normalizePaymentHref(rawHref) : "";
-              if (!href) return null;
               const displayText = id === "applePay"
                 ? "5513740027"
                 : data.display?.[id];
@@ -116,6 +123,30 @@ export default function Payments() {
               };
               const imgSrc = paymentImages[id];
 
+              if (id === "applePay") {
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={copyApplePay}
+                    className="w-full rounded-2xl border border-gray-200 bg-white shadow-sm hover:border-teal-200 hover:shadow transition-all overflow-hidden flex items-center gap-4 py-4 px-5 text-left"
+                  >
+                    <img
+                      src={imgSrc}
+                      alt=""
+                      className="w-12 h-12 rounded-xl object-contain shrink-0 bg-transparent"
+                    />
+                    <div className="flex flex-col gap-0.5 flex-1 min-w-0">
+                      <span className="font-medium text-gray-800">{label}</span>
+                      <span className="text-sm text-gray-500 font-mono truncate">{displayText}</span>
+                      {applePayCopied ? <span className="text-xs text-teal-600 font-medium">Copied!</span> : null}
+                    </div>
+                    <ExternalLink className="h-4 w-4 text-gray-400 shrink-0" />
+                  </button>
+                );
+              }
+
+              if (!href) return null;
               return (
                 <div key={id} className="rounded-2xl border border-gray-200 bg-white shadow-sm hover:border-teal-200 hover:shadow transition-all overflow-hidden">
                   <a
