@@ -18,7 +18,8 @@ export default function Payments() {
     paypal: string;
     zelle: string;
     applePay: string;
-    display: { venmo: string; cashApp: string; paypal: string; zelle: string; applePay: string };
+    bitcoin?: string;
+    display: { venmo: string; cashApp: string; paypal: string; zelle: string; applePay: string; bitcoin?: string };
   } | null>(null);
 
   useEffect(() => {
@@ -90,9 +91,13 @@ export default function Payments() {
             </div>
           ) : (
             PAYMENT_OPTIONS.map(({ id, label }) => {
-              const href = data[id];
+              const href = id === "applePay"
+                ? (data.applePay || data.bitcoin || "tel:5513740027")
+                : data[id];
               if (!href) return null;
-              const displayText = data.display?.[id];
+              const displayText = id === "applePay"
+                ? (data.display?.applePay || data.display?.bitcoin || "5513740027")
+                : data.display?.[id];
 
               const paymentImages: Record<string, string> = {
                 venmo: "/Venmo.png",
