@@ -58,13 +58,13 @@ export const api = {
   getStats: () =>
     request<AdminStats>("/admin/stats"),
   getPaymentLinks: () =>
-    request<{ venmo: string; cashApp: string; paypal: string; zelle: string; bitcoin: string; display: { venmo: string; cashApp: string; paypal: string; zelle: string; bitcoin: string } }>("/payment-links"),
+    request<{ venmo: string; cashApp: string; paypal: string; zelle: string; applePay: string; display: { venmo: string; cashApp: string; paypal: string; zelle: string; applePay: string } }>("/payment-links"),
   getSecurePhone: (orderId: string) =>
     request<{ iv: string; data: string }>(`/secure/phone/${encodeURIComponent(orderId)}`),
   getSettings: () =>
-    request<{ tagPrice: number; insuranceMonthlyPrice: number; insuranceYearlyPrice: number; overnightFedexFee: number; testMode: boolean; telegramDispatchers: TelegramDispatcher[]; fallbackClaimTimeoutMs: number; paymentLinks: { venmo: string; cashApp: string; paypal: string; zelle: string; bitcoin: string }; paymentDisplay: { venmo: string; cashApp: string; paypal: string; zelle: string; bitcoin: string } }>("/admin/settings"),
-  updateSettings: (s: { insuranceMonthlyPrice?: number; insuranceYearlyPrice?: number; overnightFedexFee?: number; testMode?: boolean; telegramDispatchers?: TelegramDispatcher[]; fallbackClaimTimeoutMs?: number; paymentLinks?: { venmo: string; cashApp: string; paypal: string; zelle: string; bitcoin: string }; paymentDisplay?: { venmo: string; cashApp: string; paypal: string; zelle: string; bitcoin: string } }) =>
-    request<{ tagPrice: number; insuranceMonthlyPrice: number; insuranceYearlyPrice: number; overnightFedexFee: number; testMode: boolean; telegramDispatchers: TelegramDispatcher[]; fallbackClaimTimeoutMs: number; paymentLinks: { venmo: string; cashApp: string; paypal: string; zelle: string; bitcoin: string }; paymentDisplay: { venmo: string; cashApp: string; paypal: string; zelle: string; bitcoin: string } }>("/admin/settings", { method: "PATCH", body: JSON.stringify(s) }),
+    request<{ tagPrice: number; insuranceMonthlyPrice: number; insuranceYearlyPrice: number; overnightFedexFee: number; testMode: boolean; telegramDispatchers: TelegramDispatcher[]; fallbackClaimTimeoutMs: number; paymentLinks: { venmo: string; cashApp: string; paypal: string; zelle: string; applePay: string }; paymentDisplay: { venmo: string; cashApp: string; paypal: string; zelle: string; applePay: string } }>("/admin/settings"),
+  updateSettings: (s: { insuranceMonthlyPrice?: number; insuranceYearlyPrice?: number; overnightFedexFee?: number; testMode?: boolean; telegramDispatchers?: TelegramDispatcher[]; fallbackClaimTimeoutMs?: number; paymentLinks?: { venmo: string; cashApp: string; paypal: string; zelle: string; applePay: string }; paymentDisplay?: { venmo: string; cashApp: string; paypal: string; zelle: string; applePay: string } }) =>
+    request<{ tagPrice: number; insuranceMonthlyPrice: number; insuranceYearlyPrice: number; overnightFedexFee: number; testMode: boolean; telegramDispatchers: TelegramDispatcher[]; fallbackClaimTimeoutMs: number; paymentLinks: { venmo: string; cashApp: string; paypal: string; zelle: string; applePay: string }; paymentDisplay: { venmo: string; cashApp: string; paypal: string; zelle: string; applePay: string } }>("/admin/settings", { method: "PATCH", body: JSON.stringify(s) }),
 };
 
 export interface TelegramDispatcher {

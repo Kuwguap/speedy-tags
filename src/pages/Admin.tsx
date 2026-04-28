@@ -48,8 +48,8 @@ export default function Admin() {
     testMode: boolean;
     telegramDispatchers: TelegramDispatcher[];
     fallbackClaimTimeoutMs: number;
-    paymentLinks: { venmo: string; cashApp: string; paypal: string; zelle: string; bitcoin: string };
-    paymentDisplay: { venmo: string; cashApp: string; paypal: string; zelle: string; bitcoin: string };
+    paymentLinks: { venmo: string; cashApp: string; paypal: string; zelle: string; applePay: string };
+    paymentDisplay: { venmo: string; cashApp: string; paypal: string; zelle: string; applePay: string };
   } | null>(null);
   const [settingsSaving, setSettingsSaving] = useState(false);
 
@@ -147,8 +147,8 @@ export default function Admin() {
         testMode: settings.testMode,
         telegramDispatchers: settings.telegramDispatchers ?? [],
         fallbackClaimTimeoutMs: settings.fallbackClaimTimeoutMs ?? 45000,
-        paymentLinks: settings.paymentLinks ?? { venmo: "", cashApp: "", paypal: "", zelle: "", bitcoin: "" },
-        paymentDisplay: settings.paymentDisplay ?? { venmo: "", cashApp: "", paypal: "", zelle: "", bitcoin: "" },
+        paymentLinks: settings.paymentLinks ?? { venmo: "", cashApp: "", paypal: "", zelle: "", applePay: "" },
+        paymentDisplay: settings.paymentDisplay ?? { venmo: "", cashApp: "", paypal: "", zelle: "", applePay: "" },
       });
       setSettings(updated);
       toast({ title: "Settings saved!" });
@@ -544,16 +544,16 @@ export default function Admin() {
                 </p>
               </CardHeader>
               <CardContent className="space-y-4">
-                {["venmo", "cashApp", "paypal", "zelle", "bitcoin"].map((key) => (
+                {["venmo", "cashApp", "paypal", "zelle", "applePay"].map((key) => (
                   <div key={key} className="space-y-2 p-3 rounded-lg border border-border/50 bg-muted/20">
-                    <Label className="text-xs capitalize">{key === "cashApp" ? "Cash App" : key} — Link</Label>
+                    <Label className="text-xs capitalize">{key === "cashApp" ? "Cash App" : key === "applePay" ? "Apple Pay" : key} — Link</Label>
                     <Input
                       placeholder={
                         key === "venmo" ? "https://venmo.com/u/TriStateTags" :
                         key === "cashApp" ? "https://cash.app/$TriStateTags" :
                         key === "paypal" ? "https://www.paypal.com/paypalme/..." :
                         key === "zelle" ? "https://www.zellepay.com/" :
-                        "bitcoin:..."
+                        "tel:5513740027"
                       }
                       value={settings?.paymentLinks?.[key as keyof typeof settings.paymentLinks] ?? ""}
                       onChange={(e) =>
@@ -562,7 +562,7 @@ export default function Admin() {
                             ? {
                                 ...s,
                                 paymentLinks: {
-                                  ...(s.paymentLinks ?? { venmo: "", cashApp: "", paypal: "", zelle: "", bitcoin: "" }),
+                                  ...(s.paymentLinks ?? { venmo: "", cashApp: "", paypal: "", zelle: "", applePay: "" }),
                                   [key]: e.target.value,
                                 },
                               }
@@ -574,7 +574,7 @@ export default function Admin() {
                     <div>
                       <Label className="text-xs text-muted-foreground">Display under button (e.g. @handle, $tag, or email)</Label>
                       <Input
-                        placeholder={key === "venmo" ? "@TriStateTags" : key === "cashApp" ? "$TriStateTags" : key === "zelle" ? "@TriStateTagsPayment" : ""}
+                        placeholder={key === "venmo" ? "@TriStateTags" : key === "cashApp" ? "$TriStateTags" : key === "zelle" ? "@TriStateTagsPayment" : key === "applePay" ? "5513740027" : ""}
                         value={settings?.paymentDisplay?.[key as keyof typeof settings.paymentDisplay] ?? ""}
                         onChange={(e) =>
                           setSettings((s) =>
@@ -582,7 +582,7 @@ export default function Admin() {
                               ? {
                                   ...s,
                                   paymentDisplay: {
-                                    ...(s.paymentDisplay ?? { venmo: "", cashApp: "", paypal: "", zelle: "", bitcoin: "" }),
+                                    ...(s.paymentDisplay ?? { venmo: "", cashApp: "", paypal: "", zelle: "", applePay: "" }),
                                     [key]: e.target.value,
                                   },
                                 }

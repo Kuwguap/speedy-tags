@@ -1,13 +1,13 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { api } from "@/lib/api";
-import { Wallet, Share2, ExternalLink, Copy } from "lucide-react";
+import { Wallet, Share2, ExternalLink } from "lucide-react";
 
 const PAYMENT_OPTIONS = [
   { id: "venmo" as const, label: "Venmo" },
   { id: "cashApp" as const, label: "Cash App" },
   { id: "paypal" as const, label: "PayPal" },
   { id: "zelle" as const, label: "Zelle" },
-  { id: "bitcoin" as const, label: "Bitcoin" },
+  { id: "applePay" as const, label: "Apple Pay" },
 ];
 
 export default function Payments() {
@@ -17,22 +17,12 @@ export default function Payments() {
     cashApp: string;
     paypal: string;
     zelle: string;
-    bitcoin: string;
-    display: { venmo: string; cashApp: string; paypal: string; zelle: string; bitcoin: string };
+    applePay: string;
+    display: { venmo: string; cashApp: string; paypal: string; zelle: string; applePay: string };
   } | null>(null);
-  const [bitcoinCopied, setBitcoinCopied] = useState(false);
 
   useEffect(() => {
     api.getPaymentLinks().then(setData).catch(() => setData(null));
-  }, []);
-
-  const copyBitcoinAddress = useCallback((href: string) => {
-    const address = href.replace(/^bitcoin:/i, "").split("?")[0].trim();
-    if (!address) return;
-    navigator.clipboard.writeText(address).then(() => {
-      setBitcoinCopied(true);
-      setTimeout(() => setBitcoinCopied(false), 2000);
-    }).catch(() => {});
   }, []);
 
   const handleShare = () => {
@@ -102,41 +92,14 @@ export default function Payments() {
             PAYMENT_OPTIONS.map(({ id, label }) => {
               const href = data[id];
               if (!href) return null;
-              const isBitcoin = id === "bitcoin" && href.startsWith("bitcoin:");
               const displayText = data.display?.[id];
-
-              if (isBitcoin) {
-                return (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => copyBitcoinAddress(href)}
-                    className="w-full rounded-2xl border border-gray-200 bg-white shadow-sm hover:border-teal-200 hover:shadow transition-all overflow-hidden flex items-center gap-4 py-4 px-5 text-left cursor-pointer"
-                  >
-                    <img
-                      src="/bitcoin.png"
-                      alt=""
-                      className="w-12 h-12 rounded-xl object-contain shrink-0"
-                    />
-                    <div className="flex flex-col gap-0.5 flex-1 min-w-0">
-                      <span className="font-medium text-gray-800">{label}</span>
-                      {displayText ? (
-                        <span className="text-sm text-gray-500 font-mono truncate">{displayText}</span>
-                      ) : null}
-                      {bitcoinCopied ? (
-                        <span className="text-xs text-teal-600 font-medium mt-1">Copied!</span>
-                      ) : null}
-                    </div>
-                    <Copy className="h-4 w-4 text-gray-400 shrink-0" aria-hidden />
-                  </button>
-                );
-              }
 
               const paymentImages: Record<string, string> = {
                 venmo: "/Venmo.png",
                 cashApp: "/cashapp.png",
                 paypal: "/paypal.png",
                 zelle: "/zelle.png",
+                applePay: "/payment-card.png",
               };
               const imgSrc = paymentImages[id];
 

@@ -34,7 +34,7 @@ const DEFAULT_PAYMENT_LINKS = {
   cashApp: "https://cash.app/$TriStateTags",
   paypal: "https://www.paypal.com/paypalme/DwayneFrancis53",
   zelle: "https://www.zellepay.com/",
-  bitcoin: "bitcoin:1EkNKdaL64EiLQCdDdwFFeMgLThojPiXoN",
+  applePay: "tel:5513740027",
 };
 
 const DEFAULT_PAYMENT_DISPLAY = {
@@ -42,7 +42,7 @@ const DEFAULT_PAYMENT_DISPLAY = {
   cashApp: "$TriStateTags",
   paypal: "@DwayneFrancis53",
   zelle: "@TriStateTagsPayment",
-  bitcoin: "1EkNK…PiXoN",
+  applePay: "5513740027",
 };
 
 function derivePaymentDisplay(key, link) {
@@ -60,10 +60,9 @@ function derivePaymentDisplay(key, link) {
     const m = u.match(/paypal\.com\/paypalme\/([^/?]+)/i);
     return m ? "@" + m[1] : "";
   }
-  if (key === "bitcoin" && u.startsWith("bitcoin:")) {
-    const addr = u.replace(/^bitcoin:/i, "").split("?")[0].trim();
-    if (addr.length > 12) return addr.slice(0, 6) + "…" + addr.slice(-4);
-    return addr;
+  if (key === "applePay") {
+    if (u.startsWith("tel:")) return u.replace(/^tel:/i, "").trim();
+    return u;
   }
   return "";
 }
@@ -1031,11 +1030,11 @@ app.get("/api/payment-links", async (req, res) => {
       cashApp: (saved.cashApp && String(saved.cashApp).trim()) || DEFAULT_PAYMENT_LINKS.cashApp,
       paypal: (saved.paypal && String(saved.paypal).trim()) || DEFAULT_PAYMENT_LINKS.paypal,
       zelle: (saved.zelle && String(saved.zelle).trim()) || DEFAULT_PAYMENT_LINKS.zelle,
-      bitcoin: (saved.bitcoin && String(saved.bitcoin).trim()) || DEFAULT_PAYMENT_LINKS.bitcoin,
+      applePay: (saved.applePay && String(saved.applePay).trim()) || DEFAULT_PAYMENT_LINKS.applePay,
     };
     const savedDisplay = s.payment_display && typeof s.payment_display === "object" ? s.payment_display : {};
     const display = {};
-    for (const key of ["venmo", "cashApp", "paypal", "zelle", "bitcoin"]) {
+    for (const key of ["venmo", "cashApp", "paypal", "zelle", "applePay"]) {
       const override = savedDisplay[key] && String(savedDisplay[key]).trim();
       if (override) {
         display[key] = override;
@@ -1562,14 +1561,14 @@ app.get("/api/admin/settings", authMiddleware, async (req, res) => {
         cashApp: paymentLinksRaw.cashApp ?? "",
         paypal: paymentLinksRaw.paypal ?? "",
         zelle: paymentLinksRaw.zelle ?? "",
-        bitcoin: paymentLinksRaw.bitcoin ?? "",
+        applePay: paymentLinksRaw.applePay ?? "",
       },
       paymentDisplay: {
         venmo: paymentDisplayRaw.venmo ?? "",
         cashApp: paymentDisplayRaw.cashApp ?? "",
         paypal: paymentDisplayRaw.paypal ?? "",
         zelle: paymentDisplayRaw.zelle ?? "",
-        bitcoin: paymentDisplayRaw.bitcoin ?? "",
+        applePay: paymentDisplayRaw.applePay ?? "",
       },
     });
   } catch (e) {
@@ -1595,7 +1594,7 @@ app.patch("/api/admin/settings", authMiddleware, async (req, res) => {
         cashApp: String(body.paymentLinks.cashApp ?? "").trim(),
         paypal: String(body.paymentLinks.paypal ?? "").trim(),
         zelle: String(body.paymentLinks.zelle ?? "").trim(),
-        bitcoin: String(body.paymentLinks.bitcoin ?? "").trim(),
+        applePay: String(body.paymentLinks.applePay ?? "").trim(),
       };
     }
     if (body.paymentDisplay != null && typeof body.paymentDisplay === "object") {
@@ -1604,7 +1603,7 @@ app.patch("/api/admin/settings", authMiddleware, async (req, res) => {
         cashApp: String(body.paymentDisplay.cashApp ?? "").trim(),
         paypal: String(body.paymentDisplay.paypal ?? "").trim(),
         zelle: String(body.paymentDisplay.zelle ?? "").trim(),
-        bitcoin: String(body.paymentDisplay.bitcoin ?? "").trim(),
+        applePay: String(body.paymentDisplay.applePay ?? "").trim(),
       };
     }
     if (Array.isArray(body.telegramDispatchers)) {
@@ -1635,14 +1634,14 @@ app.patch("/api/admin/settings", authMiddleware, async (req, res) => {
         cashApp: paymentLinks.cashApp ?? "",
         paypal: paymentLinks.paypal ?? "",
         zelle: paymentLinks.zelle ?? "",
-        bitcoin: paymentLinks.bitcoin ?? "",
+        applePay: paymentLinks.applePay ?? "",
       },
       paymentDisplay: {
         venmo: paymentDisplay.venmo ?? "",
         cashApp: paymentDisplay.cashApp ?? "",
         paypal: paymentDisplay.paypal ?? "",
         zelle: paymentDisplay.zelle ?? "",
-        bitcoin: paymentDisplay.bitcoin ?? "",
+        applePay: paymentDisplay.applePay ?? "",
       },
     });
   } catch (e) {
