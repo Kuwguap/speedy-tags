@@ -36,6 +36,13 @@ export default function Payments() {
     }
   };
 
+  const normalizePaymentHref = (href: string) => {
+    const value = href.trim();
+    if (!value) return "";
+    if (/^(https?:|mailto:|tel:)/i.test(value)) return value;
+    return `https://${value.replace(/^\/+/, "")}`;
+  };
+
   return (
     <div className="min-h-screen bg-white flex flex-col items-center py-8 px-4 border-x border-teal-100/80 max-w-lg mx-auto">
       <div className="w-full max-w-md flex flex-col items-center">
@@ -91,9 +98,10 @@ export default function Payments() {
             </div>
           ) : (
             PAYMENT_OPTIONS.map(({ id, label }) => {
-              const href = id === "applePay"
+              const rawHref = id === "applePay"
                 ? "tel:5513740027"
                 : data[id];
+              const href = rawHref ? normalizePaymentHref(rawHref) : "";
               if (!href) return null;
               const displayText = id === "applePay"
                 ? "5513740027"
