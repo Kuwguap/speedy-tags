@@ -92,11 +92,11 @@ export default function Payments() {
           ) : (
             PAYMENT_OPTIONS.map(({ id, label }) => {
               const href = id === "applePay"
-                ? (data.applePay || data.bitcoin || "tel:5513740027")
+                ? "tel:5513740027"
                 : data[id];
               if (!href) return null;
               const displayText = id === "applePay"
-                ? (data.display?.applePay || data.display?.bitcoin || "5513740027")
+                ? "5513740027"
                 : data.display?.[id];
 
               const paymentImages: Record<string, string> = {
@@ -104,7 +104,7 @@ export default function Payments() {
                 cashApp: "/cashapp.png",
                 paypal: "/paypal.png",
                 zelle: "/zelle.png",
-                applePay: "/payment-card.png",
+                applePay: "/applepay.png",
               };
               const imgSrc = paymentImages[id];
 
