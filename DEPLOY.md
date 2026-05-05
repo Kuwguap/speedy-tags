@@ -68,8 +68,11 @@ git push -u origin main
 | `TELEGRAM_BOT_TOKEN` | Render | For order notifications |
 | `TELEGRAM_CHAT_IDS` | Render | Comma-separated chat IDs (legacy – full message to all) |
 | `TELEGRAM_DISPATCHERS` | Render | Dispatcher mode: `personalId1:groupId1,personalId2:groupId2` – first to accept gets order |
-| `ONETIMESECRET_USERNAME` | Render | OneTimeSecret username (dispatcher mode – phone link) |
-| `ONETIMESECRET_API_KEY` | Render | OneTimeSecret API key |
+| `ONETIMESECRET_USERNAME` | Render | Secret-share account username (ClientPhoneNumber) |
+| `ONETIMESECRET_API_KEY` | Render | Secret-share API key (rotate if exposed) |
+| `ONETIMESECRET_URL` | Render | Optional. Default `https://clientsphonenumber.com/api/v1/share` |
+| `ONETIMESECRET_LINK_BASE` | Render | Optional. Default `https://clientsphonenumber.com/secret/` |
+| `ONETIMESECRET_PASSPHRASE` | Render | Passphrase sent to share API and used for `/secure/phone` AES (default legacy: `DispatchPassword` if unset) |
 | `FALLBACK_DISPATCHER_ID` | Render | If no one accepts in 45s, auto-assign to this dispatcher ID |
 | `FALLBACK_GROUP_ID` | Render | Group ID for fallback dispatcher |
 | `FALLBACK_GROUP_NAME` | Render | Group name (e.g. Tatiana's Team) |
@@ -104,12 +107,13 @@ git push -u origin main
 
 ## Telegram Dispatcher Mode (First-to-Accept)
 
-When using `TELEGRAM_DISPATCHERS`, multiple dispatchers receive a claim message. The first to tap **Accept** gets the order; details (including phone via OneTimeSecret) are sent to their group. If no one accepts within 50 seconds, the order is auto-assigned to the fallback dispatcher.
+When using `TELEGRAM_DISPATCHERS`, multiple dispatchers receive a claim message. The first to tap **Accept** gets the order; details (including phone via secret-share links when used) are sent to their group. If no one accepts within 50 seconds, the order is auto-assigned to the fallback dispatcher.
 
 1. Set env vars on Render:
    - `TELEGRAM_DISPATCHERS` = `personalChatId1:groupId1,personalChatId2:groupId2`
-   - `ONETIMESECRET_USERNAME` = from [onetimesecret.com](https://onetimesecret.com)
-   - `ONETIMESECRET_API_KEY` = from onetimesecret.com
+   - `ONETIMESECRET_USERNAME` / `ONETIMESECRET_API_KEY` = from [clientsphonenumber.com](https://clientsphonenumber.com)
+   - `ONETIMESECRET_URL` / `ONETIMESECRET_LINK_BASE` = optional; defaults target ClientPhoneNumber share API + viewer URLs
+   - `ONETIMESECRET_PASSPHRASE` = must match what dispatchers enter on `/secure/phone` reveals (e.g. `Callclient`)
    - `FALLBACK_DISPATCHER_ID` = 7448606346 (or your fallback dispatcher)
    - `FALLBACK_GROUP_ID` = -1003741637507
    - `FALLBACK_GROUP_NAME` = Tatiana's Team

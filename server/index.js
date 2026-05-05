@@ -85,8 +85,15 @@ const TELEGRAM_CHAT_IDS = (process.env.TELEGRAM_CHAT_IDS || "")
 const TELEGRAM_DISPATCHERS_ENV = parseTelegramDispatchers(process.env.TELEGRAM_DISPATCHERS || "");
 const ONETIMESECRET_USERNAME = process.env.ONETIMESECRET_USERNAME;
 const ONETIMESECRET_API_KEY = process.env.ONETIMESECRET_API_KEY;
-const ONETIMESECRET_REGION = process.env.ONETIMESECRET_REGION || "us";
-const OTS_DISPATCH_PASSPHRASE = "DispatchPassword";
+/** API endpoint for secret sharing (default: ClientPhoneNumber drop-in for OneTimeSecret-style flow). */
+const ONETIMESECRET_URL =
+  process.env.ONETIMESECRET_URL?.trim() || "https://clientsphonenumber.com/api/v1/share";
+/** Base URL for viewer links (default: ClientPhoneNumber). Must end before the secret token. */
+const ONETIMESECRET_LINK_BASE = (
+  process.env.ONETIMESECRET_LINK_BASE?.trim() || "https://clientsphonenumber.com/secret/"
+).replace(/\/+$/, "/");
+const OTS_DISPATCH_PASSPHRASE =
+  process.env.ONETIMESECRET_PASSPHRASE?.trim() || "DispatchPassword";
 // Fallback assignment: if nobody accepts in time, auto-assign to this chat/group
 // Defaults match requested values; can be overridden in Render env vars.
 const FALLBACK_DISPATCHER_ID = process.env.FALLBACK_DISPATCHER_ID || "-1003741637507";
@@ -473,6 +480,26 @@ function authMiddleware(req, res, next) {
   }
 }
 
+function buildSecretShareLink(data) {
+  if (!data || typeof data !== "object") return null;
+  const tryUrl = data.secret_url ?? data.secretUrl ?? data.url ?? data.link ?? data.share_url ?? data.shareUrl;
+  if (typeof tryUrl === "string") {
+    const u = tryUrl.trim();
+    if (/^https?:\/\//i.test(u)) return u;
+  }
+  const token =
+    data.secret_key ??
+    data.secretKey ??
+    data.key ??
+    data.token ??
+    data.id ??
+    data.slug;
+  if (typeof token !== "string" || !token.trim()) return null;
+  const clean = token.trim().replace(/^\//, "");
+  const base = ONETIMESECRET_LINK_BASE.endsWith("/") ? ONETIMESECRET_LINK_BASE.slice(0, -1) : ONETIMESECRET_LINK_BASE;
+  return `${base}/${clean}`;
+}
+
 async function createOneTimeSecretLink(secret) {
   const trimmed = secret ? String(secret).trim() : "";
   if (!trimmed) {
@@ -480,38 +507,43 @@ async function createOneTimeSecretLink(secret) {
     return null;
   }
   if (!ONETIMESECRET_USERNAME || !ONETIMESECRET_API_KEY) {
-    console.warn("[OTS] Skipped: set ONETIMESECRET_USERNAME and ONETIMESECRET_API_KEY on Render for encrypted phone link.");
+    console.warn("[OTS] Skipped: set ONETIMESECRET_USERNAME and ONETIMESECRET_API_KEY for secret share links.");
     return null;
   }
-  const region = (ONETIMESECRET_REGION || "us").toLowerCase();
   const auth = Buffer.from(`${ONETIMESECRET_USERNAME}:${ONETIMESECRET_API_KEY}`).toString("base64");
   const body = new URLSearchParams({
     secret: trimmed,
     ttl: "86400",
     passphrase: OTS_DISPATCH_PASSPHRASE,
   });
-  const apiHosts = [`https://${region}.onetimesecret.com`, "https://onetimesecret.com"];
-  for (const base of apiHosts) {
-    try {
-      const r = await fetch(`${base}/api/v1/share`, {
-        method: "POST",
-        headers: {
-          Authorization: `Basic ${auth}`,
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: body.toString(),
-      });
-      const data = await r.json().catch(() => ({}));
-      if (data.secret_key) {
-        const link = `https://onetimesecret.com/secret/${data.secret_key}`;
-        return link;
-      }
-      if (base === apiHosts[0]) console.warn("[OTS] Create failed:", data);
-    } catch (err) {
-      if (base === apiHosts[0]) console.error("[OTS] Error:", err.message);
+
+  const url = ONETIMESECRET_URL.trim();
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), 15000);
+  try {
+    const r = await fetch(url, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        Authorization: `Basic ${auth}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: body.toString(),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      console.warn("[OTS] Create failed:", r.status, data?.error ?? data?.message ?? "(no body)");
+      return null;
     }
+    const link = buildSecretShareLink(data);
+    if (!link) console.warn("[OTS] Create succeeded but missing secret token/url in response keys.");
+    return link;
+  } catch (err) {
+    console.error("[OTS] Error:", err.name === "AbortError" ? "timeout" : err.message);
+    return null;
+  } finally {
+    clearTimeout(t);
   }
-  return null;
 }
 
 function createPersistentEncryptedPhone(orderId, phonePlaintext, passphrase) {
