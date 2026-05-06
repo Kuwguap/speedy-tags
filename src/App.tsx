@@ -14,6 +14,7 @@ import Admin from "./pages/Admin";
 import Terms from "./pages/Terms";
 import Privacy from "./pages/Privacy";
 import Payments from "./pages/Payments";
+import SecurePhone from "./pages/SecurePhone";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -35,6 +36,7 @@ const App = () => (
             <Route path="/admin" element={<Admin />} />
             <Route path="/payment" element={<Payments />} />
             <Route path="/payments" element={<Payments />} />
+            <Route path="/secure/phone/:orderId" element={<SecurePhone />} />
             <Route path="/terms" element={<Terms />} />
             <Route path="/privacy" element={<Privacy />} />
             <Route path="*" element={<NotFound />} />

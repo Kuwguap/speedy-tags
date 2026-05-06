@@ -29,6 +29,11 @@ import {
 } from "lucide-react";
 import AdminLogin from "./AdminLogin";
 
+function formatUsd(value: unknown) {
+  const n = typeof value === "number" ? value : parseFloat(String(value ?? ""));
+  return (Number.isFinite(n) ? n : 0).toFixed(2);
+}
+
 export default function Admin() {
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -272,7 +277,7 @@ export default function Admin() {
                       </CardTitle>
                     </CardHeader>
                     <CardContent>
-                      <p className="text-3xl font-display font-bold">${stats.totalPayments.toFixed(2)}</p>
+                      <p className="text-3xl font-display font-bold">${formatUsd(stats.totalPayments)}</p>
                       <p className="text-sm text-muted-foreground">Total revenue</p>
                     </CardContent>
                   </Card>
@@ -329,7 +334,7 @@ export default function Admin() {
                               <TableRow key={o.id}>
                                 <TableCell className="font-mono text-xs">{o.id.slice(0, 8)}…</TableCell>
                                 <TableCell>{o.serviceTitle}</TableCell>
-                                <TableCell>${o.price.toFixed(2)}</TableCell>
+                                <TableCell>${formatUsd(o.price)}</TableCell>
                                 <TableCell className="text-sm">{new Date(o.createdAt).toLocaleString()}</TableCell>
                                 <TableCell>
                                   {o.telegramSent ? (
@@ -439,7 +444,7 @@ export default function Admin() {
                 <div key={s.id} className="flex items-center justify-between p-4 rounded-lg bg-card border border-border/50 shadow-card">
                   <div>
                     <h3 className="font-semibold text-foreground">{s.title}</h3>
-                    <p className="text-sm text-muted-foreground">${s.price.toFixed(2)}</p>
+                    <p className="text-sm text-muted-foreground">${formatUsd(s.price)}</p>
                   </div>
                   <Button variant="ghost" size="icon" onClick={() => handleDelete(s.id)} className="text-destructive hover:text-destructive">
                     <Trash2 className="h-4 w-4" />
@@ -461,7 +466,7 @@ export default function Admin() {
               <CardContent className="space-y-6">
                 {settings && (
                   <>
-                    <p className="text-sm text-muted-foreground">Tag price: ${settings.tagPrice.toFixed(2)} (from first service in Services)</p>
+                    <p className="text-sm text-muted-foreground">Tag price: ${formatUsd(settings.tagPrice)} (from first service in Services)</p>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <div>
                         <Label>Insurance Monthly ($/month)</Label>
@@ -696,7 +701,7 @@ export default function Admin() {
                           <TableCell>{o.carMakeModel}</TableCell>
                           <TableCell>{o.color}</TableCell>
                           <TableCell>{o.phone}</TableCell>
-                          <TableCell className="text-right font-semibold">${o.price.toFixed(2)}</TableCell>
+                          <TableCell className="text-right font-semibold">${formatUsd(o.price)}</TableCell>
                           <TableCell>
                             {o.telegramSent ? (
                               <Badge variant="secondary" className="bg-success/10 text-success text-xs">Sent</Badge>

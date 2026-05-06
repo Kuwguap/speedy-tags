@@ -417,10 +417,17 @@ async function loadActivity() {
   return loadJson(ACTIVITY_FILE, { dataIn: [], dataOut: [], payments: [] });
 }
 
+function normalizeOrderPrice(p) {
+  const n = typeof p === "number" ? p : parseFloat(String(p ?? ""));
+  return Number.isFinite(n) ? n : 0;
+}
+
 // Map Supabase rows to API shape
 function orderRowToApi(row) {
   if (!row) return row;
-  if (row.serviceId) return row;
+  if (row.serviceId) {
+    return { ...row, price: normalizeOrderPrice(row.price) };
+  }
   return {
     id: row.id,
     serviceId: row.service_id,
@@ -438,7 +445,7 @@ function orderRowToApi(row) {
     year: row.year,
     make: row.make,
     model: row.model,
-    price: parseFloat(row.price),
+    price: normalizeOrderPrice(row.price),
     createdAt: row.created_at,
     telegramSent: row.telegram_sent,
     telegramRecipients: typeof row.telegram_recipients === "string" ? JSON.parse(row.telegram_recipients || "[]") : (row.telegram_recipients || []),
@@ -1686,7 +1693,7 @@ app.get("/api/admin/stats", authMiddleware, async (req, res) => {
     const orders = await loadOrders();
     const ordersApi = useSupabase() ? orders.map(orderRowToApi) : orders;
     const activity = await loadActivity();
-    const totalPayments = ordersApi.reduce((s, o) => s + (o.price || parseFloat(o.price) || 0), 0);
+    const totalPayments = ordersApi.reduce((s, o) => s + normalizeOrderPrice(o.price), 0);
     res.json({
       ordersCount: ordersApi.length,
       totalPayments,

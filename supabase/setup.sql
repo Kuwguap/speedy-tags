@@ -57,6 +57,8 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS success_email_sent BOOLEAN DEFAULT F
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS telegram_accepted_by TEXT;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS telegram_accepted_group_id TEXT;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS telegram_claim_message_ids JSONB DEFAULT '{}';
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS phone_enc_iv TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS phone_enc_data TEXT;
 
 -- Settings table (checkout config)
 CREATE TABLE IF NOT EXISTS settings (
