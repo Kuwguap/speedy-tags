@@ -2,5 +2,20 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "framework": null,
-  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+  "headers": [
+    {
+      "source": "/backend/app.js",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
+      ]
+    }
+  ],
+  "rewrites": [
+    { "source": "/backend", "destination": "/backend/index.html" },
+    { "source": "/backend/", "destination": "/backend/index.html" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
 }
