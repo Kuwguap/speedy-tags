@@ -101,10 +101,22 @@ const FALLBACK_GROUP_ID = process.env.FALLBACK_GROUP_ID || "-1003741637507";
 const FALLBACK_GROUP_NAME = process.env.FALLBACK_GROUP_NAME || "Tatiana's Team";
 const FALLBACK_CLAIM_TIMEOUT_MS = parseInt(process.env.FALLBACK_CLAIM_TIMEOUT_MS || "45000", 10);
 
+// Telegram chat IDs are integers but admins often paste them from external
+// tools that add invisible characters (NBSP, zero-width space, BOM, fancy
+// dashes). Strict equality (===) silently fails when comparing such strings to
+// the chat IDs Telegram sends in callbacks, which manifests as "Accept doesn't
+// work". canonicalChatId normalizes both sides identically before compare.
+function canonicalChatId(raw) {
+  if (raw == null) return "";
+  return String(raw)
+    .replace(/[\s\u00A0\u200B-\u200D\uFEFF]/g, "") // whitespace + zero-width + BOM
+    .replace(/[\u2010-\u2015\u2212\uFE63\uFF0D]/g, "-"); // fancy/full-width dashes → ASCII -
+}
+
 function parseTelegramDispatchers(str) {
   if (!str || typeof str !== "string") return [];
   return str.split(",").map((pair) => {
-    const parts = pair.trim().split(":").map((s) => s.trim());
+    const parts = pair.trim().split(":").map((s) => canonicalChatId(s));
     const [dispatcherId, groupId] = parts;
     return dispatcherId && groupId ? { dispatcherId, groupId, groupName: parts[2] || `Group ${groupId.slice(-4)}` } : null;
   }).filter(Boolean);
@@ -116,8 +128,8 @@ async function loadDispatchers() {
   if (Array.isArray(fromSettings) && fromSettings.length > 0) {
     const normalized = fromSettings
       .map((d) => ({
-        dispatcherId: String(d?.dispatcherId || "").trim(),
-        groupId: String(d?.groupId || "").trim(),
+        dispatcherId: canonicalChatId(d?.dispatcherId),
+        groupId: canonicalChatId(d?.groupId),
         groupName: String(d?.groupName || "").trim(),
       }))
       // Allow entries with just a groupId (dispatcherId optional); group is where claims/buttons live.
@@ -138,8 +150,8 @@ async function loadDispatchers() {
   }
   if (TELEGRAM_CHAT_IDS.length > 0) {
     return TELEGRAM_CHAT_IDS.map((chatId) => ({
-      dispatcherId: chatId,
-      groupId: chatId,
+      dispatcherId: canonicalChatId(chatId),
+      groupId: canonicalChatId(chatId),
       groupName: `Chat ${String(chatId).slice(-6)}`,
     }));
   }
@@ -279,11 +291,14 @@ async function appendActivity(type, payload) {
 }
 
 function normalizeDispatchers(val) {
-  if (Array.isArray(val)) return val.map((d) => ({
-    dispatcherId: String(d.dispatcherId ?? d.dispatcher_id ?? "").trim(),
-    groupId: String(d.groupId ?? d.group_id ?? "").trim(),
-    groupName: String(d.groupName ?? d.group_name ?? "").trim() || (d.groupId || d.group_id ? `Group ${String(d.groupId || d.group_id).slice(-4)}` : ""),
-  }));
+  if (Array.isArray(val)) return val.map((d) => {
+    const groupId = canonicalChatId(d.groupId ?? d.group_id);
+    return {
+      dispatcherId: canonicalChatId(d.dispatcherId ?? d.dispatcher_id),
+      groupId,
+      groupName: String(d.groupName ?? d.group_name ?? "").trim() || (groupId ? `Group ${groupId.slice(-4)}` : ""),
+    };
+  });
   if (typeof val === "string") { try { return normalizeDispatchers(JSON.parse(val)); } catch { return []; } }
   return [];
 }
@@ -897,7 +912,9 @@ app.post("/api/telegram/webhook", async (req, res) => {
     return;
   }
   const fromMessageId = cq.message?.message_id;
-  const fromChatId = String(cq.message?.chat?.id || "");
+  const rawFromChatId = String(cq.message?.chat?.id || "");
+  const fromChatId = canonicalChatId(rawFromChatId);
+  const fromUserId = canonicalChatId(cq.from?.id);
 
   if (cq.data.startsWith("decline_")) {
     await answerCallback(cq.id, "Declined");
@@ -921,13 +938,43 @@ app.post("/api/telegram/webhook", async (req, res) => {
 
   try {
     const orderRow = await findOrderById(orderId);
-    if (!orderRow) return;
+    if (!orderRow) {
+      console.warn(`[Telegram webhook] Order ${orderId} not found for accept from chat ${fromChatId}.`);
+      if (fromMessageId) await editTelegramMessage(fromChatId, fromMessageId, "❌ Order not found. It may have expired.");
+      return;
+    }
     const order = useSupabase() ? orderRowToApi(orderRow) : orderRow;
     const claimIds = typeof order.telegramClaimMessageIds === "object" ? order.telegramClaimMessageIds : (order.telegram_claim_message_ids && typeof order.telegram_claim_message_ids === "string" ? JSON.parse(order.telegram_claim_message_ids || "{}") : {});
 
     const dispatchers = await loadDispatchers();
-    const dispatcher = dispatchers.find((d) => d.dispatcherId === fromChatId || d.groupId === fromChatId);
-    if (!dispatcher) return;
+    const dispatcher = dispatchers.find(
+      (d) => d.dispatcherId === fromChatId || d.groupId === fromChatId || d.dispatcherId === fromUserId,
+    );
+    if (!dispatcher) {
+      // Previously this silently dropped the click. Surface the mismatch in
+      // both server logs and the dispatcher's chat so the admin can see
+      // exactly which chat ID Telegram reported vs what's saved in /admin.
+      const configured = dispatchers.map((d) => d.groupId).filter(Boolean).join(", ") || "(none)";
+      console.warn(
+        `[Telegram webhook] Accept from chat ${fromChatId} (user ${fromUserId}) ` +
+          `did not match any configured dispatcher. Configured group IDs: ${configured}`,
+      );
+      if (fromMessageId) {
+        await editTelegramMessage(
+          fromChatId,
+          fromMessageId,
+          [
+            "⚠️ <b>This chat isn't registered as a dispatcher.</b>",
+            "",
+            `Chat ID Telegram reported: <code>${escapeTelegramHtml(fromChatId)}</code>`,
+            `Configured group IDs: <code>${escapeTelegramHtml(configured)}</code>`,
+            "",
+            "Admin → /admin → Telegram Dispatchers: paste the exact chat ID above into the Group ID field.",
+          ].join("\n"),
+        );
+      }
+      return;
+    }
 
     const alreadyAccepted = order.telegramAcceptedBy || order.telegram_accepted_by;
     if (alreadyAccepted) {
@@ -935,13 +982,19 @@ app.post("/api/telegram/webhook", async (req, res) => {
       return;
     }
 
-    const won = await tryAcceptOrder(orderId, fromChatId, dispatcher.groupId || fromChatId);
+    const acceptGroupId = dispatcher.groupId || fromChatId;
+    const won = await tryAcceptOrder(orderId, fromChatId, acceptGroupId);
     if (!won) {
       if (fromMessageId) await editTelegramMessage(fromChatId, fromMessageId, "❌ This tag was taken by another team.");
       return;
     }
 
-    const acceptGroupId = dispatcher.groupId || fromChatId;
+    if (fromMessageId) {
+      // Replace the claim button with a confirmation so the accepter sees something happen
+      // even if sending the full dispatch to the group races slower than the click.
+      await editTelegramMessage(fromChatId, fromMessageId, "✅ Accepted. Sending full order to your group…");
+    }
+
     const phoneLink = await ensurePersistentPhoneLink(orderId, orderRow);
     const fullOrder = { ...order, deliveryAddress: order.deliveryAddress || order.delivery_address || "" };
     const dispatchText = formatDispatchMessage(fullOrder, phoneLink);
@@ -954,7 +1007,7 @@ app.post("/api/telegram/webhook", async (req, res) => {
 
     for (const [chatId, mid] of Object.entries(claimIds || {})) {
       if (!mid) continue;
-      if (String(chatId) === String(fromChatId)) continue;
+      if (canonicalChatId(chatId) === fromChatId) continue;
       await editTelegramMessage(chatId, mid, "❌ This tag was taken by another team.");
     }
   } catch (err) {
@@ -1646,11 +1699,14 @@ app.patch("/api/admin/settings", authMiddleware, async (req, res) => {
       };
     }
     if (Array.isArray(body.telegramDispatchers)) {
-      updates.telegram_dispatchers = body.telegramDispatchers.map((d) => ({
-        dispatcherId: String(d.dispatcherId || "").trim(),
-        groupId: String(d.groupId || "").trim(),
-        groupName: String(d.groupName || "").trim() || (d.groupId ? `Group ${String(d.groupId).slice(-4)}` : ""),
-      }));
+      updates.telegram_dispatchers = body.telegramDispatchers.map((d) => {
+        const groupId = canonicalChatId(d.groupId);
+        return {
+          dispatcherId: canonicalChatId(d.dispatcherId),
+          groupId,
+          groupName: String(d.groupName || "").trim() || (groupId ? `Group ${groupId.slice(-4)}` : ""),
+        };
+      });
     }
     await saveSettings(updates);
     const [s, services] = await Promise.all([loadSettings(), loadServices()]);
@@ -1683,6 +1739,46 @@ app.patch("/api/admin/settings", authMiddleware, async (req, res) => {
         applePay: paymentDisplay.applePay ?? "",
       },
     });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Inspect the current Telegram webhook (URL, pending updates, last error).
+// Lets the admin verify the bot is correctly wired up without using curl.
+app.get("/api/admin/telegram/webhook", authMiddleware, async (req, res) => {
+  if (!TELEGRAM_BOT_TOKEN) return res.status(400).json({ error: "TELEGRAM_BOT_TOKEN not set on server" });
+  try {
+    const r = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getWebhookInfo`);
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || !data.ok) {
+      return res.status(502).json({ error: data?.description || "Telegram getWebhookInfo failed" });
+    }
+    const expectedUrl = `${req.protocol}://${req.get("host")}/api/telegram/webhook`;
+    res.json({ info: data.result, expectedUrl });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Register the Telegram webhook to a specific URL, or default to the current
+// request's host. Use this immediately after a domain or hosting change so
+// dispatcher Accept buttons start delivering callbacks again.
+app.post("/api/admin/telegram/webhook", authMiddleware, async (req, res) => {
+  if (!TELEGRAM_BOT_TOKEN) return res.status(400).json({ error: "TELEGRAM_BOT_TOKEN not set on server" });
+  const inputUrl = typeof req.body?.url === "string" ? req.body.url.trim() : "";
+  const url = inputUrl || `${req.protocol}://${req.get("host")}/api/telegram/webhook`;
+  try {
+    const r = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url, allowed_updates: ["callback_query"], drop_pending_updates: false }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || !data.ok) {
+      return res.status(502).json({ error: data?.description || "Telegram setWebhook failed", url });
+    }
+    res.json({ ok: true, url, description: data.description || "Webhook set." });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

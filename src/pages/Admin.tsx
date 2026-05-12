@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { api, type ServiceRecord, type OrderRecord, type AdminStats, type TelegramDispatcher } from "@/lib/api";
+import { api, type ServiceRecord, type OrderRecord, type AdminStats, type TelegramDispatcher, type TelegramWebhookInfo } from "@/lib/api";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -57,6 +57,35 @@ export default function Admin() {
     paymentDisplay: { venmo: string; cashApp: string; paypal: string; zelle: string; applePay: string };
   } | null>(null);
   const [settingsSaving, setSettingsSaving] = useState(false);
+  const [webhookInfo, setWebhookInfo] = useState<{ info: TelegramWebhookInfo; expectedUrl: string } | null>(null);
+  const [webhookLoading, setWebhookLoading] = useState(false);
+  const [webhookBusy, setWebhookBusy] = useState(false);
+  const [webhookCustomUrl, setWebhookCustomUrl] = useState("");
+
+  async function refreshWebhookInfo() {
+    setWebhookLoading(true);
+    try {
+      const data = await api.getTelegramWebhook();
+      setWebhookInfo(data);
+    } catch (e) {
+      toast({ title: "Webhook info failed", description: (e as Error).message, variant: "destructive" });
+    } finally {
+      setWebhookLoading(false);
+    }
+  }
+
+  async function registerWebhook(url?: string) {
+    setWebhookBusy(true);
+    try {
+      const r = await api.setTelegramWebhook(url);
+      toast({ title: "Webhook registered", description: r.url });
+      await refreshWebhookInfo();
+    } catch (e) {
+      toast({ title: "setWebhook failed", description: (e as Error).message, variant: "destructive" });
+    } finally {
+      setWebhookBusy(false);
+    }
+  }
 
   const token = typeof window !== "undefined" ? localStorage.getItem("admin_token") : null;
 
@@ -96,6 +125,13 @@ export default function Admin() {
       setAuthChecked(true);
     }
   }, []);
+
+  useEffect(() => {
+    if (view === "settings" && isAuthenticated && !webhookInfo && !webhookLoading) {
+      refreshWebhookInfo();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, isAuthenticated]);
 
   const handleLogout = () => {
     localStorage.removeItem("admin_token");
@@ -662,6 +698,88 @@ export default function Admin() {
                     Save Settings above to persist dispatchers. When any dispatchers are configured, new orders use first-to-accept flow instead of TELEGRAM_CHAT_IDS.
                   </p>
                 )}
+              </CardContent>
+            </Card>
+
+            <Card className="shadow-card border-border/50">
+              <CardHeader>
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <Send className="h-4 w-4" /> Telegram Webhook
+                </CardTitle>
+                <p className="text-sm text-muted-foreground">
+                  Required so Accept/Decline buttons reach the server. If accepts silently do nothing, the webhook is usually the cause.
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {webhookInfo ? (
+                  <div className="rounded-lg border border-border/50 bg-muted/30 p-3 text-sm space-y-1">
+                    <div>
+                      <span className="text-muted-foreground">Current URL:</span>{" "}
+                      <code className="text-xs break-all">{webhookInfo.info.url || "(not set)"}</code>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Expected URL:</span>{" "}
+                      <code className="text-xs break-all">{webhookInfo.expectedUrl}</code>
+                    </div>
+                    {typeof webhookInfo.info.pending_update_count === "number" && (
+                      <div>
+                        <span className="text-muted-foreground">Pending updates:</span>{" "}
+                        {webhookInfo.info.pending_update_count}
+                      </div>
+                    )}
+                    {webhookInfo.info.last_error_message && (
+                      <div className="text-destructive">
+                        Last error: {webhookInfo.info.last_error_message}
+                      </div>
+                    )}
+                    {webhookInfo.info.url &&
+                      webhookInfo.info.url !== webhookInfo.expectedUrl && (
+                        <div className="text-amber-600 dark:text-amber-400 text-xs">
+                          Current URL doesn't match this server. Click "Register to this server" below.
+                        </div>
+                      )}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    {webhookLoading ? "Loading webhook info…" : "Webhook info not loaded."}
+                  </p>
+                )}
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={refreshWebhookInfo}
+                    disabled={webhookLoading}
+                  >
+                    {webhookLoading ? "Refreshing…" : "Refresh"}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => registerWebhook()}
+                    disabled={webhookBusy}
+                  >
+                    {webhookBusy ? "Registering…" : "Register to this server"}
+                  </Button>
+                </div>
+                <div className="flex flex-col sm:flex-row gap-2 pt-2 border-t border-border/40">
+                  <Input
+                    placeholder="https://your-api.example.com/api/telegram/webhook"
+                    value={webhookCustomUrl}
+                    onChange={(e) => setWebhookCustomUrl(e.target.value)}
+                    className="font-mono text-xs"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => registerWebhook(webhookCustomUrl.trim())}
+                    disabled={webhookBusy || !webhookCustomUrl.trim()}
+                  >
+                    Register custom URL
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           </div>

@@ -65,12 +65,31 @@ export const api = {
     request<{ tagPrice: number; insuranceMonthlyPrice: number; insuranceYearlyPrice: number; overnightFedexFee: number; testMode: boolean; telegramDispatchers: TelegramDispatcher[]; fallbackClaimTimeoutMs: number; paymentLinks: { venmo: string; cashApp: string; paypal: string; zelle: string; applePay: string }; paymentDisplay: { venmo: string; cashApp: string; paypal: string; zelle: string; applePay: string } }>("/admin/settings"),
   updateSettings: (s: { insuranceMonthlyPrice?: number; insuranceYearlyPrice?: number; overnightFedexFee?: number; testMode?: boolean; telegramDispatchers?: TelegramDispatcher[]; fallbackClaimTimeoutMs?: number; paymentLinks?: { venmo: string; cashApp: string; paypal: string; zelle: string; applePay: string }; paymentDisplay?: { venmo: string; cashApp: string; paypal: string; zelle: string; applePay: string } }) =>
     request<{ tagPrice: number; insuranceMonthlyPrice: number; insuranceYearlyPrice: number; overnightFedexFee: number; testMode: boolean; telegramDispatchers: TelegramDispatcher[]; fallbackClaimTimeoutMs: number; paymentLinks: { venmo: string; cashApp: string; paypal: string; zelle: string; applePay: string }; paymentDisplay: { venmo: string; cashApp: string; paypal: string; zelle: string; applePay: string } }>("/admin/settings", { method: "PATCH", body: JSON.stringify(s) }),
+  getTelegramWebhook: () =>
+    request<{ info: TelegramWebhookInfo; expectedUrl: string }>("/admin/telegram/webhook"),
+  setTelegramWebhook: (url?: string) =>
+    request<{ ok: boolean; url: string; description?: string }>("/admin/telegram/webhook", {
+      method: "POST",
+      body: JSON.stringify(url ? { url } : {}),
+    }),
 };
 
 export interface TelegramDispatcher {
   dispatcherId: string;
   groupId: string;
   groupName: string;
+}
+
+export interface TelegramWebhookInfo {
+  url: string;
+  has_custom_certificate?: boolean;
+  pending_update_count?: number;
+  ip_address?: string;
+  last_error_date?: number;
+  last_error_message?: string;
+  last_synchronization_error_date?: number;
+  max_connections?: number;
+  allowed_updates?: string[];
 }
 
 export interface ServiceRecord {
