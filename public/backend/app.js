@@ -94,6 +94,12 @@ function transactionsTabActive() {
   return !!(p && p.classList.contains("tab-panel-active"));
 }
 
+// Forward registry for handlers that are owned by setupEvents()'s closure
+// (e.g. refreshRecipients) but need to be invoked from module-scope code
+// like setupAdminTabs()'s tab activation. setupEvents() populates this at
+// the end of its initialization; callers must use optional chaining.
+const adminApi = {};
+
 function setupAdminTabs() {
   const strip = document.querySelector(".tab-strip");
   const txnPanel = document.getElementById("panel-transactions");
@@ -120,7 +126,7 @@ function setupAdminTabs() {
     } else if (id === "transactions") {
       refreshUnifiedTransactions();
     } else if (id === "dispatch") {
-      refreshRecipients();
+      adminApi.refreshRecipients?.();
       refreshIssuerAdmin();
     }
   };
@@ -3581,6 +3587,11 @@ function setupEvents() {
   applyTxZoom(1);
   applyTxnUnifiedZoom(1);
   updateRecipientConfidentialUI();
+
+  // Publish closure-owned handlers so module-scope callers (tab activation,
+  // etc.) can reach them. Must happen before applyLoggedInUI() so any
+  // ordering between setupEvents() and tab activation is safe.
+  adminApi.refreshRecipients = refreshRecipients;
 
   // Initial lock layout: without this, first paint shows tables before any login attempt.
   applyLoggedInUI(!!String(getStoredPassword() || "").trim());
