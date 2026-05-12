@@ -3593,7 +3593,9 @@ window.addEventListener("DOMContentLoaded", async () => {
   setupEvents();
   updateTxnAuthGate();
   renderUnifiedTransactions();
-  refreshRecipients();
+  // refreshRecipients() is owned by setupEvents() and is already invoked
+  // through applyLoggedInUI() at the end of setupEvents(); calling it here
+  // would reference an undefined name in this scope (TDZ ReferenceError).
   await tryInitialLogin();
   // If the Transactions tab is active on first load and we already have a
   // stored password, kick off the joined fetch immediately so the spreadsheet
