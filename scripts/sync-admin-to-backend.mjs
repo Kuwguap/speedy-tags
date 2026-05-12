@@ -7,8 +7,24 @@
 // Only `index.html` and `app.js` are copied — admin/.vercel, admin/.env.local,
 // admin/vercel.json and admin/.gitignore are intentionally skipped because
 // they are either secrets or apply only to the standalone admin deployment.
+//
+// While copying index.html, this script rewrites the relative
+// `<script src="app.js">` into an absolute `<script src="/backend/app.js?v=…">`
+// so that when the page is served at /backend (no trailing slash), the
+// browser doesn't resolve the script URL against / and hit Vercel's SPA
+// catch-all rewrite (which would return the React index.html as text/html
+// and break every button on the admin page). The cache-buster `?v=…` is the
+// content hash of app.js, so browsers always pick up the new JS on deploy.
 
-import { mkdirSync, copyFileSync, existsSync, statSync } from "node:fs";
+import {
+  mkdirSync,
+  copyFileSync,
+  existsSync,
+  statSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
+import { createHash } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -17,7 +33,7 @@ const repoRoot = resolve(__dirname, "..");
 const srcDir = join(repoRoot, "admin");
 const destDir = join(repoRoot, "public", "backend");
 
-const PUBLIC_FILES = ["index.html", "app.js"];
+const BACKEND_BASE = "/backend";
 
 if (!existsSync(srcDir)) {
   console.log(`[sync-admin] No ${srcDir} folder; skipping.`);
@@ -26,17 +42,40 @@ if (!existsSync(srcDir)) {
 
 mkdirSync(destDir, { recursive: true });
 
-let copied = 0;
-for (const name of PUBLIC_FILES) {
-  const src = join(srcDir, name);
-  if (!existsSync(src) || !statSync(src).isFile()) {
-    console.warn(`[sync-admin] Missing ${src}; skipping.`);
-    continue;
-  }
-  const dest = join(destDir, name);
-  copyFileSync(src, dest);
-  copied++;
-  console.log(`[sync-admin] ${name}: admin/ -> public/backend/`);
+const appJsSrc = join(srcDir, "app.js");
+const indexHtmlSrc = join(srcDir, "index.html");
+
+if (!existsSync(appJsSrc) || !statSync(appJsSrc).isFile()) {
+  console.warn(`[sync-admin] Missing ${appJsSrc}; aborting.`);
+  process.exit(1);
+}
+if (!existsSync(indexHtmlSrc) || !statSync(indexHtmlSrc).isFile()) {
+  console.warn(`[sync-admin] Missing ${indexHtmlSrc}; aborting.`);
+  process.exit(1);
 }
 
-console.log(`[sync-admin] Done (${copied}/${PUBLIC_FILES.length} files).`);
+copyFileSync(appJsSrc, join(destDir, "app.js"));
+const appJsBytes = readFileSync(appJsSrc);
+const appJsHash = createHash("sha1").update(appJsBytes).digest("hex").slice(0, 10);
+console.log(`[sync-admin] app.js: admin/ -> public/backend/ (hash=${appJsHash})`);
+
+let html = readFileSync(indexHtmlSrc, "utf8");
+const before = html;
+
+const scriptTag = /<script\s+src=(["'])\.?\/?app\.js\1\s*>/g;
+const replacement = `<script src="${BACKEND_BASE}/app.js?v=${appJsHash}">`;
+html = html.replace(scriptTag, replacement);
+
+if (html === before) {
+  console.warn(
+    `[sync-admin] Did not find <script src="app.js"> in admin/index.html — ` +
+      `serving at ${BACKEND_BASE} may break relative URLs. Check the source.`,
+  );
+}
+
+writeFileSync(join(destDir, "index.html"), html);
+console.log(
+  `[sync-admin] index.html: admin/ -> public/backend/ ` +
+    `(script src rewritten to ${BACKEND_BASE}/app.js?v=${appJsHash})`,
+);
+console.log(`[sync-admin] Done.`);
