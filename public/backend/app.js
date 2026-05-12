@@ -84,6 +84,11 @@ function issuerTabActive() {
   return !!(issuerPanel && issuerPanel.classList.contains("tab-panel-active"));
 }
 
+function dispatchTabActive() {
+  const dispatchPanel = document.getElementById("panel-dispatch");
+  return !!(dispatchPanel && dispatchPanel.classList.contains("tab-panel-active"));
+}
+
 function transactionsTabActive() {
   const p = document.getElementById("panel-transactions");
   return !!(p && p.classList.contains("tab-panel-active"));
@@ -95,7 +100,7 @@ function setupAdminTabs() {
   const dispatchPanel = document.getElementById("panel-dispatch");
   const issuerPanel = document.getElementById("panel-issuer");
   if (!strip || !dispatchPanel || !issuerPanel) {
-    return;
+    return () => {};
   }
   const tabs = strip.querySelectorAll(".tab[data-tab]");
 
@@ -115,7 +120,8 @@ function setupAdminTabs() {
     } else if (id === "transactions") {
       refreshUnifiedTransactions();
     } else if (id === "dispatch") {
-      refreshDispatchDriversList();
+      refreshRecipients();
+      refreshIssuerAdmin();
     }
   };
 
@@ -127,6 +133,7 @@ function setupAdminTabs() {
       }
     });
   });
+  return activate;
 }
 
 function resolveHighkageHandleSet() {
@@ -769,9 +776,9 @@ async function refreshUnifiedTransactions() {
     const err = res.error || ("HTTP_" + (res.status || 0));
     setTxnBanner(
       err === "UNAUTHORIZED"
-        ? "Unauthorized — re-enter admin password or unlock from Krab Dispatch."
+        ? "Unauthorized — re-enter admin password or unlock from the Krab Issuer tab."
         : err === "NO_PASSWORD"
-        ? "Unlock on the Krab Dispatch tab first."
+        ? "Unlock on the Krab Issuer tab first."
         : "Failed to load: " + err
     );
     setTxnStatus("");
@@ -815,6 +822,7 @@ function doAdminLogout() {
   storePassword("");
   syncAdminPasswordInputs("");
   clearAdminAuthErrorDisplays();
+  _issuerAiSnapshot = null;
   _txnLoading = false;
   _txnRows = [];
   setTxnBanner("");
@@ -885,12 +893,6 @@ function updateIssuerAuthGate() {
   noAuth.style.display = "none";
   main.style.display = "block";
   return false;
-}
-
-function maybeRefreshIssuerTab() {
-  if (issuerTabActive()) {
-    refreshIssuerAdmin();
-  }
 }
 
 function issuerFillAssignSelects(groups, drivers) {
@@ -1147,77 +1149,6 @@ function renderIssuerDrivers(drivers) {
   });
 }
 
-function renderDispatchDrivers(drivers) {
-  const tb = document.getElementById("dispatch-drivers-tbody");
-  if (!tb) return;
-  tb.innerHTML = "";
-  const list = Array.isArray(drivers) ? drivers : [];
-  if (list.length === 0) {
-    const tr = document.createElement("tr");
-    const td = document.createElement("td");
-    td.colSpan = 5;
-    td.className = "muted";
-    td.textContent = "No drivers.";
-    tr.appendChild(td);
-    tb.appendChild(tr);
-    return;
-  }
-  list.forEach((d) => {
-    const tr = document.createElement("tr");
-    const nm = document.createElement("td");
-    nm.textContent = d.driver_name || "—";
-    nm.style.textAlign = "left";
-    const tg = document.createElement("td");
-    tg.innerHTML = "<code>" + escapeIssuerText(d.driver_telegram_id || "") + "</code>";
-    const ph = document.createElement("td");
-    ph.textContent = d.phone_number || "—";
-    const st = document.createElement("td");
-    st.textContent = d.is_active === false ? "Inactive" : "Active";
-    const act = document.createElement("td");
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "btn-danger-issuer";
-    btn.textContent = d.is_active === false ? "Activate" : "Deactivate";
-    btn.dataset.toggleDispatchDriver = d.id;
-    act.appendChild(btn);
-    tr.appendChild(nm);
-    tr.appendChild(tg);
-    tr.appendChild(ph);
-    tr.appendChild(st);
-    tr.appendChild(act);
-    tb.appendChild(tr);
-  });
-}
-
-async function refreshDispatchDriversList() {
-  const tb = document.getElementById("dispatch-drivers-tbody");
-  if (!tb) return;
-  if (!hasAdminPassword()) {
-    tb.innerHTML =
-      '<tr><td colspan="5" class="muted">Unlock to view drivers.</td></tr>';
-    return;
-  }
-  try {
-    const res = await fetch(API_BASE + "/dispatch-drivers/ui");
-    if (res.status === 503) {
-      tb.innerHTML =
-        '<tr><td colspan="5" class="muted">Issuer database not configured on API.</td></tr>';
-      return;
-    }
-    if (!res.ok) {
-      tb.innerHTML =
-        '<tr><td colspan="5" class="muted">Could not load drivers.</td></tr>';
-      return;
-    }
-    const drivers = await res.json();
-    renderDispatchDrivers(drivers);
-  } catch (e) {
-    console.error(e);
-    tb.innerHTML =
-      '<tr><td colspan="5" class="muted">Failed to load drivers.</td></tr>';
-  }
-}
-
 function renderIssuerAssistants(groups, assistantsByGroup) {
   const host = document.getElementById("issuer-assistants-host");
   if (!host) return;
@@ -1456,51 +1387,63 @@ async function refreshIssuerAdmin() {
   if (updateIssuerAuthGate()) {
     return;
   }
-  const gRes = await issuerApiJson("/issuer-admin/groups");
-  if (!hasAdminPassword()) {
-    return;
+  const dtb = document.getElementById("issuer-drivers-tbody");
+  if (dtb) {
+    dtb.innerHTML =
+      '<tr><td colspan="5" class="muted">Loading drivers…</td></tr>';
   }
-  if (!gRes.ok) {
-    setIssuerBanner(
-      gRes.status === 503
-        ? "Configure SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY on the API server."
-        : gRes.error || "Could not load Issuer data."
-    );
-    return;
-  }
-  const groups = Array.isArray(gRes.data) ? gRes.data : [];
-  const [
-    dRes,
-    setRes,
-    aRes,
-    cRes,
-    bRes,
-    stRes,
-    rdRes,
-    subRes,
-    renRes,
-  ] = await Promise.all([
+
+  const [gRes, dRes] = await Promise.all([
+    issuerApiJson("/issuer-admin/groups"),
     issuerApiJson("/issuer-admin/drivers"),
-    issuerApiJson("/issuer-admin/settings"),
-    issuerApiJson("/issuer-admin/assignments"),
-    issuerApiJson("/issuer-admin/contact-sources"),
-    issuerApiJson("/issuer-admin/bot-usage?limit=100"),
-    issuerApiJson("/issuer-admin/stats"),
-    issuerApiJson("/issuer-admin/receipt-debts/summary"),
-    issuerApiJson("/issuer-admin/receipts/submitted?limit=80"),
-    issuerApiJson("/issuer-admin/renewals/upcoming"),
   ]);
   if (!hasAdminPassword()) {
     return;
   }
-  const softErr = [dRes, setRes, aRes, cRes, bRes, stRes, rdRes, subRes, renRes].find(
+  if (gRes.status === 401 || dRes.status === 401) {
+    setIssuerBanner("Session expired. Re-enter password on the Krab Issuer tab.");
+    return;
+  }
+
+  const drivers = dRes.ok && Array.isArray(dRes.data) ? dRes.data : [];
+  if (dRes.ok) {
+    renderIssuerDrivers(drivers);
+  } else if (dtb) {
+    dtb.innerHTML =
+      '<tr><td colspan="5" class="muted">Could not load drivers.</td></tr>';
+  }
+
+  if (!gRes.ok) {
+    setIssuerBanner(
+      gRes.status === 503
+        ? "Configure SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY on the API server."
+        : gRes.error || "Could not load groups."
+    );
+    return;
+  }
+  const groups = Array.isArray(gRes.data) ? gRes.data : [];
+
+  const [setRes, aRes, cRes, bRes, stRes, rdRes, subRes, renRes] =
+    await Promise.all([
+      issuerApiJson("/issuer-admin/settings"),
+      issuerApiJson("/issuer-admin/assignments"),
+      issuerApiJson("/issuer-admin/contact-sources"),
+      issuerApiJson("/issuer-admin/bot-usage?limit=100"),
+      issuerApiJson("/issuer-admin/stats"),
+      issuerApiJson("/issuer-admin/receipt-debts/summary"),
+      issuerApiJson("/issuer-admin/receipts/submitted?limit=80"),
+      issuerApiJson("/issuer-admin/renewals/upcoming"),
+    ]);
+  if (!hasAdminPassword()) {
+    return;
+  }
+  const softErr = [setRes, aRes, cRes, bRes, stRes, rdRes, subRes, renRes].find(
     (x) => !x.ok && x.status !== 503
   );
   if (softErr && softErr.status === 401) {
-    setIssuerBanner("Session expired. Re-enter password on the Dispatch tab.");
+    setIssuerBanner("Session expired. Re-enter password on the Krab Issuer tab.");
     return;
   }
-  const drivers = dRes.ok && Array.isArray(dRes.data) ? dRes.data : [];
   const settings = setRes.ok && setRes.data ? setRes.data : {};
   const assignments = aRes.ok && Array.isArray(aRes.data) ? aRes.data : [];
   const contacts = cRes.ok && Array.isArray(cRes.data) ? cRes.data : [];
@@ -1520,7 +1463,6 @@ async function refreshIssuerAdmin() {
   renderIssuerContactSources(contacts);
   renderIssuerAssignments(assignments, groups, drivers);
   renderIssuerGroups(groups);
-  renderIssuerDrivers(drivers);
   renderIssuerDebts(debts);
   renderIssuerSubmitted(submitted);
   renderIssuerRenewals(renewals);
@@ -1537,6 +1479,36 @@ async function refreshIssuerAdmin() {
     assistantsByGroup[g.id] = r.ok && Array.isArray(r.data) ? r.data : [];
   });
   renderIssuerAssistants(groups, assistantsByGroup);
+
+  _issuerAiSnapshot = {
+    source: "krab_issuer_admin",
+    group_count: groups.length,
+    driver_count: drivers.length,
+    assignment_count: assignments.length,
+    contact_source_count: contacts.length,
+    assistants_group_count: groups.filter(
+      (g) => (assistantsByGroup[g.id] || []).length > 0
+    ).length,
+    settings: {
+      assistants_choose_group: !!settings.assistants_choose_group,
+      receipt_detection_mode: settings.receipt_detection_mode || "",
+    },
+    stats_total_leads: stats.total_leads,
+    stats_drivers_headline: Array.isArray(stats.drivers)
+      ? stats.drivers.slice(0, 12)
+      : [],
+    debt_rows: Array.isArray(debts.drivers) ? debts.drivers.length : 0,
+    submitted_recent: submitted.length,
+    renewals_upcoming: renewals.length,
+    sample_group_names: groups
+      .slice(0, 15)
+      .map((g) => g.group_name || "")
+      .filter(Boolean),
+    sample_driver_names: drivers
+      .slice(0, 20)
+      .map((d) => d.driver_name || "")
+      .filter(Boolean),
+  };
 
   const warn = [dRes, setRes, aRes, cRes, bRes, stRes, rdRes, subRes, renRes].filter(
     (x) => !x.ok
@@ -2024,10 +1996,15 @@ async function refreshLatest() {
 }
 
 let lastSummary = null;
+/** Last Issuer-admin compact snapshot for AI (Krab Issuer tab). Cleared on logout. */
+let _issuerAiSnapshot = null;
 let summaryZoomScale = 1;
 let txZoomScale = 1;
 const summaryAiHistory = [];
 const SUMMARY_AI_HISTORY_KEY = "krab_summary_ai_history";
+
+const issuerAiHistory = [];
+const ISSUER_AI_HISTORY_KEY = "krab_issuer_ai_history";
 
 function loadSummaryAiHistory() {
   try {
@@ -2060,6 +2037,58 @@ function saveSummaryAiHistory() {
   }
 }
 
+function loadIssuerAiHistory() {
+  try {
+    const raw = sessionStorage.getItem(ISSUER_AI_HISTORY_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      issuerAiHistory.length = 0;
+      for (const m of parsed.slice(-20)) {
+        if (!m || !m.role || !m.content) continue;
+        issuerAiHistory.push({
+          role: String(m.role),
+          content: String(m.content),
+        });
+      }
+    }
+  } catch {
+    // ignore
+  }
+}
+
+function saveIssuerAiHistory() {
+  try {
+    sessionStorage.setItem(
+      ISSUER_AI_HISTORY_KEY,
+      JSON.stringify(issuerAiHistory.slice(-20))
+    );
+  } catch {
+    // ignore
+  }
+}
+
+function renderIssuerAiLog() {
+  const log = document.getElementById("issuer-ai-log");
+  if (!log) return;
+  log.innerHTML = "";
+  if (!issuerAiHistory.length) {
+    const div = document.createElement("div");
+    div.className = "summary-ai-msg assistant";
+    div.textContent = "Ask across Krab Issuer and Krab Dispatch (shared references).";
+    log.appendChild(div);
+    return;
+  }
+  for (const m of issuerAiHistory.slice(-16)) {
+    const div = document.createElement("div");
+    div.className =
+      "summary-ai-msg " + (m.role === "user" ? "user" : "assistant");
+    div.textContent = m.content;
+    log.appendChild(div);
+  }
+  log.scrollTop = log.scrollHeight;
+}
+
 function renderSummaryAiLog() {
   const log = document.getElementById("summary-ai-log");
   if (!log) return;
@@ -2067,7 +2096,8 @@ function renderSummaryAiLog() {
   if (!summaryAiHistory.length) {
     const div = document.createElement("div");
     div.className = "summary-ai-msg assistant";
-    div.textContent = "Ask questions about current summary data.";
+    div.textContent =
+      "Ask across both bots—for example counts by driver, refs, or receipt status.";
     log.appendChild(div);
     return;
   }
@@ -2387,7 +2417,7 @@ function answerSummaryQuestion(question) {
   return "I can answer questions like: 'how many issuers made transactions today?' or 'how many does haru have?'";
 }
 
-async function askSummaryWithGpt(question) {
+async function askSummaryWithGpt(question, options = {}) {
   if (!lastSummary || !Array.isArray(lastSummary.items)) {
     return "Generate summary first so I can analyze the data.";
   }
@@ -2395,9 +2425,13 @@ async function askSummaryWithGpt(question) {
   if (!q) {
     return "Please ask a question.";
   }
+  const issuerSnap =
+    options && options.includeIssuerSnapshot && _issuerAiSnapshot
+      ? _issuerAiSnapshot
+      : null;
   const payload = {
     question: q,
-    history: summaryAiHistory.slice(-12),
+    history: options.historySlice || summaryAiHistory.slice(-12),
     window:
       (document.getElementById("summary-window") &&
         document.getElementById("summary-window").value) ||
@@ -2411,6 +2445,7 @@ async function askSummaryWithGpt(question) {
       failed: lastSummary.failed,
       items: (lastSummary.items || []).slice(0, 300),
     },
+    issuer_admin_snapshot: issuerSnap,
   };
   const res = await requestWithAdminJson("/ai/summary-ask", {
     method: "POST",
@@ -2781,11 +2816,12 @@ function applyLoggedInUI(loggedIn) {
   const txnPageTitle = document.getElementById("txn-page-title");
   const txnAuthArea = document.getElementById("txn-auth-area");
   const issuerPageTitle = document.getElementById("issuer-page-title");
-  const issuerAddDriverWrap = document.getElementById("issuer-add-driver-wrap");
   const issuerPrivateWrap = document.getElementById("issuer-private-wrap");
-  const dispatchDriversListWrap = document.getElementById(
-    "dispatch-drivers-list-wrap"
+  const issuerSupabaseDriverStack = document.getElementById(
+    "issuer-supabase-driver-stack"
   );
+  const dispatchAiChatWrap = document.getElementById("dispatch-ai-chat-wrap");
+  const issuerAiChatWrap = document.getElementById("issuer-ai-chat-wrap");
   const issuerToolbarPrivate = document.getElementById("issuer-toolbar-private");
   const issuerAuthArea = document.getElementById("issuer-auth-area");
 
@@ -2796,7 +2832,7 @@ function applyLoggedInUI(loggedIn) {
     if (b) b.style.display = loggedIn ? "inline-flex" : "none";
   });
 
-  // Krab Dispatch tab: when locked, show ONLY the Access panel.
+  // panel-dispatch (tab label "Krab Issuer"): Access + email recipients; full dashboard after unlock.
   if (dispatchHeaderWrap) dispatchHeaderWrap.style.display = loggedIn ? "flex" : "none";
   if (dispatchTxPanel) dispatchTxPanel.style.display = loggedIn ? "block" : "none";
 
@@ -2806,21 +2842,33 @@ function applyLoggedInUI(loggedIn) {
   if (txnPrivateWrap) txnPrivateWrap.style.display = loggedIn ? "block" : "none";
   if (txnToolbarPrivate) txnToolbarPrivate.style.display = loggedIn ? "contents" : "none";
 
-  // Krab Issuer tab: when locked, show Access + Add driver.
+  // Krab Issuer tab: when locked, show Access only; main Issuer tools (groups, etc.) after unlock.
   if (issuerPageTitle) issuerPageTitle.style.display = loggedIn ? "block" : "none";
   if (issuerAuthArea) issuerAuthArea.style.display = loggedIn ? "none" : "block";
   if (issuerPrivateWrap) issuerPrivateWrap.style.display = loggedIn ? "block" : "none";
   if (issuerToolbarPrivate) issuerToolbarPrivate.style.display = loggedIn ? "contents" : "none";
-  // Keep add-driver visible even when locked (list stays hidden until unlocked).
-  if (issuerAddDriverWrap) issuerAddDriverWrap.style.display = "block";
-
-  // Krab Dispatch: Telegram drivers list mirrors Issuer (private until unlocked).
-  if (dispatchDriversListWrap) {
-    dispatchDriversListWrap.style.display = loggedIn ? "block" : "none";
-    dispatchDriversListWrap.setAttribute(
+  // panel-issuer (tab label "Krab Dispatch"): chatID add driver always visible; Drivers table after unlock.
+  const issuerDriversListPanel = document.getElementById(
+    "issuer-drivers-list-panel"
+  );
+  if (issuerSupabaseDriverStack) {
+    issuerSupabaseDriverStack.style.display = "block";
+    issuerSupabaseDriverStack.setAttribute("aria-hidden", "false");
+  }
+  if (issuerDriversListPanel) {
+    issuerDriversListPanel.style.display = loggedIn ? "block" : "none";
+    issuerDriversListPanel.setAttribute(
       "aria-hidden",
       loggedIn ? "false" : "true"
     );
+  }
+  if (dispatchAiChatWrap) {
+    dispatchAiChatWrap.style.display = loggedIn ? "block" : "none";
+    dispatchAiChatWrap.setAttribute("aria-hidden", loggedIn ? "false" : "true");
+  }
+  if (issuerAiChatWrap) {
+    issuerAiChatWrap.style.display = loggedIn ? "block" : "none";
+    issuerAiChatWrap.setAttribute("aria-hidden", loggedIn ? "false" : "true");
   }
 }
 
@@ -2900,8 +2948,13 @@ function setupEvents() {
   const summaryAiInput = document.getElementById("summary-ai-input");
   const summaryAiAskBtn = document.getElementById("summary-ai-ask-btn");
   const summaryAiAnswer = document.getElementById("summary-ai-answer");
+  const issuerAiInput = document.getElementById("issuer-ai-input");
+  const issuerAiAskBtn = document.getElementById("issuer-ai-ask-btn");
+  const issuerAiAnswer = document.getElementById("issuer-ai-answer");
   loadSummaryAiHistory();
   renderSummaryAiLog();
+  loadIssuerAiHistory();
+  renderIssuerAiLog();
 
   async function doLoginWithPassword(pwRaw, errEl) {
     const pw = String(pwRaw || "").trim();
@@ -2963,74 +3016,6 @@ function setupEvents() {
       if (b) b.addEventListener("click", () => doAdminLogout());
     }
   );
-
-  const dispatchAddDriverBtn = document.getElementById("dispatch-add-driver-btn");
-  if (dispatchAddDriverBtn) {
-    dispatchAddDriverBtn.addEventListener("click", async () => {
-      const name = (document.getElementById("dispatch-driver-name") || {}).value || "";
-      const tid = (document.getElementById("dispatch-driver-chat-id") || {}).value || "";
-      const phoneRaw =
-        (document.getElementById("dispatch-driver-phone") || {}).value || "";
-      const msg = document.getElementById("dispatch-add-driver-msg");
-      const driver_name = String(name).trim();
-      const driver_telegram_id = String(tid).trim();
-      const phone_number = String(phoneRaw || "").trim();
-      if (!driver_name || !driver_telegram_id) {
-        if (msg) msg.textContent = "Driver name and Telegram chat/user ID are required.";
-        return;
-      }
-      if (msg) msg.textContent = "Adding…";
-      try {
-        const body = { driver_name, driver_telegram_id };
-        if (phone_number) body.phone_number = phone_number;
-        const res = await fetch(API_BASE + "/dispatch-drivers/ui", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
-        if (res.status === 409) {
-          if (msg) msg.textContent = "Driver already exists for this Telegram ID.";
-          return;
-        }
-        if (!res.ok) {
-          const txt = await res.text().catch(() => "");
-          throw new Error("HTTP_" + res.status + (txt ? ": " + txt : ""));
-        }
-        (document.getElementById("dispatch-driver-name") || {}).value = "";
-        (document.getElementById("dispatch-driver-chat-id") || {}).value = "";
-        (document.getElementById("dispatch-driver-phone") || {}).value = "";
-        if (msg) msg.textContent = "Driver added.";
-        refreshDispatchDriversList();
-      } catch (e) {
-        console.error(e);
-        if (msg) msg.textContent = "Failed to add driver. Please try again.";
-      }
-    });
-  }
-
-  const dispatchDriversTb = document.getElementById("dispatch-drivers-tbody");
-  if (dispatchDriversTb) {
-    dispatchDriversTb.addEventListener("click", async (ev) => {
-      const btn = ev.target.closest("[data-toggle-dispatch-driver]");
-      if (!btn) return;
-      const id = btn.getAttribute("data-toggle-dispatch-driver");
-      if (!id) return;
-      try {
-        const res = await fetch(
-          API_BASE + "/dispatch-drivers/ui/" + encodeURIComponent(id) + "/toggle",
-          { method: "POST" }
-        );
-        if (!res.ok) {
-          alert("Could not toggle driver.");
-          return;
-        }
-        await refreshDispatchDriversList();
-      } catch (e) {
-        console.error(e);
-        alert("Could not toggle driver.");
-      }
-    });
-  }
 
   refreshTableBtn.addEventListener("click", () => {
     refreshTransactions();
@@ -3320,7 +3305,9 @@ function setupEvents() {
     saveSummaryAiHistory();
     renderSummaryAiLog();
     try {
-      const ai = await askSummaryWithGpt(q);
+      const ai = await askSummaryWithGpt(q, {
+        historySlice: summaryAiHistory.slice(-12),
+      });
       summaryAiAnswer.textContent = ai;
       summaryAiHistory.push({ role: "assistant", content: String(ai) });
       saveSummaryAiHistory();
@@ -3343,6 +3330,53 @@ function setupEvents() {
     summaryAiInput.addEventListener("keydown", (ev) => {
       if (ev.key === "Enter") {
         handleAiAsk();
+      }
+    });
+  }
+
+  async function handleIssuerAiAsk() {
+    if (!issuerAiAnswer) return;
+    const q = issuerAiInput ? issuerAiInput.value : "";
+    if (!String(q || "").trim()) {
+      issuerAiAnswer.textContent = "Please enter a question.";
+      return;
+    }
+    if (!lastSummary || !Array.isArray(lastSummary.items)) {
+      try {
+        await refreshSummary();
+      } catch {
+        // continue
+      }
+    }
+    issuerAiAnswer.textContent = "Thinking...";
+    issuerAiHistory.push({ role: "user", content: String(q) });
+    saveIssuerAiHistory();
+    renderIssuerAiLog();
+    try {
+      const ai = await askSummaryWithGpt(q, {
+        historySlice: issuerAiHistory.slice(-12),
+        includeIssuerSnapshot: true,
+      });
+      issuerAiAnswer.textContent = ai;
+      issuerAiHistory.push({ role: "assistant", content: String(ai) });
+      saveIssuerAiHistory();
+      renderIssuerAiLog();
+    } catch {
+      const msg = "AI unavailable right now. Please try again.";
+      issuerAiAnswer.textContent = msg;
+      issuerAiHistory.push({ role: "assistant", content: msg });
+      saveIssuerAiHistory();
+      renderIssuerAiLog();
+    }
+    if (issuerAiInput) issuerAiInput.value = "";
+  }
+  if (issuerAiAskBtn) {
+    issuerAiAskBtn.addEventListener("click", handleIssuerAiAsk);
+  }
+  if (issuerAiInput) {
+    issuerAiInput.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") {
+        handleIssuerAiAsk();
       }
     });
   }
@@ -3524,15 +3558,19 @@ function setupEvents() {
   applyLoggedInUI = (loggedIn) => {
     originalApplyLoggedInUI(loggedIn);
     if (loggedIn) {
+      updateIssuerAuthGate();
       refreshRecipients();
-      maybeRefreshIssuerTab();
+      refreshIssuerAdmin();
       maybeRefreshTxnTab();
-      refreshDispatchDriversList();
     } else {
       updateIssuerAuthGate();
       updateTxnAuthGate();
       updateRecipientConfidentialUI();
-      refreshDispatchDriversList();
+      const idtb = document.getElementById("issuer-drivers-tbody");
+      if (idtb) {
+        idtb.innerHTML =
+          '<tr><td colspan="5" class="muted">Unlock to load drivers.</td></tr>';
+      }
     }
   };
 
@@ -3549,12 +3587,13 @@ function setupEvents() {
 }
 
 window.addEventListener("DOMContentLoaded", async () => {
-  setupAdminTabs();
+  const activateTab = setupAdminTabs();
+  activateTab("transactions");
   checkHealth();
   setupEvents();
   updateTxnAuthGate();
   renderUnifiedTransactions();
-  refreshDispatchDriversList();
+  refreshRecipients();
   await tryInitialLogin();
   // If the Transactions tab is active on first load and we already have a
   // stored password, kick off the joined fetch immediately so the spreadsheet
