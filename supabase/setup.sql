@@ -98,3 +98,10 @@ ON CONFLICT (id) DO NOTHING;
 -- 6. Seed one activity entry
 INSERT INTO activity (type, payload) VALUES
   ('dataIn', '{"orderId":"demo-order-001","serviceTitle":"30-Day Temporary Tag","price":29.99}'::jsonb);
+
+-- 7. Force PostgREST to reload its schema cache so newly added columns
+--    (e.g. phone_enc_iv, phone_enc_data) are immediately visible to the API.
+--    Without this, the server may still see "Could not find the
+--    phone_enc_data column of orders in the schema cache" until PostgREST
+--    is restarted.
+NOTIFY pgrst, 'reload schema';

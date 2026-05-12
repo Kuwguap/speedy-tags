@@ -218,6 +218,55 @@ async function findOrderByStripeSessionId(sessionId) {
   return orders.find((o) => o.stripeSessionId === sessionId) || null;
 }
 
+// PostgREST returns errors like `Could not find the 'phone_enc_data' column of
+// 'orders' in the schema cache` (code PGRST204) when the deployed Supabase
+// schema is missing a column the code wants to write. This usually means the
+// admin hasn't re-run supabase/setup.sql after a code update. To stop one
+// stale schema from breaking checkout entirely, we extract the missing column
+// name and retry the write without it, logging a one-line hint each time.
+const __missingColumnLogged = new Set();
+function extractMissingColumn(error) {
+  if (!error) return null;
+  const msg = `${error.message || ""} ${error.details || ""} ${error.hint || ""}`;
+  const m = msg.match(/['"`]?([a-z_][a-z0-9_]*)['"`]?\s+column\s+of/i)
+        || msg.match(/column\s+['"`]?([a-z_][a-z0-9_]*)['"`]?\s+(?:of|does not exist|not found)/i);
+  return m ? m[1] : null;
+}
+function logMissingColumn(table, column) {
+  const key = `${table}.${column}`;
+  if (__missingColumnLogged.has(key)) return;
+  __missingColumnLogged.add(key);
+  console.warn(
+    `[Supabase] Column '${column}' not found on '${table}' in schema cache. ` +
+      `Retrying without it. Run supabase/setup.sql in Supabase SQL Editor to apply pending migrations.`,
+  );
+}
+async function supabaseInsertResilient(table, row) {
+  let payload = { ...row };
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const { error } = await supabase.from(table).insert(payload);
+    if (!error) return;
+    const missing = extractMissingColumn(error);
+    if (!missing || !(missing in payload)) throw error;
+    logMissingColumn(table, missing);
+    delete payload[missing];
+  }
+  throw new Error(`[Supabase] Too many missing columns on '${table}'; aborting insert`);
+}
+async function supabaseUpdateResilient(table, row, matchColumn, matchValue) {
+  let payload = { ...row };
+  for (let attempt = 0; attempt < 8; attempt++) {
+    if (Object.keys(payload).length === 0) return;
+    const { error } = await supabase.from(table).update(payload).eq(matchColumn, matchValue);
+    if (!error) return;
+    const missing = extractMissingColumn(error);
+    if (!missing || !(missing in payload)) throw error;
+    logMissingColumn(table, missing);
+    delete payload[missing];
+  }
+  throw new Error(`[Supabase] Too many missing columns on '${table}'; aborting update`);
+}
+
 async function saveOrder(order) {
   if (useSupabase()) {
     const row = {
@@ -227,8 +276,6 @@ async function saveOrder(order) {
       first_name: order.firstName || "Pending",
       last_name: order.lastName || "",
       phone: order.phone || "",
-      phone_enc_iv: order.phoneEncIv || null,
-      phone_enc_data: order.phoneEncData || null,
       address: order.address || "",
       delivery_address: order.deliveryAddress || "",
       vin: order.vin || "",
@@ -248,8 +295,12 @@ async function saveOrder(order) {
       delivery_phone: order.deliveryPhone || null,
       product_choice: order.productChoice || null,
     };
-    const { error } = await supabase.from("orders").insert(row);
-    if (error) throw error;
+    // Only include encrypted phone fields when there's actually a value to
+    // store. Keeps inserts working on databases that haven't yet had the
+    // phone_enc_iv / phone_enc_data ALTER TABLE migration applied.
+    if (order.phoneEncIv) row.phone_enc_iv = order.phoneEncIv;
+    if (order.phoneEncData) row.phone_enc_data = order.phoneEncData;
+    await supabaseInsertResilient("orders", row);
     return;
   }
   const orders = loadJson(ORDERS_FILE, []);
@@ -381,8 +432,7 @@ async function updateOrder(id, updates) {
     if (updates.telegramAcceptedGroupId != null) row.telegram_accepted_group_id = updates.telegramAcceptedGroupId;
     if (updates.telegramClaimMessageIds != null) row.telegram_claim_message_ids = typeof updates.telegramClaimMessageIds === "string" ? updates.telegramClaimMessageIds : JSON.stringify(updates.telegramClaimMessageIds || {});
     if (Object.keys(row).length === 0) return;
-    const { error } = await supabase.from("orders").update(row).eq("id", id);
-    if (error) throw error;
+    await supabaseUpdateResilient("orders", row, "id", id);
     return;
   }
   const orders = loadJson(ORDERS_FILE, []);
