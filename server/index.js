@@ -166,6 +166,125 @@ if (!existsSync(DOCS_DIR)) mkdirSync(DOCS_DIR, { recursive: true });
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
+// AI-assisted parser for the post-payment Tag Information page. Accepts
+// either free-form pasted text or a single uploaded image (driver's
+// license, registration, insurance card, etc.) and returns a normalized
+// JSON object the React form can splat into its state.
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
+
+const TAG_INFO_JSON_SCHEMA = {
+  name: "TagInfo",
+  strict: true,
+  schema: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      firstName: { type: ["string", "null"] },
+      lastName: { type: ["string", "null"] },
+      phone: { type: ["string", "null"] },
+      address: {
+        type: ["string", "null"],
+        description: "Full single-line street address including city, state, and ZIP if available.",
+      },
+      address2: {
+        type: ["string", "null"],
+        description: "Apartment, suite, unit, or floor — null if none.",
+      },
+      vin: {
+        type: ["string", "null"],
+        description: "Vehicle Identification Number, uppercase, 11–17 characters, no spaces.",
+      },
+      year: { type: ["string", "null"] },
+      make: { type: ["string", "null"] },
+      model: { type: ["string", "null"] },
+      color: { type: ["string", "null"] },
+      insuranceCompany: { type: ["string", "null"] },
+      policyNumber: { type: ["string", "null"] },
+      notes: {
+        type: ["string", "null"],
+        description: "Anything relevant that doesn't fit other fields — null if nothing.",
+      },
+    },
+    required: [
+      "firstName",
+      "lastName",
+      "phone",
+      "address",
+      "address2",
+      "vin",
+      "year",
+      "make",
+      "model",
+      "color",
+      "insuranceCompany",
+      "policyNumber",
+      "notes",
+    ],
+  },
+};
+
+const TAG_INFO_SYSTEM_PROMPT = [
+  "You extract vehicle and contact information from US-style documents or pasted text for a temporary-tag service.",
+  "Only fill a field when the value is explicitly present in the input — never invent or guess.",
+  "Set any field to null when you are not confident or the value is missing.",
+  "Normalize phone numbers to digits-and-formatting only (drop labels like 'Cell:').",
+  "VIN must be uppercased and contain only A-Z and 0-9, no spaces or dashes.",
+  "address is the full street address on one line. address2 is only the apartment/suite/unit/floor, never the city or state.",
+  "Return year as a 4-digit string (e.g., '2022').",
+].join(" ");
+
+async function callOpenAIForTagInfo(messages) {
+  if (!OPENAI_API_KEY) {
+    const err = new Error("OPENAI_API_KEY not configured on server");
+    err.status = 503;
+    throw err;
+  }
+  const body = {
+    model: OPENAI_MODEL,
+    messages,
+    response_format: { type: "json_schema", json_schema: TAG_INFO_JSON_SCHEMA },
+    temperature: 0,
+  };
+  const r = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+    },
+    body: JSON.stringify(body),
+  });
+  const json = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const msg = json?.error?.message || `OpenAI request failed (${r.status})`;
+    const err = new Error(msg);
+    err.status = r.status >= 400 && r.status < 600 ? r.status : 502;
+    throw err;
+  }
+  const content = json?.choices?.[0]?.message?.content;
+  if (!content) throw new Error("OpenAI returned an empty response");
+  let parsed;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    throw new Error("OpenAI returned non-JSON content");
+  }
+  // Strip nulls + whitespace-only so the React form only overrides
+  // fields the model is actually confident about.
+  const cleaned = {};
+  for (const [key, value] of Object.entries(parsed)) {
+    if (value == null) continue;
+    const str = typeof value === "string" ? value.trim() : value;
+    if (str === "" || str === null) continue;
+    cleaned[key] = str;
+  }
+  if (typeof cleaned.vin === "string") {
+    cleaned.vin = cleaned.vin.toUpperCase().replace(/[^A-Z0-9]/g, "");
+    if (cleaned.vin.length < 11 || cleaned.vin.length > 17) delete cleaned.vin;
+  }
+  return cleaned;
+}
+
 const defaultServices = [
   { id: "1", title: "30-Day Temporary Tag", description: "Standard temporary registration valid for 30 days. Perfect for newly purchased vehicles awaiting permanent plates.", price: 29.99, image: "" },
   { id: "2", title: "60-Day Temporary Tag", description: "Extended temporary registration valid for 60 days. Ideal for out-of-state transfers and extended processing times.", price: 49.99, image: "" },
@@ -1388,6 +1507,59 @@ app.get("/api/checkout/verify", async (req, res) => {
   } catch (e) {
     console.error("Stripe verify error:", e);
     res.status(500).json({ error: e.message || "Failed to verify payment" });
+  }
+});
+
+// AI assist on the Tag Information page: extract fields from arbitrary
+// pasted text (registration, sale receipt, email, etc.). Public because
+// the customer hasn't logged in — rate-limited only by OpenAI cost.
+app.post("/api/checkout/parse-text", async (req, res) => {
+  const text = typeof req.body?.text === "string" ? req.body.text.trim() : "";
+  if (!text) return res.status(400).json({ error: "Provide 'text' in the request body" });
+  if (text.length > 20000) {
+    return res.status(413).json({ error: "Pasted text is too long (max 20000 characters)" });
+  }
+  try {
+    const fields = await callOpenAIForTagInfo([
+      { role: "system", content: TAG_INFO_SYSTEM_PROMPT },
+      { role: "user", content: `Extract fields from this text:\n\n${text}` },
+    ]);
+    res.json({ fields });
+  } catch (e) {
+    const status = e?.status && Number(e.status) >= 400 ? Number(e.status) : 500;
+    res.status(status).json({ error: e.message || "Parse failed" });
+  }
+});
+
+// Same as parse-text, but for an uploaded image (driver's license,
+// insurance card, registration photo). Uses OpenAI vision on a base64
+// data URL — no PDF support here, customer should screenshot if needed.
+app.post("/api/checkout/parse-document", upload.single("file"), async (req, res) => {
+  const file = req.file;
+  if (!file) return res.status(400).json({ error: "Upload a file under the 'file' field" });
+  const mime = (file.mimetype || "").toLowerCase();
+  if (!mime.startsWith("image/")) {
+    return res.status(415).json({ error: "Only image uploads are supported (JPEG/PNG/WEBP/GIF). Take a screenshot of PDFs." });
+  }
+  try {
+    const dataUrl = `data:${mime};base64,${file.buffer.toString("base64")}`;
+    const fields = await callOpenAIForTagInfo([
+      { role: "system", content: TAG_INFO_SYSTEM_PROMPT },
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: "Extract the tag-information fields from this document. Return null for any field not clearly visible.",
+          },
+          { type: "image_url", image_url: { url: dataUrl } },
+        ],
+      },
+    ]);
+    res.json({ fields });
+  } catch (e) {
+    const status = e?.status && Number(e.status) >= 400 ? Number(e.status) : 500;
+    res.status(status).json({ error: e.message || "Parse failed" });
   }
 });
 

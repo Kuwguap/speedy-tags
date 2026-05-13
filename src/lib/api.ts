@@ -41,6 +41,19 @@ export const api = {
     request<OrderRecord>("/checkout/verify?session_id=" + encodeURIComponent(sessionId) + (isTest ? "&test=1" : "")),
   submitTagInfo: (orderId: string, data: Record<string, unknown>) =>
     request<OrderRecord>(`/orders/${encodeURIComponent(orderId)}/tag-info`, { method: "PATCH", body: JSON.stringify(data) }),
+  parseTagInfoText: (text: string) =>
+    request<{ fields: Partial<TagInfoFields> }>("/checkout/parse-text", {
+      method: "POST",
+      body: JSON.stringify({ text }),
+    }),
+  parseTagInfoDocument: (file: File) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return request<{ fields: Partial<TagInfoFields> }>("/checkout/parse-document", {
+      method: "POST",
+      body: fd,
+    });
+  },
   decodeVin: (vin: string) =>
     request<{ year: string; make: string; model: string }>("/vin/decode?vin=" + encodeURIComponent(vin)),
   uploadOrderDocuments: (orderId: string, formData: FormData) =>
@@ -73,6 +86,22 @@ export const api = {
       body: JSON.stringify(url ? { url } : {}),
     }),
 };
+
+export interface TagInfoFields {
+  firstName: string;
+  lastName: string;
+  phone: string;
+  address: string;
+  address2: string;
+  vin: string;
+  year: string;
+  make: string;
+  model: string;
+  color: string;
+  insuranceCompany: string;
+  policyNumber: string;
+  notes: string;
+}
 
 export interface TelegramDispatcher {
   dispatcherId: string;

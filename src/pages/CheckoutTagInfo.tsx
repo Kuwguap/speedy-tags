@@ -1,15 +1,15 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { Header } from "@/components/Header";
 import { AddressAutocomplete } from "@/components/AddressAutocomplete";
-import { api } from "@/lib/api";
+import { api, type TagInfoFields } from "@/lib/api";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Search, Loader2 } from "lucide-react";
+import { Search, Loader2, Sparkles, Upload, FileText } from "lucide-react";
 import { z } from "zod";
 
 const schema = z.object({
@@ -57,8 +57,99 @@ export default function CheckoutTagInfo() {
     notes: "",
   });
   const [errors, setErrors] = useState<Partial<Record<keyof FormData, string>>>({});
+  const [parsing, setParsing] = useState<"text" | "file" | null>(null);
+  const [parseText, setParseText] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const needsOwnInsurance = order?.productChoice === "tag_only";
+
+  // Only override fields the AI is confident about (non-empty strings).
+  const applyParsedFields = (fields: Partial<TagInfoFields>) => {
+    const overrideKeys: (keyof FormData)[] = [];
+    setForm((f) => {
+      const next = { ...f };
+      (Object.keys(fields) as (keyof TagInfoFields)[]).forEach((key) => {
+        const value = fields[key];
+        if (typeof value !== "string") return;
+        const trimmed = value.trim();
+        if (!trimmed) return;
+        // FormData keys are a subset of TagInfoFields keys, so this cast is safe.
+        (next as Record<string, string>)[key] = key === "vin" ? trimmed.toUpperCase() : trimmed;
+        overrideKeys.push(key as keyof FormData);
+      });
+      return next;
+    });
+    if (overrideKeys.length > 0) {
+      setErrors((e) => {
+        const next = { ...e };
+        overrideKeys.forEach((k) => {
+          next[k] = undefined;
+        });
+        return next;
+      });
+    }
+    return overrideKeys.length;
+  };
+
+  const handleParseText = async () => {
+    const text = parseText.trim();
+    if (!text) {
+      toast({ title: "Paste some text first", variant: "destructive" });
+      return;
+    }
+    setParsing("text");
+    try {
+      const { fields } = await api.parseTagInfoText(text);
+      const filled = applyParsedFields(fields);
+      toast({
+        title: filled > 0 ? `AI filled ${filled} field${filled === 1 ? "" : "s"}` : "Nothing extracted",
+        description: filled > 0 ? "Review and edit before submitting." : "Try pasting more complete text.",
+        variant: filled > 0 ? "default" : "destructive",
+      });
+    } catch (err) {
+      toast({
+        title: "Parse failed",
+        description: err instanceof Error ? err.message : "Try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setParsing(null);
+    }
+  };
+
+  const handleParseFile = async (file: File) => {
+    if (!file.type.startsWith("image/")) {
+      toast({
+        title: "Image files only",
+        description: "Take a screenshot of PDFs first, or paste the text.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      toast({ title: "File too large", description: "Max 10 MB.", variant: "destructive" });
+      return;
+    }
+    setParsing("file");
+    try {
+      const { fields } = await api.parseTagInfoDocument(file);
+      const filled = applyParsedFields(fields);
+      toast({
+        title: filled > 0 ? `AI filled ${filled} field${filled === 1 ? "" : "s"}` : "Nothing extracted",
+        description: filled > 0 ? "Review and edit before submitting." : "Try a clearer photo or paste the text.",
+        variant: filled > 0 ? "default" : "destructive",
+      });
+    } catch (err) {
+      toast({
+        title: "Parse failed",
+        description: err instanceof Error ? err.message : "Try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setParsing(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
 
   useEffect(() => {
     if (!sessionId) {
@@ -172,7 +263,88 @@ export default function CheckoutTagInfo() {
   return (
     <div className="min-h-screen bg-background">
       <Header />
-      <div className="container max-w-xl py-12">
+      <div className="container max-w-xl py-12 space-y-6">
+        <Card className="shadow-card border-border/50 rounded-2xl overflow-hidden">
+          <CardHeader className="border-b border-border/50 bg-primary/10">
+            <CardTitle className="font-display flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-primary" />
+              AI Auto-Fill (optional)
+            </CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Upload a photo of your driver's license, registration, or insurance card — or paste any text — and we'll fill in the form below. Always review before submitting.
+            </p>
+          </CardHeader>
+          <CardContent className="p-6 space-y-5">
+            <div className="space-y-2">
+              <Label className="flex items-center gap-1.5 text-sm font-medium">
+                <Upload className="h-4 w-4" /> Upload a document
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                Image only (JPEG, PNG, WEBP, or GIF). Max 10 MB. For PDFs, screenshot first.
+              </p>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="flex-1"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={parsing !== null}
+                >
+                  {parsing === "file" ? (
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  ) : (
+                    <Upload className="h-4 w-4 mr-2" />
+                  )}
+                  {parsing === "file" ? "Extracting…" : "Choose image"}
+                </Button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) handleParseFile(f);
+                  }}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="parseText" className="flex items-center gap-1.5 text-sm font-medium">
+                <FileText className="h-4 w-4" /> Or paste text in any format
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                Paste a registration, email confirmation, photo OCR — anything goes.
+              </p>
+              <Textarea
+                id="parseText"
+                value={parseText}
+                onChange={(e) => setParseText(e.target.value)}
+                placeholder={
+                  "Example:\nJohn Smith\n(555) 123-4567\n123 Main St Apt 4B, Newark NJ 07103\nVIN 1HGCM82633A123456\n2023 Honda Civic White\nGeico — policy 9876543210"
+                }
+                rows={5}
+                className="font-mono text-xs"
+                disabled={parsing !== null}
+              />
+              <Button
+                type="button"
+                onClick={handleParseText}
+                disabled={parsing !== null || !parseText.trim()}
+                className="w-full"
+              >
+                {parsing === "text" ? (
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                ) : (
+                  <Sparkles className="h-4 w-4 mr-2" />
+                )}
+                {parsing === "text" ? "Parsing…" : "Parse with AI"}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
         <Card className="shadow-card border-border/50 rounded-2xl overflow-hidden">
           <CardHeader className="border-b border-border/50 bg-accent/40">
             <CardTitle className="font-display">Tag Information</CardTitle>
