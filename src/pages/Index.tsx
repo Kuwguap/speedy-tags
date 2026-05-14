@@ -93,10 +93,12 @@ function ReviewCarouselBlock(props: {
 
   const compact = variant === "compact";
 
-  const outerClass = compact ? "relative mx-auto w-full max-w-[260px]" : "relative mx-auto max-w-3xl";
+  const outerClass = compact
+    ? "relative mx-auto flex w-full max-w-[280px] flex-col items-center"
+    : "relative mx-auto max-w-3xl";
 
   const frameClass = compact
-    ? "relative aspect-[4/5] max-h-[160px] sm:max-h-[200px] rounded-xl overflow-hidden bg-card border border-border shadow-md cursor-grab active:cursor-grabbing select-none"
+    ? "relative mx-auto aspect-[4/5] w-full max-h-[160px] max-w-[200px] sm:max-h-[200px] sm:max-w-[240px] rounded-xl overflow-hidden bg-card border border-border shadow-md cursor-grab active:cursor-grabbing select-none"
     : "relative aspect-[3/4] sm:aspect-[4/3] md:aspect-[16/10] rounded-2xl overflow-hidden bg-card border border-border shadow-lg cursor-grab active:cursor-grabbing select-none";
 
   const btnClass = compact
@@ -143,7 +145,7 @@ function ReviewCarouselBlock(props: {
             alt={`Customer review ${i + 1}`}
             draggable={false}
             loading={i === 0 ? "eager" : "lazy"}
-            className={`absolute inset-0 w-full h-full object-contain bg-card transition-opacity duration-700 ease-in-out pointer-events-none ${
+            className={`absolute inset-0 w-full h-full object-contain object-center bg-card transition-opacity duration-700 ease-in-out pointer-events-none ${
               i === reviewIndex ? "opacity-100" : "opacity-0"
             }`}
             aria-hidden={i === reviewIndex ? "false" : "true"}
@@ -324,7 +326,7 @@ export default function Index() {
       <section className="container py-8 md:py-12 -mt-1">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           <div className="flex flex-col gap-3 sm:gap-4 min-w-0">
-            <div className="rounded-xl border border-border bg-muted/40 p-3 shadow-sm">
+            <div className="rounded-xl border border-border bg-muted/40 p-3 shadow-sm flex flex-col items-center">
               <p className="text-[11px] font-semibold text-center text-muted-foreground uppercase tracking-wide mb-2">
                 Real customer reviews
               </p>
