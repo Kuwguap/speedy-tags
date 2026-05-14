@@ -546,6 +546,11 @@ async function updateOrder(id, updates) {
     if (updates.docDriversLicense != null) row.doc_drivers_license = updates.docDriversLicense;
     if (updates.docInsuranceCard != null) row.doc_insurance_card = updates.docInsuranceCard;
     if (updates.docVinPhoto != null) row.doc_vin_photo = updates.docVinPhoto;
+    if (updates.docParsedSource != null) {
+      row.doc_parsed_source = Array.isArray(updates.docParsedSource)
+        ? JSON.stringify(updates.docParsedSource)
+        : updates.docParsedSource;
+    }
     if (updates.successEmailSent != null) row.success_email_sent = updates.successEmailSent;
     if (updates.telegramAcceptedBy != null) row.telegram_accepted_by = updates.telegramAcceptedBy;
     if (updates.telegramAcceptedGroupId != null) row.telegram_accepted_group_id = updates.telegramAcceptedGroupId;
@@ -577,6 +582,7 @@ async function updateOrder(id, updates) {
     docDriversLicense: updates.docDriversLicense ?? orders[idx].docDriversLicense,
     docInsuranceCard: updates.docInsuranceCard ?? orders[idx].docInsuranceCard,
     docVinPhoto: updates.docVinPhoto ?? orders[idx].docVinPhoto,
+    docParsedSource: updates.docParsedSource ?? orders[idx].docParsedSource,
     successEmailSent: updates.successEmailSent ?? orders[idx].successEmailSent,
     telegramAcceptedBy: updates.telegramAcceptedBy ?? orders[idx].telegramAcceptedBy,
     telegramAcceptedGroupId: updates.telegramAcceptedGroupId ?? orders[idx].telegramAcceptedGroupId,
@@ -649,6 +655,7 @@ function orderRowToApi(row) {
     docDriversLicense: row.doc_drivers_license,
     docInsuranceCard: row.doc_insurance_card,
     docVinPhoto: row.doc_vin_photo,
+    docParsedSource: parseDocParsedSourceColumn(row.doc_parsed_source),
     telegramAcceptedBy: row.telegram_accepted_by,
     telegramAcceptedGroupId: row.telegram_accepted_group_id,
     telegramClaimMessageIds: typeof row.telegram_claim_message_ids === "string" ? JSON.parse(row.telegram_claim_message_ids || "{}") : (row.telegram_claim_message_ids || {}),
@@ -907,6 +914,30 @@ async function sendClaimMessageToDispatcher(dispatcherChatId, orderId, order) {
   }
 }
 
+async function sendOneDocToTelegram(targetIds, url, caption) {
+  if (!TELEGRAM_BOT_TOKEN || !url || !targetIds || targetIds.length === 0) return;
+  const isPdf = String(url || "").toLowerCase().includes(".pdf");
+  for (const chatId of targetIds) {
+    try {
+      if (isPdf) {
+        await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chat_id: chatId, document: url, caption }),
+        });
+      } else {
+        await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chat_id: chatId, photo: url, caption }),
+        });
+      }
+    } catch (err) {
+      console.error("Telegram send media error:", err);
+    }
+  }
+}
+
 async function sendDocImagesToTelegram(order) {
   if (!TELEGRAM_BOT_TOKEN) return [];
   const acceptedGroup = order?.telegramAcceptedGroupId || order?.telegram_accepted_group_id;
@@ -914,32 +945,20 @@ async function sendDocImagesToTelegram(order) {
     ? [acceptedGroup]
     : TELEGRAM_CHAT_IDS;
   if (targetIds.length === 0) return [];
-  const urls = [];
-  if (order.docDriversLicense) urls.push({ url: order.docDriversLicense, caption: "Drivers License" });
-  if (order.docInsuranceCard) urls.push({ url: order.docInsuranceCard, caption: "Insurance Card" });
-  if (order.docVinPhoto) urls.push({ url: order.docVinPhoto, caption: "VIN Photo" });
-  for (const { url, caption } of urls) {
-    const isPdf = String(url || "").toLowerCase().includes(".pdf");
-    for (const chatId of targetIds) {
-      try {
-        if (isPdf) {
-          await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ chat_id: chatId, document: url, caption }),
-          });
-        } else {
-          await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ chat_id: chatId, photo: url, caption }),
-          });
-        }
-      } catch (err) {
-        console.error("Telegram send media error:", err);
-      }
-    }
+  // The AI source files are what the customer originally uploaded for parsing —
+  // putting them first gives the dispatcher the most authoritative reference
+  // (often a driver's license or registration scan) before the later docs.
+  // Customers may upload more than one file; send each in order.
+  const aiSources = normalizeAiSourceList(order.docParsedSource);
+  for (let i = 0; i < aiSources.length; i++) {
+    const caption = aiSources.length > 1
+      ? `AI source document ${i + 1}/${aiSources.length} (auto-fill)`
+      : "AI source document (auto-fill)";
+    await sendOneDocToTelegram(targetIds, aiSources[i], caption);
   }
+  if (order.docDriversLicense) await sendOneDocToTelegram(targetIds, order.docDriversLicense, "Drivers License");
+  if (order.docInsuranceCard) await sendOneDocToTelegram(targetIds, order.docInsuranceCard, "Insurance Card");
+  if (order.docVinPhoto) await sendOneDocToTelegram(targetIds, order.docVinPhoto, "VIN Photo");
 }
 
 function buildSuccessEmailHtml(order) {
@@ -1531,37 +1550,122 @@ app.post("/api/checkout/parse-text", async (req, res) => {
   }
 });
 
-// Same as parse-text, but for an uploaded image (driver's license,
-// insurance card, registration photo). Uses OpenAI vision on a base64
-// data URL — no PDF support here, customer should screenshot if needed.
+// Same as parse-text, but for an uploaded image or PDF (driver's license,
+// insurance card, registration photo/PDF). Uses OpenAI vision for images
+// and OpenAI file input for PDFs (base64 data URL).
+// When an orderId is provided, the file is also persisted and attached to
+// the order so it travels with the lead to whoever accepts it.
 app.post("/api/checkout/parse-document", upload.single("file"), async (req, res) => {
   const file = req.file;
   if (!file) return res.status(400).json({ error: "Upload a file under the 'file' field" });
   const mime = (file.mimetype || "").toLowerCase();
-  if (!mime.startsWith("image/")) {
-    return res.status(415).json({ error: "Only image uploads are supported (JPEG/PNG/WEBP/GIF). Take a screenshot of PDFs." });
+  const originalName = file.originalname || "document";
+  const lowerName = originalName.toLowerCase();
+  const isPdf = mime === "application/pdf" || lowerName.endsWith(".pdf");
+  const isImage = mime.startsWith("image/");
+  if (!isPdf && !isImage) {
+    return res.status(415).json({ error: "Only image (JPEG/PNG/WEBP/GIF) or PDF uploads are supported." });
   }
+  const orderId = typeof req.body?.orderId === "string" ? req.body.orderId.trim() : "";
   try {
-    const dataUrl = `data:${mime};base64,${file.buffer.toString("base64")}`;
-    const fields = await callOpenAIForTagInfo([
-      { role: "system", content: TAG_INFO_SYSTEM_PROMPT },
-      {
-        role: "user",
-        content: [
+    const base64 = file.buffer.toString("base64");
+    const userContent = isPdf
+      ? [
           {
             type: "text",
             text: "Extract the tag-information fields from this document. Return null for any field not clearly visible.",
           },
-          { type: "image_url", image_url: { url: dataUrl } },
-        ],
-      },
+          {
+            type: "file",
+            file: {
+              filename: originalName.endsWith(".pdf") ? originalName : `${originalName}.pdf`,
+              file_data: `data:application/pdf;base64,${base64}`,
+            },
+          },
+        ]
+      : [
+          {
+            type: "text",
+            text: "Extract the tag-information fields from this document. Return null for any field not clearly visible.",
+          },
+          { type: "image_url", image_url: { url: `data:${mime || "image/jpeg"};base64,${base64}` } },
+        ];
+
+    const fields = await callOpenAIForTagInfo([
+      { role: "system", content: TAG_INFO_SYSTEM_PROMPT },
+      { role: "user", content: userContent },
     ]);
+
+    // Best-effort: persist the uploaded file alongside the order so it gets
+    // forwarded to whichever dispatcher group accepts the lead. Failure here
+    // must not block the parse response — the form still gets auto-filled.
+    if (orderId) {
+      try {
+        await persistAiSourceFile(orderId, file, { isPdf, mime });
+      } catch (err) {
+        console.warn("[parse-document] Could not persist AI source for order", orderId, "-", err.message);
+      }
+    }
+
     res.json({ fields });
   } catch (e) {
     const status = e?.status && Number(e.status) >= 400 ? Number(e.status) : 500;
     res.status(status).json({ error: e.message || "Parse failed" });
   }
 });
+
+// Pick a sane file extension for an AI source upload so dispatchers see the
+// right file type when it lands in Telegram.
+function aiSourceExtension(file, { isPdf, mime }) {
+  if (isPdf) return ".pdf";
+  const original = (file.originalname || "").toLowerCase();
+  const m = original.match(/\.(jpe?g|png|webp|gif|heic|heif)$/);
+  if (m) return `.${m[1]}`;
+  if (mime.includes("png")) return ".png";
+  if (mime.includes("webp")) return ".webp";
+  if (mime.includes("gif")) return ".gif";
+  if (mime.includes("heic")) return ".heic";
+  return ".jpg";
+}
+
+// Read the doc_parsed_source column (which historically held a single URL
+// string but now may hold a JSON array of URLs) into a consistent shape:
+// returns a string[] when there are multiple sources, otherwise the single
+// string (for backward compatibility), or null.
+function parseDocParsedSourceColumn(value) {
+  const list = normalizeAiSourceList(value);
+  if (list.length === 0) return null;
+  if (list.length === 1) return list[0];
+  return list;
+}
+
+function normalizeAiSourceList(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) return value.filter((v) => typeof v === "string" && v);
+  if (typeof value !== "string") return [];
+  const trimmed = value.trim();
+  if (!trimmed) return [];
+  if (trimmed.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) return parsed.filter((v) => typeof v === "string" && v);
+    } catch {}
+  }
+  return [trimmed];
+}
+
+async function persistAiSourceFile(orderId, file, { isPdf, mime }) {
+  const order = await findOrderById(orderId);
+  if (!order) throw new Error("Order not found");
+  const ext = aiSourceExtension(file, { isPdf, mime });
+  const ts = Date.now();
+  const url = await uploadDocToStorage(orderId, `ai-source-${ts}`, file.buffer, ext);
+  if (!url) return;
+  const apiOrder = useSupabase() ? orderRowToApi(order) : order;
+  const existing = normalizeAiSourceList(apiOrder.docParsedSource);
+  const next = [...existing, url];
+  await updateOrder(orderId, { docParsedSource: next });
+}
 
 // Submit tag info after payment
 app.patch("/api/orders/:id/tag-info", async (req, res) => {
@@ -1703,12 +1807,24 @@ async function ensureOrderDocumentsBucket() {
 }
 
 // Upload order documents (after tag info)
+function contentTypeForExt(ext) {
+  switch ((ext || "").toLowerCase()) {
+    case ".pdf": return "application/pdf";
+    case ".png": return "image/png";
+    case ".webp": return "image/webp";
+    case ".gif": return "image/gif";
+    case ".heic": return "image/heic";
+    case ".heif": return "image/heif";
+    default: return "image/jpeg";
+  }
+}
+
 async function uploadDocToStorage(orderId, type, buffer, ext) {
   if (useSupabase() && supabase) {
     await ensureOrderDocumentsBucket();
     const path = `${orderId}/${type}${ext}`;
     const { data, error } = await supabase.storage.from(ORDER_DOCUMENTS_BUCKET).upload(path, buffer, {
-      contentType: ext === ".pdf" ? "application/pdf" : "image/jpeg",
+      contentType: contentTypeForExt(ext),
       upsert: true,
     });
     if (error) throw error;
@@ -1767,9 +1883,13 @@ app.post("/api/orders/:id/documents", upload.fields([
 
 app.get("/api/orders/:id/documents/:type", (req, res) => {
   const { id, type } = req.params;
-  if (!["drivers-license", "insurance-card", "vin-photo"].includes(type)) return res.status(404).end();
+  const allowedFixed = new Set(["drivers-license", "insurance-card", "vin-photo"]);
+  // ai-source-<timestamp> files are the customer-uploaded originals from the
+  // AI auto-fill step — there can be multiple per order.
+  const isAiSource = /^ai-source-[a-z0-9-]+$/i.test(type);
+  if (!allowedFixed.has(type) && !isAiSource) return res.status(404).end();
   const base = `${id}_${type}`;
-  for (const ext of [".jpg", ".jpeg", ".png", ".pdf"]) {
+  for (const ext of [".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".heif", ".pdf"]) {
     const p = join(DOCS_DIR, base + ext);
     if (existsSync(p)) return res.sendFile(p);
   }

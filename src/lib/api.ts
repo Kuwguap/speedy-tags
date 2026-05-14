@@ -46,9 +46,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ text }),
     }),
-  parseTagInfoDocument: (file: File) => {
+  parseTagInfoDocument: (file: File, orderId?: string) => {
     const fd = new FormData();
     fd.append("file", file);
+    if (orderId) fd.append("orderId", orderId);
     return request<{ fields: Partial<TagInfoFields> }>("/checkout/parse-document", {
       method: "POST",
       body: fd,

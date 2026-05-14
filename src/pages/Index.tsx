@@ -18,6 +18,8 @@ import {
   ChevronUp,
   Star,
   Check,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import heroBg from "@/assets/hero-bg.jpg";
 
@@ -41,6 +43,17 @@ const testimonials = [
   { quote: "Bought a car privately, needed plates ASAP. DMV verified, no issues. Highly recommend.", stars: 5, author: "Sandra M." },
 ];
 
+const reviewImages = [
+  "/reviews/photo_2026-05-14_21-16-01.jpg",
+  "/reviews/photo_2026-05-14_21-16-04.jpg",
+  "/reviews/photo_2026-05-14_21-16-06.jpg",
+  "/reviews/photo_2026-05-14_21-16-08.jpg",
+  "/reviews/photo_2026-05-14_21-16-10.jpg",
+  "/reviews/photo_2026-05-14_21-16-11.jpg",
+  "/reviews/photo_2026-05-14_21-16-13.jpg",
+  "/reviews/photo_2026-05-14_21-16-15.jpg",
+];
+
 const faqs = [
   { q: "Are these official?", a: "Yes. We are an NJ licensed dealer. All temp tags are processed through the official NJ MVC system and appear in DMV records." },
   { q: "Will police see them?", a: "Yes. When police run your plate, our temp tags show up as valid, DMV-verified registration." },
@@ -54,6 +67,8 @@ export default function Index() {
   const { update } = useCheckout();
   const [services, setServices] = useState<ServiceRecord[]>([]);
   const [openFaq, setOpenFaq] = useState<number | null>(null);
+  const [reviewIndex, setReviewIndex] = useState(0);
+  const [reviewsPaused, setReviewsPaused] = useState(false);
 
   useEffect(() => {
     api.getServices()
@@ -62,6 +77,19 @@ export default function Index() {
         setServices(getServices() as ServiceRecord[]);
       });
   }, []);
+
+  useEffect(() => {
+    if (reviewsPaused || reviewImages.length <= 1) return;
+    const id = window.setInterval(() => {
+      setReviewIndex((i) => (i + 1) % reviewImages.length);
+    }, 4500);
+    return () => window.clearInterval(id);
+  }, [reviewsPaused]);
+
+  const prevReview = () =>
+    setReviewIndex((i) => (i - 1 + reviewImages.length) % reviewImages.length);
+  const nextReview = () =>
+    setReviewIndex((i) => (i + 1) % reviewImages.length);
 
   const handleHeroBuy = () => {
     const first = services[0];
@@ -253,6 +281,75 @@ export default function Index() {
               <cite className="font-semibold text-foreground not-italic">— {t.author}</cite>
             </blockquote>
           ))}
+        </div>
+      </section>
+
+      {/* Review screenshots slideshow */}
+      <section className="py-12 md:py-16 bg-muted/40">
+        <div className="container">
+          <h2 className="font-display text-2xl md:text-3xl font-bold text-center text-foreground mb-3">
+            Real Customer Reviews
+          </h2>
+          <p className="text-muted-foreground text-center mb-8">
+            Screenshots from actual customers after they got their plates.
+          </p>
+          <div
+            className="relative mx-auto max-w-3xl"
+            onMouseEnter={() => setReviewsPaused(true)}
+            onMouseLeave={() => setReviewsPaused(false)}
+            onTouchStart={() => setReviewsPaused(true)}
+            onTouchEnd={() => setReviewsPaused(false)}
+          >
+            <div className="relative aspect-[3/4] sm:aspect-[4/3] md:aspect-[16/10] rounded-2xl overflow-hidden bg-card border border-border shadow-lg">
+              {reviewImages.map((src, i) => (
+                <img
+                  key={src}
+                  src={src}
+                  alt={`Customer review ${i + 1}`}
+                  loading={i === 0 ? "eager" : "lazy"}
+                  className={`absolute inset-0 w-full h-full object-contain bg-card transition-opacity duration-700 ease-in-out ${
+                    i === reviewIndex ? "opacity-100" : "opacity-0"
+                  }`}
+                  aria-hidden={i === reviewIndex ? "false" : "true"}
+                />
+              ))}
+
+              <button
+                type="button"
+                onClick={prevReview}
+                aria-label="Previous review"
+                className="absolute left-2 sm:left-3 top-1/2 -translate-y-1/2 inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/90 text-foreground shadow hover:bg-white transition"
+              >
+                <ChevronLeft className="h-5 w-5" />
+              </button>
+              <button
+                type="button"
+                onClick={nextReview}
+                aria-label="Next review"
+                className="absolute right-2 sm:right-3 top-1/2 -translate-y-1/2 inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/90 text-foreground shadow hover:bg-white transition"
+              >
+                <ChevronRight className="h-5 w-5" />
+              </button>
+
+              <div className="absolute bottom-2 right-3 rounded-full bg-black/60 px-2.5 py-0.5 text-xs font-medium text-white">
+                {reviewIndex + 1} / {reviewImages.length}
+              </div>
+            </div>
+
+            <div className="flex justify-center gap-2 mt-4">
+              {reviewImages.map((_, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => setReviewIndex(i)}
+                  aria-label={`Show review ${i + 1}`}
+                  className={`h-2 rounded-full transition-all ${
+                    i === reviewIndex ? "w-6 bg-primary" : "w-2 bg-border hover:bg-muted-foreground/50"
+                  }`}
+                />
+              ))}
+            </div>
+          </div>
         </div>
       </section>
 

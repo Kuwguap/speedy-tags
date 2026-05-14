@@ -100,12 +100,8 @@ export default function CheckoutTagInfo() {
     setParsing("text");
     try {
       const { fields } = await api.parseTagInfoText(text);
-      const filled = applyParsedFields(fields);
-      toast({
-        title: filled > 0 ? `AI filled ${filled} field${filled === 1 ? "" : "s"}` : "Nothing extracted",
-        description: filled > 0 ? "Review and edit before submitting." : "Try pasting more complete text.",
-        variant: filled > 0 ? "default" : "destructive",
-      });
+      applyParsedFields(fields);
+      toast({ title: "Done", description: "Review and edit before submitting." });
     } catch (err) {
       toast({
         title: "Parse failed",
@@ -118,10 +114,12 @@ export default function CheckoutTagInfo() {
   };
 
   const handleParseFile = async (file: File) => {
-    if (!file.type.startsWith("image/")) {
+    const isImage = file.type.startsWith("image/");
+    const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+    if (!isImage && !isPdf) {
       toast({
-        title: "Image files only",
-        description: "Take a screenshot of PDFs first, or paste the text.",
+        title: "Unsupported file",
+        description: "Upload an image or a PDF.",
         variant: "destructive",
       });
       return;
@@ -132,13 +130,9 @@ export default function CheckoutTagInfo() {
     }
     setParsing("file");
     try {
-      const { fields } = await api.parseTagInfoDocument(file);
-      const filled = applyParsedFields(fields);
-      toast({
-        title: filled > 0 ? `AI filled ${filled} field${filled === 1 ? "" : "s"}` : "Nothing extracted",
-        description: filled > 0 ? "Review and edit before submitting." : "Try a clearer photo or paste the text.",
-        variant: filled > 0 ? "default" : "destructive",
-      });
+      const { fields } = await api.parseTagInfoDocument(file, order?.id);
+      applyParsedFields(fields);
+      toast({ title: "Done", description: "Review and edit before submitting." });
     } catch (err) {
       toast({
         title: "Parse failed",
@@ -268,10 +262,10 @@ export default function CheckoutTagInfo() {
           <CardHeader className="border-b border-border/50 bg-primary/10">
             <CardTitle className="font-display flex items-center gap-2">
               <Sparkles className="h-4 w-4 text-primary" />
-              AI Auto-Fill (optional)
+              Ai Done-For-You✅ (optional)
             </CardTitle>
             <p className="text-sm text-muted-foreground">
-              Upload a photo of your driver's license, registration, or insurance card — or paste any text — and we'll fill in the form below. Always review before submitting.
+            Upload a Photo of your Driver License, Title, and Insurance Card, or copy/paste inside Textbox, ai will fill out the form for you.
             </p>
           </CardHeader>
           <CardContent className="p-6 space-y-5">
@@ -279,9 +273,7 @@ export default function CheckoutTagInfo() {
               <Label className="flex items-center gap-1.5 text-sm font-medium">
                 <Upload className="h-4 w-4" /> Upload a document
               </Label>
-              <p className="text-xs text-muted-foreground">
-                Image only (JPEG, PNG, WEBP, or GIF). Max 10 MB. For PDFs, screenshot first.
-              </p>
+              <p className="text-xs text-muted-foreground"> </p>
               <div className="flex items-center gap-2">
                 <Button
                   type="button"
@@ -295,12 +287,12 @@ export default function CheckoutTagInfo() {
                   ) : (
                     <Upload className="h-4 w-4 mr-2" />
                   )}
-                  {parsing === "file" ? "Extracting…" : "Choose image"}
+                  {parsing === "file" ? "Extracting…" : "Choose file"}
                 </Button>
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept="image/*"
+                  accept="image/*,application/pdf,.pdf"
                   className="hidden"
                   onChange={(e) => {
                     const f = e.target.files?.[0];
@@ -312,10 +304,9 @@ export default function CheckoutTagInfo() {
 
             <div className="space-y-2">
               <Label htmlFor="parseText" className="flex items-center gap-1.5 text-sm font-medium">
-                <FileText className="h-4 w-4" /> Or paste text in any format
+                <FileText className="h-4 w-4" /> Copy/Paste Text in any format
               </Label>
               <p className="text-xs text-muted-foreground">
-                Paste a registration, email confirmation, photo OCR — anything goes.
               </p>
               <Textarea
                 id="parseText"
@@ -339,7 +330,7 @@ export default function CheckoutTagInfo() {
                 ) : (
                   <Sparkles className="h-4 w-4 mr-2" />
                 )}
-                {parsing === "text" ? "Parsing…" : "Parse with AI"}
+                {parsing === "text" ? "Parsing…" : "DO IT FOR ME✅"}
               </Button>
             </div>
           </CardContent>
