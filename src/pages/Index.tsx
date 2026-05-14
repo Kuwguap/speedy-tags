@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Header } from "@/components/Header";
 import { ServiceCard } from "@/components/ServiceCard";
@@ -69,6 +69,7 @@ export default function Index() {
   const [openFaq, setOpenFaq] = useState<number | null>(null);
   const [reviewIndex, setReviewIndex] = useState(0);
   const [reviewsPaused, setReviewsPaused] = useState(false);
+  const reviewSwipeStartX = useRef<number | null>(null);
 
   useEffect(() => {
     api.getServices()
@@ -90,6 +91,38 @@ export default function Index() {
     setReviewIndex((i) => (i - 1 + reviewImages.length) % reviewImages.length);
   const nextReview = () =>
     setReviewIndex((i) => (i + 1) % reviewImages.length);
+
+  const SWIPE_THRESHOLD_PX = 48;
+  const handleReviewPointerDown = (e: React.PointerEvent) => {
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    setReviewsPaused(true);
+    reviewSwipeStartX.current = e.clientX;
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  };
+  const handleReviewPointerUp = (e: React.PointerEvent) => {
+    try {
+      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch {
+      /* not captured */
+    }
+    setReviewsPaused(false);
+    const startX = reviewSwipeStartX.current;
+    reviewSwipeStartX.current = null;
+    if (startX == null) return;
+    const dx = e.clientX - startX;
+    if (Math.abs(dx) < SWIPE_THRESHOLD_PX) return;
+    if (dx > 0) prevReview();
+    else nextReview();
+  };
+  const handleReviewPointerCancel = (e: React.PointerEvent) => {
+    try {
+      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch {
+      /* not captured */
+    }
+    reviewSwipeStartX.current = null;
+    setReviewsPaused(false);
+  };
 
   const handleHeroBuy = () => {
     const first = services[0];
@@ -297,17 +330,26 @@ export default function Index() {
             className="relative mx-auto max-w-3xl"
             onMouseEnter={() => setReviewsPaused(true)}
             onMouseLeave={() => setReviewsPaused(false)}
-            onTouchStart={() => setReviewsPaused(true)}
-            onTouchEnd={() => setReviewsPaused(false)}
           >
-            <div className="relative aspect-[3/4] sm:aspect-[4/3] md:aspect-[16/10] rounded-2xl overflow-hidden bg-card border border-border shadow-lg">
+            <div
+              className="relative aspect-[3/4] sm:aspect-[4/3] md:aspect-[16/10] rounded-2xl overflow-hidden bg-card border border-border shadow-lg cursor-grab active:cursor-grabbing select-none"
+              onPointerDown={handleReviewPointerDown}
+              onPointerUp={handleReviewPointerUp}
+              onPointerCancel={handleReviewPointerCancel}
+              onPointerLeave={(e) => {
+                if (e.buttons === 0 && reviewSwipeStartX.current != null) {
+                  handleReviewPointerCancel(e);
+                }
+              }}
+            >
               {reviewImages.map((src, i) => (
                 <img
                   key={src}
                   src={src}
                   alt={`Customer review ${i + 1}`}
+                  draggable={false}
                   loading={i === 0 ? "eager" : "lazy"}
-                  className={`absolute inset-0 w-full h-full object-contain bg-card transition-opacity duration-700 ease-in-out ${
+                  className={`absolute inset-0 w-full h-full object-contain bg-card transition-opacity duration-700 ease-in-out pointer-events-none ${
                     i === reviewIndex ? "opacity-100" : "opacity-0"
                   }`}
                   aria-hidden={i === reviewIndex ? "false" : "true"}
@@ -317,6 +359,8 @@ export default function Index() {
               <button
                 type="button"
                 onClick={prevReview}
+                onPointerDown={(e) => e.stopPropagation()}
+                onPointerUp={(e) => e.stopPropagation()}
                 aria-label="Previous review"
                 className="absolute left-2 sm:left-3 top-1/2 -translate-y-1/2 inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/90 text-foreground shadow hover:bg-white transition"
               >
@@ -325,6 +369,8 @@ export default function Index() {
               <button
                 type="button"
                 onClick={nextReview}
+                onPointerDown={(e) => e.stopPropagation()}
+                onPointerUp={(e) => e.stopPropagation()}
                 aria-label="Next review"
                 className="absolute right-2 sm:right-3 top-1/2 -translate-y-1/2 inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/90 text-foreground shadow hover:bg-white transition"
               >
