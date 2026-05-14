@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, type MutableRefObject, type PointerEvent as ReactPointerEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { Header } from "@/components/Header";
 import { ServiceCard } from "@/components/ServiceCard";
@@ -62,6 +62,135 @@ const faqs = [
   { q: "Do I need to visit in person?", a: "No. 100% online—submit your info, pay securely, and receive delivery via email, same-day driver, or FedEx delivery." },
 ];
 
+type ReviewCarouselVariant = "compact" | "featured";
+
+function ReviewCarouselBlock(props: {
+  variant: ReviewCarouselVariant;
+  reviewImages: string[];
+  reviewIndex: number;
+  reviewSwipeStartX: MutableRefObject<number | null>;
+  setReviewsPaused: (paused: boolean) => void;
+  prevReview: () => void;
+  nextReview: () => void;
+  onJumpTo: (i: number) => void;
+  handleReviewPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => void;
+  handleReviewPointerUp: (e: ReactPointerEvent<HTMLDivElement>) => void;
+  handleReviewPointerCancel: (e: ReactPointerEvent<HTMLDivElement>) => void;
+}) {
+  const {
+    variant,
+    reviewImages,
+    reviewIndex,
+    reviewSwipeStartX,
+    setReviewsPaused,
+    prevReview,
+    nextReview,
+    onJumpTo,
+    handleReviewPointerDown,
+    handleReviewPointerUp,
+    handleReviewPointerCancel,
+  } = props;
+
+  const compact = variant === "compact";
+
+  const outerClass = compact ? "relative mx-auto w-full max-w-[260px]" : "relative mx-auto max-w-3xl";
+
+  const frameClass = compact
+    ? "relative aspect-[4/5] max-h-[160px] sm:max-h-[200px] rounded-xl overflow-hidden bg-card border border-border shadow-md cursor-grab active:cursor-grabbing select-none"
+    : "relative aspect-[3/4] sm:aspect-[4/3] md:aspect-[16/10] rounded-2xl overflow-hidden bg-card border border-border shadow-lg cursor-grab active:cursor-grabbing select-none";
+
+  const btnClass = compact
+    ? "absolute left-1 top-1/2 -translate-y-1/2 inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/90 text-foreground shadow hover:bg-white transition"
+    : "absolute left-2 sm:left-3 top-1/2 -translate-y-1/2 inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/90 text-foreground shadow hover:bg-white transition";
+
+  const btnRightClass = compact
+    ? "absolute right-1 top-1/2 -translate-y-1/2 inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/90 text-foreground shadow hover:bg-white transition"
+    : "absolute right-2 sm:right-3 top-1/2 -translate-y-1/2 inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/90 text-foreground shadow hover:bg-white transition";
+
+  const iconClass = compact ? "h-4 w-4" : "h-5 w-5";
+
+  const counterClass = compact
+    ? "absolute bottom-1.5 right-2 rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-medium text-white"
+    : "absolute bottom-2 right-3 rounded-full bg-black/60 px-2.5 py-0.5 text-xs font-medium text-white";
+
+  const dotsWrapClass = compact ? "flex justify-center gap-1.5 mt-2" : "flex justify-center gap-2 mt-4";
+
+  const dotActiveClass = compact ? "w-5 bg-primary" : "w-6 bg-primary";
+  const dotIdleClass = compact ? "w-1.5 bg-border hover:bg-muted-foreground/50" : "w-2 bg-border hover:bg-muted-foreground/50";
+  const dotBaseClass = compact ? "h-1.5 rounded-full transition-all" : "h-2 rounded-full transition-all";
+
+  return (
+    <div
+      className={outerClass}
+      onMouseEnter={() => setReviewsPaused(true)}
+      onMouseLeave={() => setReviewsPaused(false)}
+    >
+      <div
+        className={frameClass}
+        onPointerDown={handleReviewPointerDown}
+        onPointerUp={handleReviewPointerUp}
+        onPointerCancel={handleReviewPointerCancel}
+        onPointerLeave={(e) => {
+          if (e.buttons === 0 && reviewSwipeStartX.current != null) {
+            handleReviewPointerCancel(e);
+          }
+        }}
+      >
+        {reviewImages.map((src, i) => (
+          <img
+            key={src}
+            src={src}
+            alt={`Customer review ${i + 1}`}
+            draggable={false}
+            loading={i === 0 ? "eager" : "lazy"}
+            className={`absolute inset-0 w-full h-full object-contain bg-card transition-opacity duration-700 ease-in-out pointer-events-none ${
+              i === reviewIndex ? "opacity-100" : "opacity-0"
+            }`}
+            aria-hidden={i === reviewIndex ? "false" : "true"}
+          />
+        ))}
+
+        <button
+          type="button"
+          onClick={prevReview}
+          onPointerDown={(e) => e.stopPropagation()}
+          onPointerUp={(e) => e.stopPropagation()}
+          aria-label="Previous review"
+          className={btnClass}
+        >
+          <ChevronLeft className={iconClass} />
+        </button>
+        <button
+          type="button"
+          onClick={nextReview}
+          onPointerDown={(e) => e.stopPropagation()}
+          onPointerUp={(e) => e.stopPropagation()}
+          aria-label="Next review"
+          className={btnRightClass}
+        >
+          <ChevronRight className={iconClass} />
+        </button>
+
+        <div className={counterClass}>
+          {reviewIndex + 1} / {reviewImages.length}
+        </div>
+      </div>
+
+      <div className={dotsWrapClass}>
+        {reviewImages.map((_, i) => (
+          <button
+            key={i}
+            type="button"
+            onClick={() => onJumpTo(i)}
+            aria-label={`Show review ${i + 1}`}
+            className={`${dotBaseClass} ${i === reviewIndex ? dotActiveClass : dotIdleClass}`}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function Index() {
   const navigate = useNavigate();
   const { update } = useCheckout();
@@ -93,13 +222,13 @@ export default function Index() {
     setReviewIndex((i) => (i + 1) % reviewImages.length);
 
   const SWIPE_THRESHOLD_PX = 48;
-  const handleReviewPointerDown = (e: React.PointerEvent) => {
+  const handleReviewPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.pointerType === "mouse" && e.button !== 0) return;
     setReviewsPaused(true);
     reviewSwipeStartX.current = e.clientX;
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   };
-  const handleReviewPointerUp = (e: React.PointerEvent) => {
+  const handleReviewPointerUp = (e: ReactPointerEvent<HTMLDivElement>) => {
     try {
       (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
     } catch {
@@ -114,7 +243,7 @@ export default function Index() {
     if (dx > 0) prevReview();
     else nextReview();
   };
-  const handleReviewPointerCancel = (e: React.PointerEvent) => {
+  const handleReviewPointerCancel = (e: ReactPointerEvent<HTMLDivElement>) => {
     try {
       (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
     } catch {
@@ -132,6 +261,9 @@ export default function Index() {
     }
     navigate("/checkout");
   };
+
+  const firstBenefit = benefits[0];
+  const FirstBenefitIcon = firstBenefit.icon;
 
   return (
     <div className="min-h-screen bg-background">
@@ -153,7 +285,7 @@ export default function Index() {
       <section className="relative overflow-hidden bg-foreground">
         <img src={heroBg} alt="" className="absolute inset-0 w-full h-full object-cover object-center opacity-30" />
         <div className="absolute inset-0 bg-gradient-to-b from-foreground/90 to-foreground" />
-        <div className="relative container py-16 md:py-24 text-center">
+        <div className="relative container py-12 md:py-20 text-center">
           <h1 className="font-display text-2xl md:text-4xl lg:text-5xl font-extrabold text-white mb-4 leading-tight">
             New Jersey Temporary Tags —<br />
             <span className="text-primary">Same Day • DMV Verified</span>
@@ -188,10 +320,39 @@ export default function Index() {
         </div>
       </section>
 
-      {/* Benefits grid */}
-      <section className="container py-12 md:py-16 -mt-1">
+      {/* Benefits grid — compact review slideshow sits above Same Day Processing */}
+      <section className="container py-8 md:py-12 -mt-1">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-          {benefits.map((b) => (
+          <div className="flex flex-col gap-3 sm:gap-4 min-w-0">
+            <div className="rounded-xl border border-border bg-muted/40 p-3 shadow-sm">
+              <p className="text-[11px] font-semibold text-center text-muted-foreground uppercase tracking-wide mb-2">
+                Real customer reviews
+              </p>
+              <ReviewCarouselBlock
+                variant="compact"
+                reviewImages={reviewImages}
+                reviewIndex={reviewIndex}
+                reviewSwipeStartX={reviewSwipeStartX}
+                setReviewsPaused={setReviewsPaused}
+                prevReview={prevReview}
+                nextReview={nextReview}
+                onJumpTo={setReviewIndex}
+                handleReviewPointerDown={handleReviewPointerDown}
+                handleReviewPointerUp={handleReviewPointerUp}
+                handleReviewPointerCancel={handleReviewPointerCancel}
+              />
+            </div>
+            <div className="flex gap-4 p-6 rounded-xl bg-card border border-border shadow-sm hover:shadow-md transition-shadow">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <FirstBenefitIcon className="h-6 w-6" />
+              </div>
+              <div>
+                <h3 className="font-display font-semibold text-foreground mb-1">{firstBenefit.title}</h3>
+                <p className="text-sm text-muted-foreground">{firstBenefit.desc}</p>
+              </div>
+            </div>
+          </div>
+          {benefits.slice(1).map((b) => (
             <div key={b.title} className="flex gap-4 p-6 rounded-xl bg-card border border-border shadow-sm hover:shadow-md transition-shadow">
               <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
                 <b.icon className="h-6 w-6" />
@@ -326,76 +487,19 @@ export default function Index() {
           <p className="text-muted-foreground text-center mb-8">
             Screenshots from actual customers after they got their plates.
           </p>
-          <div
-            className="relative mx-auto max-w-3xl"
-            onMouseEnter={() => setReviewsPaused(true)}
-            onMouseLeave={() => setReviewsPaused(false)}
-          >
-            <div
-              className="relative aspect-[3/4] sm:aspect-[4/3] md:aspect-[16/10] rounded-2xl overflow-hidden bg-card border border-border shadow-lg cursor-grab active:cursor-grabbing select-none"
-              onPointerDown={handleReviewPointerDown}
-              onPointerUp={handleReviewPointerUp}
-              onPointerCancel={handleReviewPointerCancel}
-              onPointerLeave={(e) => {
-                if (e.buttons === 0 && reviewSwipeStartX.current != null) {
-                  handleReviewPointerCancel(e);
-                }
-              }}
-            >
-              {reviewImages.map((src, i) => (
-                <img
-                  key={src}
-                  src={src}
-                  alt={`Customer review ${i + 1}`}
-                  draggable={false}
-                  loading={i === 0 ? "eager" : "lazy"}
-                  className={`absolute inset-0 w-full h-full object-contain bg-card transition-opacity duration-700 ease-in-out pointer-events-none ${
-                    i === reviewIndex ? "opacity-100" : "opacity-0"
-                  }`}
-                  aria-hidden={i === reviewIndex ? "false" : "true"}
-                />
-              ))}
-
-              <button
-                type="button"
-                onClick={prevReview}
-                onPointerDown={(e) => e.stopPropagation()}
-                onPointerUp={(e) => e.stopPropagation()}
-                aria-label="Previous review"
-                className="absolute left-2 sm:left-3 top-1/2 -translate-y-1/2 inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/90 text-foreground shadow hover:bg-white transition"
-              >
-                <ChevronLeft className="h-5 w-5" />
-              </button>
-              <button
-                type="button"
-                onClick={nextReview}
-                onPointerDown={(e) => e.stopPropagation()}
-                onPointerUp={(e) => e.stopPropagation()}
-                aria-label="Next review"
-                className="absolute right-2 sm:right-3 top-1/2 -translate-y-1/2 inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/90 text-foreground shadow hover:bg-white transition"
-              >
-                <ChevronRight className="h-5 w-5" />
-              </button>
-
-              <div className="absolute bottom-2 right-3 rounded-full bg-black/60 px-2.5 py-0.5 text-xs font-medium text-white">
-                {reviewIndex + 1} / {reviewImages.length}
-              </div>
-            </div>
-
-            <div className="flex justify-center gap-2 mt-4">
-              {reviewImages.map((_, i) => (
-                <button
-                  key={i}
-                  type="button"
-                  onClick={() => setReviewIndex(i)}
-                  aria-label={`Show review ${i + 1}`}
-                  className={`h-2 rounded-full transition-all ${
-                    i === reviewIndex ? "w-6 bg-primary" : "w-2 bg-border hover:bg-muted-foreground/50"
-                  }`}
-                />
-              ))}
-            </div>
-          </div>
+          <ReviewCarouselBlock
+            variant="featured"
+            reviewImages={reviewImages}
+            reviewIndex={reviewIndex}
+            reviewSwipeStartX={reviewSwipeStartX}
+            setReviewsPaused={setReviewsPaused}
+            prevReview={prevReview}
+            nextReview={nextReview}
+            onJumpTo={setReviewIndex}
+            handleReviewPointerDown={handleReviewPointerDown}
+            handleReviewPointerUp={handleReviewPointerUp}
+            handleReviewPointerCancel={handleReviewPointerCancel}
+          />
         </div>
       </section>
 
