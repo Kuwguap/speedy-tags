@@ -187,7 +187,7 @@ export default function Admin() {
         overnightFedexFee: settings.overnightFedexFee ?? 50,
         testMode: settings.testMode,
         telegramDispatchers: settings.telegramDispatchers ?? [],
-        fallbackClaimTimeoutMs: settings.fallbackClaimTimeoutMs ?? 45000,
+        fallbackClaimTimeoutMs: settings.fallbackClaimTimeoutMs ?? 300000,
         paymentLinks: settings.paymentLinks ?? { venmo: "", cashApp: "", paypal: "", zelle: "", applePay: "" },
         paymentDisplay: settings.paymentDisplay ?? { venmo: "", cashApp: "", paypal: "", zelle: "", applePay: "" },
       });
@@ -551,20 +551,20 @@ export default function Admin() {
                         type="number"
                         min="1000"
                         step="1000"
-                        value={settings.fallbackClaimTimeoutMs ?? 45000}
+                        value={settings.fallbackClaimTimeoutMs ?? 300000}
                         onChange={(e) =>
                           setSettings((s) =>
                             s
                               ? {
                                   ...s,
-                                  fallbackClaimTimeoutMs: parseInt(e.target.value || "0", 10) || 45000,
+                                  fallbackClaimTimeoutMs: parseInt(e.target.value || "0", 10) || 300000,
                                 }
                               : null
                           )
                         }
                       />
                       <p className="text-xs text-muted-foreground mt-1">
-                        Time before leads auto-assign to fallback team (default 45000 ms = 45 seconds).
+                        Time before leads auto-assign to fallback team (default 300000 ms = 5 minutes).
                       </p>
                     </div>
                     <Button onClick={handleSaveSettings} disabled={settingsSaving}>

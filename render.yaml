@@ -43,6 +43,8 @@ services:
         sync: false
       - key: FALLBACK_CLAIM_TIMEOUT_MS
         sync: false
+      - key: API_PUBLIC_URL
+        sync: false
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY

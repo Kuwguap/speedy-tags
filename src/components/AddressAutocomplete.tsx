@@ -9,6 +9,8 @@ interface AddressAutocompleteProps {
   id?: string;
   className?: string;
   error?: boolean;
+  /** When true, field is read-only and suggestions are disabled. */
+  disabled?: boolean;
 }
 
 const DEBOUNCE_MS = 500;
@@ -42,6 +44,7 @@ export function AddressAutocomplete({
   id,
   className,
   error,
+  disabled,
 }: AddressAutocompleteProps) {
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [open, setOpen] = useState(false);
@@ -76,6 +79,7 @@ export function AddressAutocomplete({
   }, []);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (disabled) return;
     const v = e.target.value;
     onChange(v);
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -102,7 +106,7 @@ export function AddressAutocomplete({
   }, []);
 
   return (
-    <div ref={wrapperRef} className="relative">
+    <div ref={wrapperRef} className={cn("relative", disabled && "opacity-70")}>
       <Input
         id={id}
         type="text"
@@ -110,10 +114,14 @@ export function AddressAutocomplete({
         placeholder={placeholder}
         value={value}
         onChange={handleInputChange}
-        onFocus={() => value.trim().length >= 3 && suggestions.length > 0 && setOpen(true)}
+        onFocus={() =>
+          !disabled && value.trim().length >= 3 && suggestions.length > 0 && setOpen(true)
+        }
+        readOnly={disabled}
+        disabled={disabled}
         className={cn(error && "border-destructive", className)}
       />
-      {open && (suggestions.length > 0 || loading) && (
+      {!disabled && open && (suggestions.length > 0 || loading) && (
         <ul
           className="absolute z-50 mt-1 w-full rounded-md border border-border bg-popover py-1 text-popover-foreground shadow-md"
           role="listbox"

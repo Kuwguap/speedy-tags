@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, type MutableRefObject, type PointerEvent as ReactPointerEvent } from "react";
+import { useState, useEffect, useRef } from "react";
+import { useHorizontalSwipe } from "@/hooks/use-horizontal-swipe";
 import { useNavigate } from "react-router-dom";
 import { Header } from "@/components/Header";
 import { ServiceCard } from "@/components/ServiceCard";
@@ -68,28 +69,19 @@ function ReviewCarouselBlock(props: {
   variant: ReviewCarouselVariant;
   reviewImages: string[];
   reviewIndex: number;
-  reviewSwipeStartX: MutableRefObject<number | null>;
   setReviewsPaused: (paused: boolean) => void;
   prevReview: () => void;
   nextReview: () => void;
   onJumpTo: (i: number) => void;
-  handleReviewPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => void;
-  handleReviewPointerUp: (e: ReactPointerEvent<HTMLDivElement>) => void;
-  handleReviewPointerCancel: (e: ReactPointerEvent<HTMLDivElement>) => void;
 }) {
-  const {
-    variant,
-    reviewImages,
-    reviewIndex,
-    reviewSwipeStartX,
-    setReviewsPaused,
-    prevReview,
-    nextReview,
-    onJumpTo,
-    handleReviewPointerDown,
-    handleReviewPointerUp,
-    handleReviewPointerCancel,
-  } = props;
+  const { variant, reviewImages, reviewIndex, setReviewsPaused, prevReview, nextReview, onJumpTo } = props;
+  const frameRef = useRef<HTMLDivElement>(null);
+  const swipe = useHorizontalSwipe(frameRef, {
+    onSwipeLeft: nextReview,
+    onSwipeRight: prevReview,
+    onInteractionStart: () => setReviewsPaused(true),
+    onInteractionEnd: () => setReviewsPaused(false),
+  });
 
   const compact = variant === "compact";
 
@@ -98,8 +90,8 @@ function ReviewCarouselBlock(props: {
     : "relative mx-auto max-w-3xl";
 
   const frameClass = compact
-    ? "relative mx-auto aspect-[4/5] w-full max-h-[160px] max-w-[200px] sm:max-h-[200px] sm:max-w-[240px] rounded-xl overflow-hidden bg-card border border-border shadow-md cursor-grab active:cursor-grabbing select-none"
-    : "relative aspect-[3/4] sm:aspect-[4/3] md:aspect-[16/10] rounded-2xl overflow-hidden bg-card border border-border shadow-lg cursor-grab active:cursor-grabbing select-none";
+    ? "relative mx-auto aspect-[4/5] w-full max-h-[160px] max-w-[200px] sm:max-h-[200px] sm:max-w-[240px] rounded-xl overflow-hidden bg-card border border-border shadow-md cursor-grab active:cursor-grabbing select-none touch-pan-y"
+    : "relative aspect-[3/4] sm:aspect-[4/3] md:aspect-[16/10] rounded-2xl overflow-hidden bg-card border border-border shadow-lg cursor-grab active:cursor-grabbing select-none touch-pan-y";
 
   const btnClass = compact
     ? "absolute left-1 top-1/2 -translate-y-1/2 inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/90 text-foreground shadow hover:bg-white transition"
@@ -128,15 +120,12 @@ function ReviewCarouselBlock(props: {
       onMouseLeave={() => setReviewsPaused(false)}
     >
       <div
+        ref={frameRef}
         className={frameClass}
-        onPointerDown={handleReviewPointerDown}
-        onPointerUp={handleReviewPointerUp}
-        onPointerCancel={handleReviewPointerCancel}
-        onPointerLeave={(e) => {
-          if (e.buttons === 0 && reviewSwipeStartX.current != null) {
-            handleReviewPointerCancel(e);
-          }
-        }}
+        role="region"
+        aria-roledescription="carousel"
+        aria-label="Customer review photos"
+        {...swipe}
       >
         {reviewImages.map((src, i) => (
           <img
@@ -157,6 +146,8 @@ function ReviewCarouselBlock(props: {
           onClick={prevReview}
           onPointerDown={(e) => e.stopPropagation()}
           onPointerUp={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
+          onTouchEnd={(e) => e.stopPropagation()}
           aria-label="Previous review"
           className={btnClass}
         >
@@ -167,6 +158,8 @@ function ReviewCarouselBlock(props: {
           onClick={nextReview}
           onPointerDown={(e) => e.stopPropagation()}
           onPointerUp={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
+          onTouchEnd={(e) => e.stopPropagation()}
           aria-label="Next review"
           className={btnRightClass}
         >
@@ -200,7 +193,6 @@ export default function Index() {
   const [openFaq, setOpenFaq] = useState<number | null>(null);
   const [reviewIndex, setReviewIndex] = useState(0);
   const [reviewsPaused, setReviewsPaused] = useState(false);
-  const reviewSwipeStartX = useRef<number | null>(null);
 
   useEffect(() => {
     api.getServices()
@@ -222,38 +214,6 @@ export default function Index() {
     setReviewIndex((i) => (i - 1 + reviewImages.length) % reviewImages.length);
   const nextReview = () =>
     setReviewIndex((i) => (i + 1) % reviewImages.length);
-
-  const SWIPE_THRESHOLD_PX = 48;
-  const handleReviewPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (e.pointerType === "mouse" && e.button !== 0) return;
-    setReviewsPaused(true);
-    reviewSwipeStartX.current = e.clientX;
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-  };
-  const handleReviewPointerUp = (e: ReactPointerEvent<HTMLDivElement>) => {
-    try {
-      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
-    } catch {
-      /* not captured */
-    }
-    setReviewsPaused(false);
-    const startX = reviewSwipeStartX.current;
-    reviewSwipeStartX.current = null;
-    if (startX == null) return;
-    const dx = e.clientX - startX;
-    if (Math.abs(dx) < SWIPE_THRESHOLD_PX) return;
-    if (dx > 0) prevReview();
-    else nextReview();
-  };
-  const handleReviewPointerCancel = (e: ReactPointerEvent<HTMLDivElement>) => {
-    try {
-      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
-    } catch {
-      /* not captured */
-    }
-    reviewSwipeStartX.current = null;
-    setReviewsPaused(false);
-  };
 
   const handleHeroBuy = () => {
     const first = services[0];
@@ -334,14 +294,10 @@ export default function Index() {
                 variant="compact"
                 reviewImages={reviewImages}
                 reviewIndex={reviewIndex}
-                reviewSwipeStartX={reviewSwipeStartX}
                 setReviewsPaused={setReviewsPaused}
                 prevReview={prevReview}
                 nextReview={nextReview}
                 onJumpTo={setReviewIndex}
-                handleReviewPointerDown={handleReviewPointerDown}
-                handleReviewPointerUp={handleReviewPointerUp}
-                handleReviewPointerCancel={handleReviewPointerCancel}
               />
             </div>
             <div className="flex gap-4 p-6 rounded-xl bg-card border border-border shadow-sm hover:shadow-md transition-shadow">
@@ -493,14 +449,10 @@ export default function Index() {
             variant="featured"
             reviewImages={reviewImages}
             reviewIndex={reviewIndex}
-            reviewSwipeStartX={reviewSwipeStartX}
             setReviewsPaused={setReviewsPaused}
             prevReview={prevReview}
             nextReview={nextReview}
             onJumpTo={setReviewIndex}
-            handleReviewPointerDown={handleReviewPointerDown}
-            handleReviewPointerUp={handleReviewPointerUp}
-            handleReviewPointerCancel={handleReviewPointerCancel}
           />
         </div>
       </section>

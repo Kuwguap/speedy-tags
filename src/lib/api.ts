@@ -138,7 +138,8 @@ export interface OrderRecord {
   lastName: string;
   phone: string;
   address: string;
-  deliveryAddress: string;
+  deliveryAddress?: string;
+  deliverySameAsRegistration?: boolean;
   deliveryMethod?: string;
   vin: string;
   carMakeModel: string;

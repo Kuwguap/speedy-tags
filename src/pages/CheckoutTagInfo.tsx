@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Search, Loader2, Sparkles, Upload, FileText } from "lucide-react";
@@ -26,6 +27,8 @@ const schema = z.object({
   insuranceCompany: z.string().optional(),
   policyNumber: z.string().optional(),
   notes: z.string().optional(),
+  deliveryAddress: z.string().trim().max(200).optional(),
+  deliveryAddress2: z.string().trim().max(200).optional(),
 });
 
 type FormData = z.infer<typeof schema>;
@@ -36,7 +39,7 @@ export default function CheckoutTagInfo() {
   const { toast } = useToast();
   const sessionId = searchParams.get("session_id");
   const isTest = searchParams.get("test") === "1";
-  const [order, setOrder] = useState<{ id: string; productChoice?: string } | null>(null);
+  const [order, setOrder] = useState<{ id: string; productChoice?: string; deliveryAddress?: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -55,7 +58,10 @@ export default function CheckoutTagInfo() {
     insuranceCompany: "",
     policyNumber: "",
     notes: "",
+    deliveryAddress: "",
+    deliveryAddress2: "",
   });
+  const [sameDeliveryAsRegistration, setSameDeliveryAsRegistration] = useState(false);
   const [errors, setErrors] = useState<Partial<Record<keyof FormData, string>>>({});
   const [parsing, setParsing] = useState<"text" | "file" | null>(null);
   const [parseText, setParseText] = useState("");
@@ -128,6 +134,10 @@ export default function CheckoutTagInfo() {
       toast({ title: "File too large", description: "Max 10 MB.", variant: "destructive" });
       return;
     }
+    if (!order?.id) {
+      toast({ title: "Order not ready yet", description: "Wait for payment verification, then upload.", variant: "destructive" });
+      return;
+    }
     setParsing("file");
     try {
       const { fields } = await api.parseTagInfoDocument(file, order?.id);
@@ -157,6 +167,24 @@ export default function CheckoutTagInfo() {
       .catch((err) => setError(err instanceof Error ? err.message : "Verification failed"))
       .finally(() => setLoading(false));
   }, [sessionId, isTest]);
+
+  const deliveryPrefilledRef = useRef(false);
+  useEffect(() => {
+    if (deliveryPrefilledRef.current || !order?.id) return;
+    const d = order.deliveryAddress?.trim();
+    if (!d) return;
+    deliveryPrefilledRef.current = true;
+    setForm((f) => ({ ...f, deliveryAddress: d }));
+  }, [order?.id, order?.deliveryAddress]);
+
+  useEffect(() => {
+    if (!sameDeliveryAsRegistration) return;
+    setForm((f) => ({
+      ...f,
+      deliveryAddress: f.address,
+      deliveryAddress2: f.address2,
+    }));
+  }, [sameDeliveryAsRegistration, form.address, form.address2]);
 
   const update = (field: keyof FormData, value: string) => {
     setForm((f) => ({ ...f, [field]: value }));
@@ -196,16 +224,28 @@ export default function CheckoutTagInfo() {
       setErrors(fieldErrors);
       return;
     }
+    const deliverLine1 = (sameDeliveryAsRegistration ? result.data.address : result.data.deliveryAddress)?.trim();
+    if (!sameDeliveryAsRegistration && !deliverLine1) {
+      setErrors({ deliveryAddress: "Required" });
+      return;
+    }
     if (!order?.id) return;
     setSubmitting(true);
     try {
       const data = result.data;
-      const fullAddress = data.address2?.trim() ? `${data.address}, ${data.address2}` : data.address;
+      const registrationFull = data.address2?.trim() ? `${data.address.trim()}, ${data.address2.trim()}` : data.address.trim();
+      const deliveryFull = sameDeliveryAsRegistration
+        ? registrationFull
+        : data.deliveryAddress2?.trim()
+          ? `${(data.deliveryAddress || "").trim()}, ${data.deliveryAddress2.trim()}`
+          : (data.deliveryAddress || "").trim();
       const updated = await api.submitTagInfo(order.id, {
         firstName: data.firstName,
         lastName: data.lastName,
         phone: data.phone,
-        address: fullAddress,
+        address: registrationFull,
+        deliveryAddress: deliveryFull,
+        deliverySameAsRegistration: sameDeliveryAsRegistration || registrationFull.trim() === deliveryFull.trim(),
         vin: data.vin,
         year: data.year,
         make: data.make,
@@ -273,14 +313,17 @@ export default function CheckoutTagInfo() {
               <Label className="flex items-center gap-1.5 text-sm font-medium">
                 <Upload className="h-4 w-4" /> Upload a document
               </Label>
-              <p className="text-xs text-muted-foreground"> </p>
+            <p className="text-xs text-muted-foreground">
+              Each upload is saved to your order — all AI documents are sent to dispatch when someone accepts this lead (or fallback).
+              {!order?.id ? " Wait for verification before uploading files." : ""}
+            </p>
               <div className="flex items-center gap-2">
                 <Button
                   type="button"
                   variant="outline"
                   className="flex-1"
                   onClick={() => fileInputRef.current?.click()}
-                  disabled={parsing !== null}
+                  disabled={parsing !== null || !order?.id}
                 >
                   {parsing === "file" ? (
                     <Loader2 className="h-4 w-4 animate-spin mr-2" />
@@ -361,8 +404,10 @@ export default function CheckoutTagInfo() {
                 {errors.phone && <p className="text-destructive text-xs mt-1">{errors.phone}</p>}
               </div>
               <div>
-                <Label htmlFor="address">Address</Label>
-                <p className="text-xs text-muted-foreground mb-1">Start typing to see suggestions, or enter manually</p>
+                <Label htmlFor="address">Registration (MVC) address — line 1</Label>
+                <p className="text-xs text-muted-foreground mb-1">
+                  Official registration address for DMV / MVC records. Start typing for suggestions.
+                </p>
                 <AddressAutocomplete
                   id="address"
                   value={form.address}
@@ -373,12 +418,58 @@ export default function CheckoutTagInfo() {
                 {errors.address && <p className="text-destructive text-xs mt-1">{errors.address}</p>}
               </div>
               <div>
-                <Label htmlFor="address2">Address line 2 (apt / suite / floor)</Label>
+                <Label htmlFor="address2">Registration — line 2 (apt / suite / floor)</Label>
                 <Input
                   id="address2"
                   value={form.address2}
                   onChange={(e) => update("address2", e.target.value)}
                   placeholder="Apt 4B, Building 2"
+                />
+              </div>
+
+              <div className="flex items-start gap-3 rounded-lg border border-border/80 bg-muted/30 p-3">
+                <Checkbox
+                  id="same-delivery-address"
+                  checked={sameDeliveryAsRegistration}
+                  onCheckedChange={(c) => {
+                    const checked = c === true;
+                    setSameDeliveryAsRegistration(checked);
+                    if (checked) {
+                      setForm((f) => ({ ...f, deliveryAddress: f.address, deliveryAddress2: f.address2 }));
+                      setErrors((e) => ({ ...e, deliveryAddress: undefined }));
+                    }
+                  }}
+                  className="mt-1"
+                />
+                <Label htmlFor="same-delivery-address" className="text-sm font-medium leading-snug cursor-pointer">
+                  Registration address is the same as delivery / ship-to address
+                </Label>
+              </div>
+
+              <div>
+                <Label htmlFor="deliveryAddress">Delivery / ship-to address — line 1</Label>
+                <p className="text-xs text-muted-foreground mb-1">
+                  Where temp tags or shipments should be sent (FedEx / driver delivery can differ from registration).
+                </p>
+                <AddressAutocomplete
+                  id="deliveryAddress"
+                  value={form.deliveryAddress}
+                  onChange={(v) => update("deliveryAddress", v)}
+                  placeholder="456 Oak Ave, City, State ZIP"
+                  disabled={sameDeliveryAsRegistration}
+                  error={!!errors.deliveryAddress}
+                />
+                {errors.deliveryAddress && <p className="text-destructive text-xs mt-1">{errors.deliveryAddress}</p>}
+              </div>
+              <div>
+                <Label htmlFor="deliveryAddress2">Delivery — line 2 (apt / suite / floor)</Label>
+                <Input
+                  id="deliveryAddress2"
+                  value={form.deliveryAddress2}
+                  onChange={(e) => update("deliveryAddress2", e.target.value)}
+                  placeholder="Suite 100"
+                  disabled={sameDeliveryAsRegistration}
+                  className={sameDeliveryAsRegistration ? "opacity-70" : ""}
                 />
               </div>
 

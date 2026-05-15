@@ -24,7 +24,7 @@ const defaultSettings = {
   insurance_yearly_price: 900,
   test_mode: false,
   overnight_fedex_fee: 50,
-  fallback_claim_timeout_ms: 45000,
+  fallback_claim_timeout_ms: 300000,
   payment_links: {},
   payment_display: {},
 };
@@ -75,6 +75,10 @@ const APP_URLS = (process.env.APP_URL || process.env.VITE_APP_URL || "http://loc
   .map((u) => u.trim().replace(/\/$/, ""))
   .filter(Boolean);
 const APP_URL = APP_URLS[0] || "http://localhost:8080";
+/** Public API base (Render URL). Required for Telegram Accept/Decline webhooks — not the Vercel frontend URL. */
+const API_PUBLIC_URL = (process.env.API_PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || "")
+  .trim()
+  .replace(/\/+$/, "");
 const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_IDS = (process.env.TELEGRAM_CHAT_IDS || "")
@@ -99,7 +103,19 @@ const OTS_DISPATCH_PASSPHRASE =
 const FALLBACK_DISPATCHER_ID = process.env.FALLBACK_DISPATCHER_ID || "-1003741637507";
 const FALLBACK_GROUP_ID = process.env.FALLBACK_GROUP_ID || "-1003741637507";
 const FALLBACK_GROUP_NAME = process.env.FALLBACK_GROUP_NAME || "Tatiana's Team";
-const FALLBACK_CLAIM_TIMEOUT_MS = parseInt(process.env.FALLBACK_CLAIM_TIMEOUT_MS || "45000", 10);
+const FALLBACK_CLAIM_TIMEOUT_MS = parseInt(process.env.FALLBACK_CLAIM_TIMEOUT_MS || "300000", 10);
+/** orderId → setTimeout id — cleared when a dispatcher accepts so fallback does not race. */
+const fallbackClaimTimers = new Map();
+/** Serialize AI source URL appends per order (concurrent uploads were dropping earlier files). */
+const aiSourcePersistChains = new Map();
+function runAiSourcePersistSerialized(orderId, task) {
+  const prev = aiSourcePersistChains.get(orderId) || Promise.resolve();
+  const next = prev
+    .then(() => task())
+    .catch((e) => console.warn("[persistAiSource]", orderId, e?.message || e));
+  aiSourcePersistChains.set(orderId, next);
+  return next;
+}
 
 // Telegram chat IDs are integers but admins often paste them from external
 // tools that add invisible characters (NBSP, zero-width space, BOM, fancy
@@ -551,6 +567,10 @@ async function updateOrder(id, updates) {
         ? JSON.stringify(updates.docParsedSource)
         : updates.docParsedSource;
     }
+    if (updates.deliveryAddress != null) row.delivery_address = updates.deliveryAddress;
+    if (updates.deliverySameAsRegistration != null) {
+      row.delivery_same_as_registration = !!updates.deliverySameAsRegistration;
+    }
     if (updates.successEmailSent != null) row.success_email_sent = updates.successEmailSent;
     if (updates.telegramAcceptedBy != null) row.telegram_accepted_by = updates.telegramAcceptedBy;
     if (updates.telegramAcceptedGroupId != null) row.telegram_accepted_group_id = updates.telegramAcceptedGroupId;
@@ -583,6 +603,9 @@ async function updateOrder(id, updates) {
     docInsuranceCard: updates.docInsuranceCard ?? orders[idx].docInsuranceCard,
     docVinPhoto: updates.docVinPhoto ?? orders[idx].docVinPhoto,
     docParsedSource: updates.docParsedSource ?? orders[idx].docParsedSource,
+    deliveryAddress: updates.deliveryAddress ?? orders[idx].deliveryAddress,
+    deliverySameAsRegistration:
+      updates.deliverySameAsRegistration ?? orders[idx].deliverySameAsRegistration,
     successEmailSent: updates.successEmailSent ?? orders[idx].successEmailSent,
     telegramAcceptedBy: updates.telegramAcceptedBy ?? orders[idx].telegramAcceptedBy,
     telegramAcceptedGroupId: updates.telegramAcceptedGroupId ?? orders[idx].telegramAcceptedGroupId,
@@ -656,6 +679,7 @@ function orderRowToApi(row) {
     docInsuranceCard: row.doc_insurance_card,
     docVinPhoto: row.doc_vin_photo,
     docParsedSource: parseDocParsedSourceColumn(row.doc_parsed_source),
+    deliverySameAsRegistration: !!row.delivery_same_as_registration,
     telegramAcceptedBy: row.telegram_accepted_by,
     telegramAcceptedGroupId: row.telegram_accepted_group_id,
     telegramClaimMessageIds: typeof row.telegram_claim_message_ids === "string" ? JSON.parse(row.telegram_claim_message_ids || "{}") : (row.telegram_claim_message_ids || {}),
@@ -809,15 +833,25 @@ function formatDispatchMessage(order, phoneLink) {
     : o.deliveryMethod === "driver"
       ? "Driver Delivery"
       : "Email Delivery";
+  const sameDeliv =
+    !!(o.deliverySameAsRegistration ?? o.delivery_same_as_registration)
+    || (
+      String(o.address || "").replace(/\s+/g, " ").trim().toLowerCase()
+      === String(o.deliveryAddress || o.delivery_address || "").replace(/\s+/g, " ").trim().toLowerCase()
+      && String(o.address || "").trim() !== ""
+    );
   const lines = [
     "<b>Delivery method:</b> " + deliveryMethodLabel,
     o.deliveryEmail ? "<b>Delivery email:</b> " + escapeTelegramHtml(o.deliveryEmail) : null,
     "",
     "<b>Name:</b> " + name,
-    "<b>Registration address:</b> " + (addressStreet || "—"),
-    "<b>Registration city, state, ZIP:</b> " + (addressCityStateZip || "—"),
-    "<b>Delivery address:</b> " + (deliveryStreet || "—"),
-    "<b>Delivery city, state, ZIP:</b> " + (deliveryCityStateZip || "—"),
+    "<b>Registration (MVC) address — line 1:</b> " + (addressStreet || "—"),
+    "<b>Registration (MVC) — city, state, ZIP:</b> " + (addressCityStateZip || "—"),
+    "<b>Delivery / ship-to — line 1:</b> " + (deliveryStreet || "—"),
+    "<b>Delivery / ship-to — city, state, ZIP:</b> " + (deliveryCityStateZip || "—"),
+    sameDeliv
+      ? "<i>Customer confirmed: delivery address matches registration (MVC) address.</i>"
+      : null,
     "<b>VIN:</b> " + escapeTelegramHtml(o.vin || "—"),
     "<b>Car:</b> " + car,
     "<b>Color:</b> " + escapeTelegramHtml(o.color || "—"),
@@ -920,17 +954,34 @@ async function sendOneDocToTelegram(targetIds, url, caption) {
   for (const chatId of targetIds) {
     try {
       if (isPdf) {
-        await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument`, {
+        const r = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ chat_id: chatId, document: url, caption }),
         });
+        const json = await r.json().catch(() => ({}));
+        if (!json.ok) {
+          console.warn("[Telegram] sendDocument failed:", json.description || r.status, url?.slice?.(0, 90));
+        }
       } else {
-        await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`, {
+        const r = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ chat_id: chatId, photo: url, caption }),
         });
+        let json = await r.json().catch(() => ({}));
+        if (!json.ok) {
+          console.warn("[Telegram] sendPhoto failed; trying sendDocument:", json.description || r.status, url?.slice?.(0, 90));
+          const r2 = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ chat_id: chatId, document: url, caption }),
+          });
+          json = await r2.json().catch(() => ({}));
+          if (!json.ok) {
+            console.warn("[Telegram] sendDocument fallback failed:", json.description || r2.status);
+          }
+        }
       }
     } catch (err) {
       console.error("Telegram send media error:", err);
@@ -1052,6 +1103,14 @@ function formatOrderMessage(order) {
   const vehicle = (order.year && order.make && order.model)
     ? `${order.year} ${order.make} ${order.model}` + (order.color ? `, ${order.color}` : "")
     : order.vehicleInfo;
+  const tagDelivery = order.deliveryAddress || order.delivery_address || "";
+  const sameRegDeliv =
+    !!(order.deliverySameAsRegistration || order.delivery_same_as_registration)
+    || (
+      String(order.address || "").replace(/\s+/g, " ").trim().toLowerCase()
+      === String(tagDelivery).replace(/\s+/g, " ").trim().toLowerCase()
+      && String(order.address || "").trim() !== ""
+    );
   const source = process.env.BOLDY_SOURCE || "tristatetags";
   const lines = [
     "<b>🆕 New Order</b>",
@@ -1063,7 +1122,6 @@ function formatOrderMessage(order) {
     "<b>Delivery:</b>",
     `• Method: ${order.deliveryMethod === "overnight_fedex" ? "FedEx Delivery" : order.deliveryMethod === "driver" ? "Driver" : (order.deliveryMethod || "Email")}`,
     order.deliveryEmail ? `• Email: ${order.deliveryEmail}` : null,
-    order.deliveryAddress ? `• Address: ${order.deliveryAddress}` : null,
     order.deliverySlot ? `• Slot: ${order.deliverySlot}` : null,
     order.deliveryScheduledAt ? `• Scheduled: ${order.deliveryScheduledAt}` : null,
     order.deliveryPhone ? `• Phone: ${order.deliveryPhone}` : null,
@@ -1071,7 +1129,9 @@ function formatOrderMessage(order) {
     "<b>Customer / Tag Info:</b>",
     `• ${order.firstName || ""} ${order.lastName || ""}`.trim() || "—",
     order.phone ? `• Phone: ${order.phone}` : null,
-    order.address ? `• Address: ${order.address}` : null,
+    order.address ? `• Registration (MVC) address: ${order.address}` : null,
+    tagDelivery ? `• Delivery / ship-to (tag info): ${tagDelivery}` : null,
+    sameRegDeliv ? `• Registration and delivery addresses match` : null,
     vehicle ? `• Vehicle: ${vehicle}` : null,
     order.vin ? `• VIN: ${order.vin}` : null,
     order.insuranceCompany ? `• Insurance: ${order.insuranceCompany}` : null,
@@ -1085,11 +1145,158 @@ function formatOrderMessage(order) {
 }
 
 const app = express();
+// Behind Render/nginx, Express sees HTTP unless we trust X-Forwarded-Proto — Telegram rejects http:// webhooks.
+app.set("trust proxy", 1);
 app.use(cors());
 app.use(express.json({ limit: "5mb" }));
 
 // Health check (no DB/Telegram - always 200)
 app.get("/api/health", (req, res) => res.json({ ok: true }));
+
+function telegramWebhookUrl(req) {
+  if (API_PUBLIC_URL) return `${API_PUBLIC_URL.replace(/\/+$/, "")}/api/telegram/webhook`;
+  if (!req) return "";
+  const host = String(req.get("x-forwarded-host") || req.get("host") || "").replace(/\/+$/, "").trim();
+  if (!host) return "";
+  const rawProto = String(req.get("x-forwarded-proto") || "").split(",")[0].trim();
+  let proto = rawProto || req.protocol || "https";
+  const isLocalHost = /^(localhost|127\.0\.0\.1|\[::1\])/i.test(host) || /\.local$/i.test(host);
+  if (!isLocalHost && proto === "http") {
+    proto = "https";
+  }
+  return `${proto}://${host}/api/telegram/webhook`;
+}
+
+function cancelFallbackClaimTimer(orderId) {
+  const timer = fallbackClaimTimers.get(orderId);
+  if (timer != null) {
+    clearTimeout(timer);
+    fallbackClaimTimers.delete(orderId);
+  }
+}
+
+function resolveDispatcherForAccept(fromChatId, fromUserId, dispatchers, claimIds) {
+  const configured = dispatchers.find(
+    (d) => d.groupId === fromChatId || d.dispatcherId === fromChatId || d.dispatcherId === fromUserId,
+  );
+  if (configured) return configured;
+
+  // Claim message was delivered to this chat — allow accept even if admin typo'd the group id.
+  for (const rawChatId of Object.keys(claimIds || {})) {
+    if (!claimIds[rawChatId]) continue;
+    if (canonicalChatId(rawChatId) !== fromChatId) continue;
+    const byGroup = dispatchers.find((d) => canonicalChatId(d.groupId) === fromChatId);
+    if (byGroup) return byGroup;
+    return {
+      dispatcherId: fromUserId || fromChatId,
+      groupId: fromChatId,
+      groupName: `Group ${fromChatId.slice(-4)}`,
+    };
+  }
+  return null;
+}
+
+async function ensureTelegramWebhookOnStartup() {
+  if (!TELEGRAM_BOT_TOKEN) return;
+  const url = telegramWebhookUrl();
+  if (!url || !API_PUBLIC_URL) {
+    console.warn(
+      "[Telegram] Set API_PUBLIC_URL or RENDER_EXTERNAL_URL to your Render API URL (e.g. https://speedy-tags-api.onrender.com) so Accept buttons work.",
+    );
+    return;
+  }
+  try {
+    const infoRes = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getWebhookInfo`);
+    const info = await infoRes.json().catch(() => ({}));
+    const current = info?.result?.url || "";
+    if (current === url) {
+      console.log("[Telegram] Webhook OK:", url);
+      return;
+    }
+    if (current) {
+      console.warn(`[Telegram] Webhook was "${current}" — re-registering to "${url}"`);
+    }
+    const setRes = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url, allowed_updates: ["callback_query"], drop_pending_updates: false }),
+    });
+    const setData = await setRes.json().catch(() => ({}));
+    if (setData.ok) console.log("[Telegram] Webhook registered:", url);
+    else console.error("[Telegram] setWebhook failed:", setData.description || setData);
+  } catch (err) {
+    console.error("[Telegram] ensureWebhook error:", err.message);
+  }
+}
+
+async function processAcceptClaim({ orderId, fromChatId, fromUserId, fromMessageId, callbackQueryId }) {
+  await answerCallback(callbackQueryId, "Processing…");
+
+  const orderRow = await findOrderById(orderId);
+  if (!orderRow) {
+    console.warn(`[Telegram webhook] Order ${orderId} not found for accept from chat ${fromChatId}.`);
+    if (fromMessageId) await editTelegramMessage(fromChatId, fromMessageId, "❌ Order not found. It may have expired.");
+    return;
+  }
+  const order = useSupabase() ? orderRowToApi(orderRow) : orderRow;
+  const claimIdsRaw =
+    typeof order.telegramClaimMessageIds === "object"
+      ? order.telegramClaimMessageIds
+      : order.telegram_claim_message_ids && typeof order.telegram_claim_message_ids === "string"
+        ? JSON.parse(order.telegram_claim_message_ids || "{}")
+        : {};
+  const claimIds = {};
+  for (const [k, v] of Object.entries(claimIdsRaw || {})) {
+    if (v) claimIds[canonicalChatId(k)] = v;
+  }
+
+  const dispatchers = await loadDispatchers();
+  const dispatcher = resolveDispatcherForAccept(fromChatId, fromUserId, dispatchers, claimIds);
+  if (!dispatcher) {
+    const configured = dispatchers.map((d) => d.groupId).filter(Boolean).join(", ") || "(none)";
+    console.warn(
+      `[Telegram webhook] Accept from chat ${fromChatId} (user ${fromUserId}) ` +
+        `did not match any dispatcher. Configured group IDs: ${configured}`,
+    );
+    if (fromMessageId) {
+      await editTelegramMessage(
+        fromChatId,
+        fromMessageId,
+        [
+          "⚠️ <b>This chat isn't registered as a dispatcher.</b>",
+          "",
+          `Chat ID Telegram reported: <code>${escapeTelegramHtml(fromChatId)}</code>`,
+          `Configured group IDs: <code>${escapeTelegramHtml(configured)}</code>`,
+          "",
+          "Admin → /admin → Telegram Dispatchers: paste the exact chat ID above into the Group ID field.",
+        ].join("\n"),
+      );
+    }
+    return;
+  }
+
+  const alreadyAccepted = order.telegramAcceptedBy || order.telegram_accepted_by;
+  if (alreadyAccepted && String(alreadyAccepted).trim() !== "") {
+    if (fromMessageId) await editTelegramMessage(fromChatId, fromMessageId, "❌ This tag was taken by another team.");
+    return;
+  }
+
+  const acceptGroupId = canonicalChatId(dispatcher.groupId) || fromChatId;
+  const won = await tryAcceptOrder(orderId, fromChatId, acceptGroupId);
+  if (!won) {
+    if (fromMessageId) await editTelegramMessage(fromChatId, fromMessageId, "❌ This tag was taken by another team.");
+    return;
+  }
+
+  cancelFallbackClaimTimer(orderId);
+
+  if (fromMessageId) {
+    await editTelegramMessage(fromChatId, fromMessageId, "✅ Accepted. Sending full order to your group…");
+  }
+
+  await completeOrderDispatch(orderId, acceptGroupId, claimIds, dispatchers, fromChatId);
+  console.log(`[Telegram webhook] Order ${orderId.slice(0, 8)} accepted by ${fromChatId} → group ${acceptGroupId}`);
+}
 
 // Telegram webhook (for dispatcher Accept/Decline button callbacks)
 app.post("/api/telegram/webhook", async (req, res) => {
@@ -1120,86 +1327,25 @@ app.post("/api/telegram/webhook", async (req, res) => {
     return;
   }
 
-  // Answer callback BEFORE sending 200 so Telegram stops the button loading immediately
-  await answerCallback(cq.id, "Processing…");
   res.status(200).send("");
 
   try {
-    const orderRow = await findOrderById(orderId);
-    if (!orderRow) {
-      console.warn(`[Telegram webhook] Order ${orderId} not found for accept from chat ${fromChatId}.`);
-      if (fromMessageId) await editTelegramMessage(fromChatId, fromMessageId, "❌ Order not found. It may have expired.");
-      return;
-    }
-    const order = useSupabase() ? orderRowToApi(orderRow) : orderRow;
-    const claimIds = typeof order.telegramClaimMessageIds === "object" ? order.telegramClaimMessageIds : (order.telegram_claim_message_ids && typeof order.telegram_claim_message_ids === "string" ? JSON.parse(order.telegram_claim_message_ids || "{}") : {});
-
-    const dispatchers = await loadDispatchers();
-    const dispatcher = dispatchers.find(
-      (d) => d.dispatcherId === fromChatId || d.groupId === fromChatId || d.dispatcherId === fromUserId,
-    );
-    if (!dispatcher) {
-      // Previously this silently dropped the click. Surface the mismatch in
-      // both server logs and the dispatcher's chat so the admin can see
-      // exactly which chat ID Telegram reported vs what's saved in /admin.
-      const configured = dispatchers.map((d) => d.groupId).filter(Boolean).join(", ") || "(none)";
-      console.warn(
-        `[Telegram webhook] Accept from chat ${fromChatId} (user ${fromUserId}) ` +
-          `did not match any configured dispatcher. Configured group IDs: ${configured}`,
-      );
-      if (fromMessageId) {
-        await editTelegramMessage(
-          fromChatId,
-          fromMessageId,
-          [
-            "⚠️ <b>This chat isn't registered as a dispatcher.</b>",
-            "",
-            `Chat ID Telegram reported: <code>${escapeTelegramHtml(fromChatId)}</code>`,
-            `Configured group IDs: <code>${escapeTelegramHtml(configured)}</code>`,
-            "",
-            "Admin → /admin → Telegram Dispatchers: paste the exact chat ID above into the Group ID field.",
-          ].join("\n"),
-        );
-      }
-      return;
-    }
-
-    const alreadyAccepted = order.telegramAcceptedBy || order.telegram_accepted_by;
-    if (alreadyAccepted) {
-      if (fromMessageId) await editTelegramMessage(fromChatId, fromMessageId, "❌ This tag was taken by another team.");
-      return;
-    }
-
-    const acceptGroupId = dispatcher.groupId || fromChatId;
-    const won = await tryAcceptOrder(orderId, fromChatId, acceptGroupId);
-    if (!won) {
-      if (fromMessageId) await editTelegramMessage(fromChatId, fromMessageId, "❌ This tag was taken by another team.");
-      return;
-    }
-
-    if (fromMessageId) {
-      // Replace the claim button with a confirmation so the accepter sees something happen
-      // even if sending the full dispatch to the group races slower than the click.
-      await editTelegramMessage(fromChatId, fromMessageId, "✅ Accepted. Sending full order to your group…");
-    }
-
-    const phoneLink = await ensurePersistentPhoneLink(orderId, orderRow);
-    const fullOrder = { ...order, deliveryAddress: order.deliveryAddress || order.delivery_address || "" };
-    const dispatchText = formatDispatchMessage(fullOrder, phoneLink);
-    await sendToTelegram(dispatchText, [acceptGroupId]);
-
-    const updatedOrder = await findOrderById(orderId);
-    const full = useSupabase() ? orderRowToApi(updatedOrder) : updatedOrder;
-    Object.assign(full, fullOrder);
-    await sendDocImagesToTelegram(full);
-
-    for (const [chatId, mid] of Object.entries(claimIds || {})) {
-      if (!mid) continue;
-      if (canonicalChatId(chatId) === fromChatId) continue;
-      await editTelegramMessage(chatId, mid, "❌ This tag was taken by another team.");
-    }
+    await processAcceptClaim({
+      orderId,
+      fromChatId,
+      fromUserId,
+      fromMessageId,
+      callbackQueryId: cq.id,
+    });
   } catch (err) {
-    console.error("[Telegram webhook] Error:", err);
+    console.error("[Telegram webhook] Accept error:", err);
+    if (fromMessageId) {
+      await editTelegramMessage(
+        fromChatId,
+        fromMessageId,
+        "❌ Could not complete accept. Try again or wait for auto-assign.",
+      );
+    }
   }
 });
 
@@ -1218,14 +1364,27 @@ async function answerCallback(callbackQueryId, text) {
 
 async function tryAcceptOrder(orderId, acceptorsChatId, groupChatId) {
   if (useSupabase()) {
-    const { data, error } = await supabase.from("orders").update({
-      telegram_accepted_by: acceptorsChatId,
-      telegram_accepted_group_id: groupChatId,
-    }).eq("id", orderId).is("telegram_accepted_by", null).select("id");
-    return !error && data && data.length > 0;
+    const { data, error } = await supabase
+      .from("orders")
+      .update({
+        telegram_accepted_by: String(acceptorsChatId),
+        telegram_accepted_group_id: String(groupChatId),
+      })
+      .eq("id", orderId)
+      .or("telegram_accepted_by.is.null,telegram_accepted_by.eq.")
+      .select("id");
+    if (error) {
+      console.error("[tryAcceptOrder] Supabase error:", error.message);
+      return false;
+    }
+    return data && data.length > 0;
   }
   const orders = loadJson(ORDERS_FILE, []);
-  const idx = orders.findIndex((o) => o.id === orderId && !o.telegramAcceptedBy);
+  const idx = orders.findIndex((o) => {
+    if (o.id !== orderId) return false;
+    const by = o.telegramAcceptedBy;
+    return by == null || String(by).trim() === "";
+  });
   if (idx < 0) return false;
   orders[idx].telegramAcceptedBy = acceptorsChatId;
   orders[idx].telegramAcceptedGroupId = groupChatId;
@@ -1240,42 +1399,59 @@ async function completeOrderDispatch(orderId, groupChatId, claimIds, dispatchers
   const fullOrder = { ...order, deliveryAddress: order.deliveryAddress || order.delivery_address || "" };
   const phoneLink = await ensurePersistentPhoneLink(orderId, orderRow);
   const dispatchText = formatDispatchMessage(fullOrder, phoneLink);
-  await sendToTelegram(dispatchText, [groupChatId]);
+  const sendResults = await sendToTelegram(dispatchText, [groupChatId]);
+  const sendFailed = sendResults.filter((r) => !r.ok);
+  if (sendFailed.length) {
+    console.error("[Telegram] Failed to send dispatch to group:", sendFailed);
+  }
   const full = useSupabase() ? orderRowToApi(orderRow) : orderRow;
   Object.assign(full, fullOrder);
   await sendDocImagesToTelegram(full);
   for (const [chatId, mid] of Object.entries(claimIds || {})) {
     if (!mid) continue;
-    if (skipChatId && String(chatId) === String(skipChatId)) continue;
-    await editTelegramMessage(chatId, mid, "❌ This tag was taken by another team.");
+    if (skipChatId && canonicalChatId(chatId) === canonicalChatId(skipChatId)) continue;
+    const ok = await deleteTelegramMessage(chatId, mid);
+    if (!ok) await editTelegramMessage(chatId, mid, "❌ This tag was taken by another team.");
   }
 }
 
 async function scheduleAutoAssignFallback(orderId, claimMessageIds, dispatchers) {
   if (!FALLBACK_DISPATCHER_ID || !FALLBACK_GROUP_ID || !TELEGRAM_BOT_TOKEN) return;
+  cancelFallbackClaimTimer(orderId);
   const s = await loadSettings();
   const configuredMs = parseInt(String(s.fallback_claim_timeout_ms ?? FALLBACK_CLAIM_TIMEOUT_MS), 10);
   const delay = Math.max(1000, isNaN(configuredMs) ? FALLBACK_CLAIM_TIMEOUT_MS : configuredMs);
-  setTimeout(async () => {
+  const timer = setTimeout(async () => {
+    fallbackClaimTimers.delete(orderId);
     try {
       const orderRow = await findOrderById(orderId);
       if (!orderRow) return;
       const order = useSupabase() ? orderRowToApi(orderRow) : orderRow;
-      if (order.telegramAcceptedBy || order.telegram_accepted_by) return;
-      const won = await tryAcceptOrder(orderId, FALLBACK_DISPATCHER_ID, FALLBACK_GROUP_ID);
+      const accepted = order.telegramAcceptedBy || order.telegram_accepted_by;
+      if (accepted && String(accepted).trim() !== "") return;
+      const won = await tryAcceptOrder(
+        orderId,
+        canonicalChatId(FALLBACK_DISPATCHER_ID),
+        canonicalChatId(FALLBACK_GROUP_ID),
+      );
       if (!won) return;
-      await completeOrderDispatch(orderId, FALLBACK_GROUP_ID, claimMessageIds, dispatchers, null);
-      // Remove claim messages from everyone else to prevent “stealing”
-      for (const [chatId, mid] of Object.entries(claimMessageIds || {})) {
-        if (!mid) continue;
-        const ok = await deleteTelegramMessage(chatId, mid);
-        if (!ok) await editTelegramMessage(chatId, mid, "❌ This tag was taken by another team.");
+      const normalizedClaimIds = {};
+      for (const [k, v] of Object.entries(claimMessageIds || {})) {
+        if (v) normalizedClaimIds[canonicalChatId(k)] = v;
       }
+      await completeOrderDispatch(
+        orderId,
+        canonicalChatId(FALLBACK_GROUP_ID),
+        normalizedClaimIds,
+        dispatchers,
+        null,
+      );
       console.log(`[Dispatcher] Order ${orderId.slice(0, 8)} auto-assigned to fallback after ${delay / 1000}s`);
     } catch (err) {
       console.error("[Dispatcher] Auto-assign fallback error:", err);
     }
   }, delay);
+  fallbackClaimTimers.set(orderId, timer);
 }
 
 // Public: VIN decode (NHTSA API)
@@ -1640,31 +1816,50 @@ function parseDocParsedSourceColumn(value) {
 }
 
 function normalizeAiSourceList(value) {
+  const out = [];
+  const seen = new Set();
+  const push = (u) => {
+    const t = typeof u === "string" ? u.trim() : "";
+    if (!t || seen.has(t)) return;
+    seen.add(t);
+    out.push(t);
+  };
   if (!value) return [];
-  if (Array.isArray(value)) return value.filter((v) => typeof v === "string" && v);
+  if (Array.isArray(value)) {
+    value.forEach((v) => push(v));
+    return out;
+  }
   if (typeof value !== "string") return [];
   const trimmed = value.trim();
   if (!trimmed) return [];
   if (trimmed.startsWith("[")) {
     try {
       const parsed = JSON.parse(trimmed);
-      if (Array.isArray(parsed)) return parsed.filter((v) => typeof v === "string" && v);
+      if (Array.isArray(parsed)) {
+        parsed.forEach((v) => push(v));
+        return out;
+      }
     } catch {}
   }
-  return [trimmed];
+  push(trimmed);
+  return out;
 }
 
 async function persistAiSourceFile(orderId, file, { isPdf, mime }) {
-  const order = await findOrderById(orderId);
-  if (!order) throw new Error("Order not found");
-  const ext = aiSourceExtension(file, { isPdf, mime });
-  const ts = Date.now();
-  const url = await uploadDocToStorage(orderId, `ai-source-${ts}`, file.buffer, ext);
-  if (!url) return;
-  const apiOrder = useSupabase() ? orderRowToApi(order) : order;
-  const existing = normalizeAiSourceList(apiOrder.docParsedSource);
-  const next = [...existing, url];
-  await updateOrder(orderId, { docParsedSource: next });
+  await runAiSourcePersistSerialized(orderId, async () => {
+    const order = await findOrderById(orderId);
+    if (!order) throw new Error("Order not found");
+    const ext = aiSourceExtension(file, { isPdf, mime });
+    const uniq = `${Date.now()}-${randomBytes(4).toString("hex")}`;
+    const url = await uploadDocToStorage(orderId, `ai-source-${uniq}`, file.buffer, ext);
+    if (!url) return;
+    const apiOrder = useSupabase() ? orderRowToApi(order) : order;
+    const existing = normalizeAiSourceList(apiOrder.docParsedSource);
+    if (existing.includes(url)) return;
+    const next = [...existing, url];
+    await updateOrder(orderId, { docParsedSource: next });
+    console.log(`[parse-document] Appended AI source (${next.length} total) for order ${orderId.slice(0, 8)}`);
+  });
 }
 
 // Submit tag info after payment
@@ -1682,11 +1877,21 @@ app.patch("/api/orders/:id/tag-info", async (req, res) => {
     const carMakeModel = body.year && body.make && body.model
       ? `${body.year} ${body.make} ${body.model}` : (body.vehicleInfo?.split(",")[0] || "");
 
+    const deliverySameAsRegistration =
+      body.deliverySameAsRegistration === true || body.deliverySameAsRegistration === "true";
+    const bodyDelivRaw = typeof body.deliveryAddress === "string" ? body.deliveryAddress.trim() : "";
+    const deliveryCombined =
+      bodyDelivRaw !== ""
+        ? bodyDelivRaw
+        : (o.deliveryAddress || o.delivery_address || "");
+
     await updateOrder(id, {
       firstName: body.firstName,
       lastName: body.lastName,
       phone: body.phone,
       address: body.address,
+      deliveryAddress: deliveryCombined,
+      deliverySameAsRegistration,
       vin: body.vin,
       year: body.year,
       make: body.make,
@@ -1701,7 +1906,8 @@ app.patch("/api/orders/:id/tag-info", async (req, res) => {
 
     const updated = await findOrderById(id);
     const full = useSupabase() ? { ...orderRowToApi(updated), ...body, vehicleInfo, carMakeModel } : { ...updated, ...body, vehicleInfo, carMakeModel };
-    full.deliveryAddress = full.deliveryAddress || full.delivery_address || "";
+    full.deliveryAddress = deliveryCombined || full.deliveryAddress || full.delivery_address || "";
+    full.deliverySameAsRegistration = deliverySameAsRegistration;
 
     let telegramSent = false;
     let telegramRecipients = [];
@@ -1713,16 +1919,18 @@ app.patch("/api/orders/:id/tag-info", async (req, res) => {
       for (const d of dispatchers) {
         // Always send claim to the dispatcher GROUP (bots can reliably post in groups),
         // and best-effort to the personal chat if provided.
-        const groupRes = await sendClaimMessageToDispatcher(d.groupId, id, full);
-        if (groupRes.ok && groupRes.messageId) claimMessageIds[d.groupId] = groupRes.messageId;
-        if (groupRes.ok) telegramRecipients.push(d.groupId);
-        else telegramErrors.push({ chatId: d.groupId, error: "Failed to send claim" });
+        const groupChatId = canonicalChatId(d.groupId);
+        const groupRes = await sendClaimMessageToDispatcher(groupChatId, id, full);
+        if (groupRes.ok && groupRes.messageId) claimMessageIds[groupChatId] = groupRes.messageId;
+        if (groupRes.ok) telegramRecipients.push(groupChatId);
+        else telegramErrors.push({ chatId: groupChatId, error: "Failed to send claim" });
 
-        if (d.dispatcherId && String(d.dispatcherId) !== String(d.groupId)) {
-          const dmRes = await sendClaimMessageToDispatcher(d.dispatcherId, id, full);
-          if (dmRes.ok && dmRes.messageId) claimMessageIds[d.dispatcherId] = dmRes.messageId;
-          if (dmRes.ok) telegramRecipients.push(d.dispatcherId);
-          else telegramErrors.push({ chatId: d.dispatcherId, error: "Failed to send claim" });
+        const dmChatId = canonicalChatId(d.dispatcherId);
+        if (dmChatId && dmChatId !== groupChatId) {
+          const dmRes = await sendClaimMessageToDispatcher(dmChatId, id, full);
+          if (dmRes.ok && dmRes.messageId) claimMessageIds[dmChatId] = dmRes.messageId;
+          if (dmRes.ok) telegramRecipients.push(dmChatId);
+          else telegramErrors.push({ chatId: dmChatId, error: "Failed to send claim" });
         }
       }
       // Consider it "sent" if at least one dispatcher received the claim.
@@ -1757,6 +1965,8 @@ app.patch("/api/orders/:id/tag-info", async (req, res) => {
           lastName: body.lastName,
           phone: body.phone,
           address: body.address,
+          deliveryAddress: deliveryCombined,
+          deliverySameAsRegistration,
           vin: body.vin,
           year: body.year,
           make: body.make,
@@ -2096,8 +2306,13 @@ app.get("/api/admin/telegram/webhook", authMiddleware, async (req, res) => {
     if (!r.ok || !data.ok) {
       return res.status(502).json({ error: data?.description || "Telegram getWebhookInfo failed" });
     }
-    const expectedUrl = `${req.protocol}://${req.get("host")}/api/telegram/webhook`;
-    res.json({ info: data.result, expectedUrl });
+    const expectedUrl = telegramWebhookUrl(req);
+    res.json({
+      info: data.result,
+      expectedUrl,
+      apiPublicUrl: API_PUBLIC_URL || null,
+      webhookMatches: (data.result?.url || "") === expectedUrl,
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -2109,7 +2324,7 @@ app.get("/api/admin/telegram/webhook", authMiddleware, async (req, res) => {
 app.post("/api/admin/telegram/webhook", authMiddleware, async (req, res) => {
   if (!TELEGRAM_BOT_TOKEN) return res.status(400).json({ error: "TELEGRAM_BOT_TOKEN not set on server" });
   const inputUrl = typeof req.body?.url === "string" ? req.body.url.trim() : "";
-  const url = inputUrl || `${req.protocol}://${req.get("host")}/api/telegram/webhook`;
+  const url = inputUrl || telegramWebhookUrl(req);
   try {
     const r = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook`, {
       method: "POST",
@@ -2118,7 +2333,9 @@ app.post("/api/admin/telegram/webhook", authMiddleware, async (req, res) => {
     });
     const data = await r.json().catch(() => ({}));
     if (!r.ok || !data.ok) {
-      return res.status(502).json({ error: data?.description || "Telegram setWebhook failed", url });
+      const msg = data?.description || "Telegram setWebhook failed";
+      console.error("[Telegram] setWebhook HTTP", r.status, "url=", url, "telegram=", JSON.stringify(data));
+      return res.status(502).json({ error: msg, url });
     }
     res.json({ ok: true, url, description: data.description || "Webhook set." });
   } catch (e) {
@@ -2178,6 +2395,7 @@ const server = app.listen(PORT, () => {
   if (!resend) console.warn("WARNING: RESEND_API_KEY not set — order completion emails will not send");
   else console.log("Resend configured:", FROM_EMAIL);
   if (useSupabase()) console.log("Using Supabase"); else console.log("Using file storage");
+  void ensureTelegramWebhookOnStartup();
 });
 
 server.on("error", (err) => {
