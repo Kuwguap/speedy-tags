@@ -100,8 +100,14 @@ const OTS_DISPATCH_PASSPHRASE =
   process.env.ONETIMESECRET_PASSPHRASE?.trim() || "DispatchPassword";
 // Fallback assignment: if nobody accepts in time, auto-assign to this chat/group
 // Defaults match requested values; can be overridden in Render env vars.
-const FALLBACK_DISPATCHER_ID = process.env.FALLBACK_DISPATCHER_ID || "-1003741637507";
-const FALLBACK_GROUP_ID = process.env.FALLBACK_GROUP_ID || "-1003741637507";
+// FALLBACK_*_ID let you opt in to an "auto-assign on timeout" lead-of-last-resort.
+// They MUST be configured explicitly via env or the fallback only sends a reminder
+// instead of silently locking the order. (Hardcoded defaults previously caused
+// every lead to get auto-locked to a ghost chat after the timeout, so dispatchers
+// saw "❌ This tag was taken by another team" and the lead vanished.)
+const FALLBACK_DISPATCHER_ID = (process.env.FALLBACK_DISPATCHER_ID || "").trim();
+const FALLBACK_GROUP_ID = (process.env.FALLBACK_GROUP_ID || "").trim();
+const FALLBACK_AUTO_ASSIGN = String(process.env.FALLBACK_AUTO_ASSIGN || "").toLowerCase() === "true";
 const FALLBACK_GROUP_NAME = process.env.FALLBACK_GROUP_NAME || "Tatiana's Team";
 const FALLBACK_CLAIM_TIMEOUT_MS = parseInt(process.env.FALLBACK_CLAIM_TIMEOUT_MS || "300000", 10);
 /** orderId → setTimeout id — cleared when a dispatcher accepts so fallback does not race. */
@@ -574,6 +580,8 @@ async function updateOrder(id, updates) {
     if (updates.successEmailSent != null) row.success_email_sent = updates.successEmailSent;
     if (updates.telegramAcceptedBy != null) row.telegram_accepted_by = updates.telegramAcceptedBy;
     if (updates.telegramAcceptedGroupId != null) row.telegram_accepted_group_id = updates.telegramAcceptedGroupId;
+    if (updates.telegramAcceptedGroupName != null) row.telegram_accepted_group_name = updates.telegramAcceptedGroupName;
+    if (updates.telegramAcceptedAt != null) row.telegram_accepted_at = updates.telegramAcceptedAt;
     if (updates.telegramClaimMessageIds != null) row.telegram_claim_message_ids = typeof updates.telegramClaimMessageIds === "string" ? updates.telegramClaimMessageIds : JSON.stringify(updates.telegramClaimMessageIds || {});
     if (Object.keys(row).length === 0) return;
     await supabaseUpdateResilient("orders", row, "id", id);
@@ -609,6 +617,8 @@ async function updateOrder(id, updates) {
     successEmailSent: updates.successEmailSent ?? orders[idx].successEmailSent,
     telegramAcceptedBy: updates.telegramAcceptedBy ?? orders[idx].telegramAcceptedBy,
     telegramAcceptedGroupId: updates.telegramAcceptedGroupId ?? orders[idx].telegramAcceptedGroupId,
+    telegramAcceptedGroupName: updates.telegramAcceptedGroupName ?? orders[idx].telegramAcceptedGroupName,
+    telegramAcceptedAt: updates.telegramAcceptedAt ?? orders[idx].telegramAcceptedAt,
     telegramClaimMessageIds: updates.telegramClaimMessageIds ?? orders[idx].telegramClaimMessageIds,
   });
   saveJson(ORDERS_FILE, orders);
@@ -682,6 +692,8 @@ function orderRowToApi(row) {
     deliverySameAsRegistration: !!row.delivery_same_as_registration,
     telegramAcceptedBy: row.telegram_accepted_by,
     telegramAcceptedGroupId: row.telegram_accepted_group_id,
+    telegramAcceptedGroupName: row.telegram_accepted_group_name || null,
+    telegramAcceptedAt: row.telegram_accepted_at || null,
     telegramClaimMessageIds: typeof row.telegram_claim_message_ids === "string" ? JSON.parse(row.telegram_claim_message_ids || "{}") : (row.telegram_claim_message_ids || {}),
   };
 }
@@ -840,7 +852,14 @@ function formatDispatchMessage(order, phoneLink) {
       === String(o.deliveryAddress || o.delivery_address || "").replace(/\s+/g, " ").trim().toLowerCase()
       && String(o.address || "").trim() !== ""
     );
+  const acceptedByName = (o.telegramAcceptedGroupName || o.telegram_accepted_group_name || "").trim();
+  const acceptedAtIso = o.telegramAcceptedAt || o.telegram_accepted_at || "";
+  const acceptedAtLabel = acceptedAtIso ? new Date(acceptedAtIso).toLocaleString() : "";
   const lines = [
+    acceptedByName
+      ? `✅ <b>Accepted by:</b> ${escapeTelegramHtml(acceptedByName)}${acceptedAtLabel ? ` <i>at ${escapeTelegramHtml(acceptedAtLabel)}</i>` : ""}`
+      : null,
+    acceptedByName ? "" : null,
     "<b>Delivery method:</b> " + deliveryMethodLabel,
     o.deliveryEmail ? "<b>Delivery email:</b> " + escapeTelegramHtml(o.deliveryEmail) : null,
     "",
@@ -883,13 +902,25 @@ async function sendToTelegram(text, chatIds = TELEGRAM_CHAT_IDS) {
   return results;
 }
 
-async function editTelegramMessage(chatId, messageId, text) {
+async function editTelegramMessage(chatId, messageId, text, options = {}) {
   if (!TELEGRAM_BOT_TOKEN) return false;
   try {
+    const body = {
+      chat_id: chatId,
+      message_id: messageId,
+      text,
+      parse_mode: "HTML",
+    };
+    // Default behaviour for terminal status updates: drop any leftover Accept/
+    // Decline keyboard so dispatchers can't keep clicking after the lead is
+    // resolved. Pass keepKeyboard:true to leave the existing markup alone.
+    if (!options.keepKeyboard) {
+      body.reply_markup = { inline_keyboard: [] };
+    }
     const r = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/editMessageText`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, message_id: messageId, text, parse_mode: "HTML" }),
+      body: JSON.stringify(body),
     });
     const json = await r.json();
     return json.ok === true;
@@ -992,10 +1023,26 @@ async function sendOneDocToTelegram(targetIds, url, caption) {
 async function sendDocImagesToTelegram(order) {
   if (!TELEGRAM_BOT_TOKEN) return [];
   const acceptedGroup = order?.telegramAcceptedGroupId || order?.telegram_accepted_group_id;
-  const targetIds = acceptedGroup
-    ? [acceptedGroup]
-    : TELEGRAM_CHAT_IDS;
-  if (targetIds.length === 0) return [];
+  // Only the group that explicitly accepted the lead receives the customer's
+  // documents. If nobody has accepted yet, we DO NOT broadcast to all configured
+  // chat IDs — that previously leaked PII (driver's licenses, insurance cards) to
+  // groups that were never going to handle the lead. The accept handler calls
+  // sendDocImagesToTelegram again right after the order is claimed, so the
+  // accepting group still gets every document the customer has uploaded so far.
+  if (!acceptedGroup) {
+    if (
+      order?.docDriversLicense ||
+      order?.docInsuranceCard ||
+      order?.docVinPhoto ||
+      normalizeAiSourceList(order?.docParsedSource).length > 0
+    ) {
+      console.log(
+        `[Telegram] Holding ${order?.id?.slice?.(0, 8) || "?"} docs until a group accepts the lead.`,
+      );
+    }
+    return [];
+  }
+  const targetIds = [acceptedGroup];
   // The AI source files are what the customer originally uploaded for parsing —
   // putting them first gives the dispatcher the most authoritative reference
   // (often a driver's license or registration scan) before the later docs.
@@ -1275,27 +1322,86 @@ async function processAcceptClaim({ orderId, fromChatId, fromUserId, fromMessage
     return;
   }
 
+  const acceptGroupId = canonicalChatId(dispatcher.groupId) || fromChatId;
+  const acceptGroupName =
+    (dispatcher.groupName && String(dispatcher.groupName).trim()) ||
+    `Group ${String(acceptGroupId).slice(-4)}`;
+
+  // If the order was already accepted (e.g. between the click reaching us and
+  // this code path running), surface the actual group name so supervisors know
+  // who took the lead — not just a generic "another team".
   const alreadyAccepted = order.telegramAcceptedBy || order.telegram_accepted_by;
   if (alreadyAccepted && String(alreadyAccepted).trim() !== "") {
-    if (fromMessageId) await editTelegramMessage(fromChatId, fromMessageId, "❌ This tag was taken by another team.");
+    const winnerName = await resolveGroupName(order, dispatchers);
+    if (fromMessageId) {
+      await editTelegramMessage(
+        fromChatId,
+        fromMessageId,
+        `❌ Already accepted by <b>${escapeTelegramHtml(winnerName)}</b>.`,
+      );
+    }
     return;
   }
 
-  const acceptGroupId = canonicalChatId(dispatcher.groupId) || fromChatId;
-  const won = await tryAcceptOrder(orderId, fromChatId, acceptGroupId);
+  const won = await tryAcceptOrder(orderId, fromChatId, acceptGroupId, acceptGroupName);
   if (!won) {
-    if (fromMessageId) await editTelegramMessage(fromChatId, fromMessageId, "❌ This tag was taken by another team.");
+    // Lost the race; look up the actual winner so we can name them.
+    const refreshedRow = await findOrderById(orderId);
+    const refreshed = refreshedRow
+      ? useSupabase() ? orderRowToApi(refreshedRow) : refreshedRow
+      : null;
+    const winnerName = await resolveGroupName(refreshed || {}, dispatchers);
+    if (fromMessageId) {
+      await editTelegramMessage(
+        fromChatId,
+        fromMessageId,
+        `❌ Already accepted by <b>${escapeTelegramHtml(winnerName)}</b>.`,
+      );
+    }
     return;
   }
 
   cancelFallbackClaimTimer(orderId);
 
   if (fromMessageId) {
-    await editTelegramMessage(fromChatId, fromMessageId, "✅ Accepted. Sending full order to your group…");
+    await editTelegramMessage(
+      fromChatId,
+      fromMessageId,
+      `✅ Accepted by <b>${escapeTelegramHtml(acceptGroupName)}</b> — sending full order to your group…`,
+    );
   }
 
-  await completeOrderDispatch(orderId, acceptGroupId, claimIds, dispatchers, fromChatId);
-  console.log(`[Telegram webhook] Order ${orderId.slice(0, 8)} accepted by ${fromChatId} → group ${acceptGroupId}`);
+  await completeOrderDispatch(
+    orderId,
+    acceptGroupId,
+    claimIds,
+    dispatchers,
+    fromChatId,
+    { groupName: acceptGroupName },
+  );
+  console.log(
+    `[Telegram webhook] Order ${orderId.slice(0, 8)} accepted by ${acceptGroupName} (${fromChatId}) → group ${acceptGroupId}`,
+  );
+}
+
+// Resolve a human-readable group name for an accepted order. Prefers the value
+// stored on the order, falls back to dispatcher settings, and finally to the
+// last 4 of the chat ID so dispatchers always see *something* identifiable.
+async function resolveGroupName(order, dispatchers) {
+  const stored =
+    order?.telegramAcceptedGroupName ||
+    order?.telegram_accepted_group_name ||
+    "";
+  if (stored && String(stored).trim()) return String(stored).trim();
+  const groupId = canonicalChatId(
+    order?.telegramAcceptedGroupId || order?.telegram_accepted_group_id || "",
+  );
+  if (groupId && Array.isArray(dispatchers)) {
+    const match = dispatchers.find((d) => canonicalChatId(d.groupId) === groupId);
+    if (match?.groupName && String(match.groupName).trim()) return String(match.groupName).trim();
+  }
+  if (groupId) return `Group ${groupId.slice(-4)}`;
+  return "another team";
 }
 
 // Telegram webhook (for dispatcher Accept/Decline button callbacks)
@@ -1362,20 +1468,43 @@ async function answerCallback(callbackQueryId, text) {
   }
 }
 
-async function tryAcceptOrder(orderId, acceptorsChatId, groupChatId) {
+async function tryAcceptOrder(orderId, acceptorsChatId, groupChatId, groupName = "") {
+  const acceptedAt = new Date().toISOString();
+  const cleanName = groupName ? String(groupName).trim() : "";
   if (useSupabase()) {
-    const { data, error } = await supabase
-      .from("orders")
-      .update({
+    // Build the update payload with the new metadata. supabaseUpdateResilient
+    // gracefully drops missing columns, but here we use a single-shot update
+    // because we depend on the WHERE-clause race protection. If the optional
+    // columns don't exist yet, retry without them.
+    const tryUpdate = async (extra) => {
+      const payload = {
         telegram_accepted_by: String(acceptorsChatId),
         telegram_accepted_group_id: String(groupChatId),
-      })
-      .eq("id", orderId)
-      .or("telegram_accepted_by.is.null,telegram_accepted_by.eq.")
-      .select("id");
-    if (error) {
-      console.error("[tryAcceptOrder] Supabase error:", error.message);
-      return false;
+        ...extra,
+      };
+      const { data, error } = await supabase
+        .from("orders")
+        .update(payload)
+        .eq("id", orderId)
+        .or("telegram_accepted_by.is.null,telegram_accepted_by.eq.")
+        .select("id");
+      return { data, error };
+    };
+
+    let extras = {};
+    if (cleanName) extras.telegram_accepted_group_name = cleanName;
+    extras.telegram_accepted_at = acceptedAt;
+
+    let { data, error } = await tryUpdate(extras);
+    while (error) {
+      const missing = extractMissingColumn(error);
+      if (!missing || !(missing in extras)) {
+        console.error("[tryAcceptOrder] Supabase error:", error.message);
+        return false;
+      }
+      logMissingColumn("orders", missing);
+      delete extras[missing];
+      ({ data, error } = await tryUpdate(extras));
     }
     return data && data.length > 0;
   }
@@ -1388,11 +1517,13 @@ async function tryAcceptOrder(orderId, acceptorsChatId, groupChatId) {
   if (idx < 0) return false;
   orders[idx].telegramAcceptedBy = acceptorsChatId;
   orders[idx].telegramAcceptedGroupId = groupChatId;
+  if (cleanName) orders[idx].telegramAcceptedGroupName = cleanName;
+  orders[idx].telegramAcceptedAt = acceptedAt;
   saveJson(ORDERS_FILE, orders);
   return true;
 }
 
-async function completeOrderDispatch(orderId, groupChatId, claimIds, dispatchers, skipChatId = null) {
+async function completeOrderDispatch(orderId, groupChatId, claimIds, dispatchers, skipChatId = null, opts = {}) {
   const orderRow = await findOrderById(orderId);
   if (!orderRow) return;
   const order = useSupabase() ? orderRowToApi(orderRow) : orderRow;
@@ -1407,16 +1538,39 @@ async function completeOrderDispatch(orderId, groupChatId, claimIds, dispatchers
   const full = useSupabase() ? orderRowToApi(orderRow) : orderRow;
   Object.assign(full, fullOrder);
   await sendDocImagesToTelegram(full);
+
+  // Show every other group WHO took the lead. We replace each claim message
+  // (instead of deleting) so supervisors always have a paper trail of who
+  // accepted and when, even if a lead later goes missing in chat history.
+  const acceptedGroupName =
+    opts.groupName ||
+    (await resolveGroupName(fullOrder, dispatchers || (await loadDispatchers())));
+  const acceptedAt = fullOrder.telegramAcceptedAt
+    ? new Date(fullOrder.telegramAcceptedAt).toLocaleString()
+    : new Date().toLocaleString();
+  const takenText = opts.auto
+    ? `⏰ Auto-assigned to <b>${escapeTelegramHtml(acceptedGroupName)}</b> at ${escapeTelegramHtml(acceptedAt)}.`
+    : `❌ Already accepted by <b>${escapeTelegramHtml(acceptedGroupName)}</b> at ${escapeTelegramHtml(acceptedAt)}.`;
+
   for (const [chatId, mid] of Object.entries(claimIds || {})) {
     if (!mid) continue;
     if (skipChatId && canonicalChatId(chatId) === canonicalChatId(skipChatId)) continue;
-    const ok = await deleteTelegramMessage(chatId, mid);
-    if (!ok) await editTelegramMessage(chatId, mid, "❌ This tag was taken by another team.");
+    await editTelegramMessage(chatId, mid, takenText);
   }
 }
 
+// After the configured timeout, if a lead is still unclaimed we either:
+//   1. (default) Send a reminder ping to all dispatchers + fallback group (if any),
+//      keeping the lead claimable by everyone. The original Accept/Decline buttons
+//      stay live in each group, so any group can still claim it.
+//   2. (only if FALLBACK_AUTO_ASSIGN=true AND a real fallback group is configured)
+//      Auto-assign it to the configured fallback group as a last resort.
+//
+// Previously the fallback silently auto-locked every lead to a hardcoded ghost
+// chat ID after 5 min, which is why "all groups said the lead was already taken"
+// and leads went missing.
 async function scheduleAutoAssignFallback(orderId, claimMessageIds, dispatchers) {
-  if (!FALLBACK_DISPATCHER_ID || !FALLBACK_GROUP_ID || !TELEGRAM_BOT_TOKEN) return;
+  if (!TELEGRAM_BOT_TOKEN) return;
   cancelFallbackClaimTimer(orderId);
   const s = await loadSettings();
   const configuredMs = parseInt(String(s.fallback_claim_timeout_ms ?? FALLBACK_CLAIM_TIMEOUT_MS), 10);
@@ -1429,24 +1583,60 @@ async function scheduleAutoAssignFallback(orderId, claimMessageIds, dispatchers)
       const order = useSupabase() ? orderRowToApi(orderRow) : orderRow;
       const accepted = order.telegramAcceptedBy || order.telegram_accepted_by;
       if (accepted && String(accepted).trim() !== "") return;
-      const won = await tryAcceptOrder(
-        orderId,
-        canonicalChatId(FALLBACK_DISPATCHER_ID),
-        canonicalChatId(FALLBACK_GROUP_ID),
-      );
-      if (!won) return;
-      const normalizedClaimIds = {};
-      for (const [k, v] of Object.entries(claimMessageIds || {})) {
-        if (v) normalizedClaimIds[canonicalChatId(k)] = v;
+
+      const canAutoAssign =
+        FALLBACK_AUTO_ASSIGN &&
+        FALLBACK_DISPATCHER_ID &&
+        FALLBACK_GROUP_ID;
+
+      if (canAutoAssign) {
+        const won = await tryAcceptOrder(
+          orderId,
+          canonicalChatId(FALLBACK_DISPATCHER_ID),
+          canonicalChatId(FALLBACK_GROUP_ID),
+        );
+        if (!won) return;
+        const normalizedClaimIds = {};
+        for (const [k, v] of Object.entries(claimMessageIds || {})) {
+          if (v) normalizedClaimIds[canonicalChatId(k)] = v;
+        }
+        await completeOrderDispatch(
+          orderId,
+          canonicalChatId(FALLBACK_GROUP_ID),
+          normalizedClaimIds,
+          dispatchers,
+          null,
+          { groupName: "Fallback Team", auto: true },
+        );
+        console.log(`[Dispatcher] Order ${orderId.slice(0, 8)} auto-assigned to fallback after ${delay / 1000}s`);
+        return;
       }
-      await completeOrderDispatch(
-        orderId,
-        canonicalChatId(FALLBACK_GROUP_ID),
-        normalizedClaimIds,
-        dispatchers,
-        null,
-      );
-      console.log(`[Dispatcher] Order ${orderId.slice(0, 8)} auto-assigned to fallback after ${delay / 1000}s`);
+
+      // No auto-assign configured: ping dispatchers (and optional fallback group)
+      // that the lead is still open. The Accept/Decline buttons remain live, so any
+      // group can still claim it — we never lock the order from this code path.
+      const reminderText = [
+        "⏰ <b>Lead still unclaimed</b>",
+        `Order #${(orderId || "").slice(0, 8)} has been open for ${(delay / 1000 / 60).toFixed(0)} min.`,
+        "",
+        "Tap <b>Accept</b> on the original claim message to take it.",
+      ].join("\n");
+
+      const targets = new Set();
+      for (const d of dispatchers || []) {
+        if (d.groupId) targets.add(canonicalChatId(d.groupId));
+        if (d.dispatcherId) targets.add(canonicalChatId(d.dispatcherId));
+      }
+      if (FALLBACK_GROUP_ID) targets.add(canonicalChatId(FALLBACK_GROUP_ID));
+      if (FALLBACK_DISPATCHER_ID) targets.add(canonicalChatId(FALLBACK_DISPATCHER_ID));
+      targets.delete("");
+      if (targets.size === 0) return;
+
+      await sendToTelegram(reminderText, [...targets]);
+      console.log(`[Dispatcher] Reminder ping sent for order ${orderId.slice(0, 8)} to ${targets.size} chat(s); lead still claimable.`);
+
+      // Schedule another reminder so the lead is never silently dropped.
+      scheduleAutoAssignFallback(orderId, claimMessageIds, dispatchers);
     } catch (err) {
       console.error("[Dispatcher] Auto-assign fallback error:", err);
     }

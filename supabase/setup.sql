@@ -56,6 +56,8 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS doc_vin_photo TEXT;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS success_email_sent BOOLEAN DEFAULT FALSE;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS telegram_accepted_by TEXT;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS telegram_accepted_group_id TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS telegram_accepted_group_name TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS telegram_accepted_at TIMESTAMPTZ;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS telegram_claim_message_ids JSONB DEFAULT '{}';
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_same_as_registration BOOLEAN DEFAULT FALSE;
 

@@ -9,6 +9,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import {
   Car,
@@ -32,6 +38,214 @@ import AdminLogin from "./AdminLogin";
 function formatUsd(value: unknown) {
   const n = typeof value === "number" ? value : parseFloat(String(value ?? ""));
   return (Number.isFinite(n) ? n : 0).toFixed(2);
+}
+
+function OrderDetailBlock({
+  order,
+  dispatchers,
+}: {
+  order: OrderRecord;
+  dispatchers: TelegramDispatcher[];
+}) {
+  const pickedDispatcher = dispatchers.find(
+    (d) =>
+      String(d.groupId).trim() ===
+      String(order.telegramAcceptedGroupId || "").trim(),
+  );
+  const pickedByName =
+    (order.telegramAcceptedGroupName && order.telegramAcceptedGroupName.trim()) ||
+    (pickedDispatcher?.groupName?.trim()) ||
+    (order.telegramAcceptedGroupId ? `Group ${String(order.telegramAcceptedGroupId).slice(-4)}` : "");
+  const pickedAt = order.telegramAcceptedAt
+    ? new Date(order.telegramAcceptedAt).toLocaleString()
+    : "";
+  const aiSourceList = Array.isArray(order.docParsedSource)
+    ? order.docParsedSource
+    : order.docParsedSource
+      ? [order.docParsedSource]
+      : [];
+  const fullName = `${order.firstName || ""} ${order.lastName || ""}`.trim() || "—";
+  const vehicleLine = (order.year && order.make && order.model)
+    ? `${order.year} ${order.make} ${order.model}`
+    : (order.carMakeModel || order.vehicleInfo || "—");
+  const deliveryLabel =
+    order.deliveryMethod === "overnight_fedex" ? "FedEx Delivery" :
+    order.deliveryMethod === "driver" ? "Driver Delivery" :
+    order.deliveryMethod === "email" ? "Email Delivery" :
+    (order.deliveryMethod || "—");
+
+  const Field = ({ label, value }: { label: string; value: React.ReactNode }) => (
+    <div className="grid grid-cols-3 gap-2 py-1.5 border-b border-border/40 last:border-0">
+      <span className="text-xs uppercase tracking-wide text-muted-foreground col-span-1">{label}</span>
+      <span className="text-sm col-span-2 break-words">{value || "—"}</span>
+    </div>
+  );
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-lg border border-border/50 bg-muted/30 p-3 space-y-1">
+        <div className="text-xs uppercase tracking-wide text-muted-foreground">Lead status</div>
+        {pickedByName ? (
+          <>
+            <div className="text-sm font-semibold text-foreground">
+              ✅ Picked by <span className="text-success">{pickedByName}</span>
+            </div>
+            {pickedAt && (
+              <div className="text-xs text-muted-foreground">at {pickedAt}</div>
+            )}
+            {order.telegramAcceptedGroupId && (
+              <div className="text-xs font-mono text-muted-foreground">
+                Group ID: {order.telegramAcceptedGroupId}
+              </div>
+            )}
+            {order.telegramAcceptedBy && (
+              <div className="text-xs font-mono text-muted-foreground">
+                Accepting chat: {order.telegramAcceptedBy}
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="text-sm font-semibold text-amber-600">
+            ⏳ Unclaimed — visible to all configured dispatcher groups
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-lg border border-border/50 p-3">
+        <div className="text-xs uppercase tracking-wide text-muted-foreground mb-2">Order</div>
+        <Field label="Order ID" value={<span className="font-mono text-xs">{order.id}</span>} />
+        <Field label="Created" value={new Date(order.createdAt).toLocaleString()} />
+        <Field label="Service" value={order.serviceTitle} />
+        <Field label="Price" value={`$${formatUsd(order.price)}`} />
+        <Field label="Payment" value={order.paymentStatus || "—"} />
+        <Field label="Product choice" value={order.productChoice || "—"} />
+      </div>
+
+      <div className="rounded-lg border border-border/50 p-3">
+        <div className="text-xs uppercase tracking-wide text-muted-foreground mb-2">Customer</div>
+        <Field label="Name" value={fullName} />
+        <Field label="Phone" value={order.phone} />
+        <Field label="Address" value={order.address} />
+      </div>
+
+      <div className="rounded-lg border border-border/50 p-3">
+        <div className="text-xs uppercase tracking-wide text-muted-foreground mb-2">Delivery</div>
+        <Field label="Method" value={deliveryLabel} />
+        <Field label="Email" value={order.deliveryEmail} />
+        <Field label="Phone" value={order.deliveryPhone} />
+        <Field label="Slot" value={order.deliverySlot} />
+        <Field
+          label="Scheduled"
+          value={order.deliveryScheduledAt ? new Date(order.deliveryScheduledAt).toLocaleString() : ""}
+        />
+        <Field label="Delivery address" value={order.deliveryAddress} />
+        <Field
+          label="Same as registration"
+          value={order.deliverySameAsRegistration ? "Yes" : "No"}
+        />
+      </div>
+
+      <div className="rounded-lg border border-border/50 p-3">
+        <div className="text-xs uppercase tracking-wide text-muted-foreground mb-2">Vehicle</div>
+        <Field label="VIN" value={<span className="font-mono">{order.vin}</span>} />
+        <Field label="Vehicle" value={vehicleLine} />
+        <Field label="Color" value={order.color} />
+        <Field label="Insurance" value={order.insuranceCompany} />
+        <Field label="Policy #" value={order.policyNumber} />
+        <Field label="Notes" value={order.notes} />
+      </div>
+
+      <div className="rounded-lg border border-border/50 p-3">
+        <div className="text-xs uppercase tracking-wide text-muted-foreground mb-2">Documents</div>
+        {order.docDriversLicense || order.docInsuranceCard || order.docVinPhoto || aiSourceList.length > 0 ? (
+          <ul className="space-y-1.5 text-sm">
+            {order.docDriversLicense && (
+              <li>
+                <a
+                  href={order.docDriversLicense}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary hover:underline"
+                >
+                  Driver's License
+                </a>
+              </li>
+            )}
+            {order.docInsuranceCard && (
+              <li>
+                <a
+                  href={order.docInsuranceCard}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary hover:underline"
+                >
+                  Insurance Card
+                </a>
+              </li>
+            )}
+            {order.docVinPhoto && (
+              <li>
+                <a
+                  href={order.docVinPhoto}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary hover:underline"
+                >
+                  VIN Photo
+                </a>
+              </li>
+            )}
+            {aiSourceList.map((url, i) => (
+              <li key={url}>
+                <a
+                  href={url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary hover:underline"
+                >
+                  AI source document {aiSourceList.length > 1 ? `${i + 1}/${aiSourceList.length}` : ""}
+                </a>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm text-muted-foreground">No documents uploaded.</p>
+        )}
+      </div>
+
+      <div className="rounded-lg border border-border/50 p-3">
+        <div className="text-xs uppercase tracking-wide text-muted-foreground mb-2">Telegram delivery</div>
+        <Field
+          label="Sent"
+          value={
+            order.telegramSent ? (
+              <Badge variant="secondary" className="bg-success/10 text-success">Yes</Badge>
+            ) : (
+              <Badge variant="secondary" className="bg-destructive/10 text-destructive">No</Badge>
+            )
+          }
+        />
+        <Field
+          label="Recipients"
+          value={
+            order.telegramRecipients?.length ? (
+              <span className="font-mono text-xs">{order.telegramRecipients.join(", ")}</span>
+            ) : (
+              "—"
+            )
+          }
+        />
+        <Field
+          label="Errors"
+          value={
+            order.telegramErrors?.length
+              ? order.telegramErrors.map((e) => `${e.chatId}: ${e.error}`).join("; ")
+              : "—"
+          }
+        />
+      </div>
+    </div>
+  );
 }
 
 export default function Admin() {
@@ -61,6 +275,7 @@ export default function Admin() {
   const [webhookLoading, setWebhookLoading] = useState(false);
   const [webhookBusy, setWebhookBusy] = useState(false);
   const [webhookCustomUrl, setWebhookCustomUrl] = useState("");
+  const [orderDetail, setOrderDetail] = useState<OrderRecord | null>(null);
 
   async function refreshWebhookInfo() {
     setWebhookLoading(true);
@@ -788,6 +1003,9 @@ export default function Admin() {
         {view === "orders" && (
           <div className="space-y-6">
             <h1 className="font-display text-2xl font-bold text-foreground">Orders</h1>
+            <p className="text-sm text-muted-foreground -mt-4">
+              Click any row to view the full lead — the same details a dispatcher group sees when they accept. Useful as a fallback if a lead goes missing in Telegram.
+            </p>
             {orders.length === 0 ? (
               <p className="text-muted-foreground">No orders yet.</p>
             ) : (
@@ -805,30 +1023,71 @@ export default function Admin() {
                         <TableHead>Color</TableHead>
                         <TableHead>Phone</TableHead>
                         <TableHead className="text-right">Price</TableHead>
+                        <TableHead>Picked by</TableHead>
                         <TableHead>Telegram</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {orders.map((o) => (
-                        <TableRow key={o.id}>
-                          <TableCell className="text-sm">{new Date(o.createdAt).toLocaleDateString()}</TableCell>
-                          <TableCell className="font-medium">{o.firstName} {o.lastName}</TableCell>
-                          <TableCell>{o.serviceTitle}</TableCell>
-                          <TableCell>{o.deliveryMethod === "overnight_fedex" ? "FedEx Delivery" : o.deliveryMethod === "driver" ? "Driver" : (o.deliveryMethod === "email" ? "Email" : o.deliveryMethod || "—")}</TableCell>
-                          <TableCell className="font-mono text-xs">{o.vin}</TableCell>
-                          <TableCell>{o.carMakeModel}</TableCell>
-                          <TableCell>{o.color}</TableCell>
-                          <TableCell>{o.phone}</TableCell>
-                          <TableCell className="text-right font-semibold">${formatUsd(o.price)}</TableCell>
-                          <TableCell>
-                            {o.telegramSent ? (
-                              <Badge variant="secondary" className="bg-success/10 text-success text-xs">Sent</Badge>
-                            ) : (
-                              <Badge variant="secondary" className="bg-destructive/10 text-destructive text-xs">Failed</Badge>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      ))}
+                      {orders.map((o) => {
+                        const dispatcher = (settings?.telegramDispatchers ?? []).find(
+                          (d) =>
+                            String(d.groupId).trim() ===
+                            String(o.telegramAcceptedGroupId || "").trim(),
+                        );
+                        const pickedByName =
+                          (o.telegramAcceptedGroupName && o.telegramAcceptedGroupName.trim()) ||
+                          (dispatcher?.groupName?.trim()) ||
+                          (o.telegramAcceptedGroupId ? `Group ${String(o.telegramAcceptedGroupId).slice(-4)}` : "");
+                        const pickedAt = o.telegramAcceptedAt
+                          ? new Date(o.telegramAcceptedAt).toLocaleString()
+                          : "";
+                        return (
+                          <TableRow
+                            key={o.id}
+                            className="cursor-pointer hover:bg-muted/40"
+                            onClick={() => setOrderDetail(o)}
+                          >
+                            <TableCell className="text-sm">{new Date(o.createdAt).toLocaleDateString()}</TableCell>
+                            <TableCell className="font-medium">{o.firstName} {o.lastName}</TableCell>
+                            <TableCell>{o.serviceTitle}</TableCell>
+                            <TableCell>{o.deliveryMethod === "overnight_fedex" ? "FedEx Delivery" : o.deliveryMethod === "driver" ? "Driver" : (o.deliveryMethod === "email" ? "Email" : o.deliveryMethod || "—")}</TableCell>
+                            <TableCell className="font-mono text-xs">{o.vin}</TableCell>
+                            <TableCell>{o.carMakeModel}</TableCell>
+                            <TableCell>{o.color}</TableCell>
+                            <TableCell>{o.phone}</TableCell>
+                            <TableCell className="text-right font-semibold">${formatUsd(o.price)}</TableCell>
+                            <TableCell>
+                              {pickedByName ? (
+                                <div className="text-xs">
+                                  <Badge variant="secondary" className="bg-success/10 text-success">
+                                    <CheckCircle2 className="h-3 w-3 mr-1" />
+                                    {pickedByName}
+                                  </Badge>
+                                  {pickedAt && (
+                                    <div className="text-muted-foreground mt-1">{pickedAt}</div>
+                                  )}
+                                  {o.telegramAcceptedGroupId && (
+                                    <div className="text-muted-foreground font-mono">
+                                      {o.telegramAcceptedGroupId}
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <Badge variant="secondary" className="bg-amber-500/10 text-amber-600 text-xs">
+                                  Unclaimed
+                                </Badge>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              {o.telegramSent ? (
+                                <Badge variant="secondary" className="bg-success/10 text-success text-xs">Sent</Badge>
+                              ) : (
+                                <Badge variant="secondary" className="bg-destructive/10 text-destructive text-xs">Failed</Badge>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
                     </TableBody>
                   </Table>
                 </div>
@@ -836,6 +1095,22 @@ export default function Admin() {
             )}
           </div>
         )}
+
+        <Dialog open={!!orderDetail} onOpenChange={(open) => !open && setOrderDetail(null)}>
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>
+                Lead details — #{orderDetail?.id?.slice(0, 8)}
+              </DialogTitle>
+            </DialogHeader>
+            {orderDetail && (
+              <OrderDetailBlock
+                order={orderDetail}
+                dispatchers={settings?.telegramDispatchers ?? []}
+              />
+            )}
+          </DialogContent>
+        </Dialog>
       </main>
     </div>
   );

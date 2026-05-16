@@ -141,14 +141,35 @@ export interface OrderRecord {
   deliveryAddress?: string;
   deliverySameAsRegistration?: boolean;
   deliveryMethod?: string;
+  deliveryEmail?: string;
+  deliveryPhone?: string;
+  deliverySlot?: string;
+  deliveryScheduledAt?: string;
+  productChoice?: string;
   vin: string;
   carMakeModel: string;
   color: string;
+  year?: string;
+  make?: string;
+  model?: string;
+  vehicleInfo?: string;
+  insuranceCompany?: string;
+  policyNumber?: string;
+  notes?: string;
+  docDriversLicense?: string | null;
+  docInsuranceCard?: string | null;
+  docVinPhoto?: string | null;
+  docParsedSource?: string | string[] | null;
+  paymentStatus?: string;
   price: number;
   createdAt: string;
   telegramSent?: boolean;
   telegramRecipients?: string[];
   telegramErrors?: { chatId: string; error: string }[];
+  telegramAcceptedBy?: string | null;
+  telegramAcceptedGroupId?: string | null;
+  telegramAcceptedGroupName?: string | null;
+  telegramAcceptedAt?: string | null;
 }
 
 export interface AdminStats {
