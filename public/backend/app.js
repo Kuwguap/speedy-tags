@@ -476,8 +476,22 @@ function _txnDriverEmailSuffix(row) {
   return ` <span class="small muted">${escapeIssuerText(e)}</span>`;
 }
 
+function _txnDriverHandleSuffix(record) {
+  if (!record) return "";
+  const raw =
+    record.telegram_username ||
+    record.driver_telegram_username ||
+    record.driver_handle ||
+    "";
+  const handle = String(raw || "").trim().replace(/^@+/, "");
+  if (!handle) return "";
+  return ` <span class="small muted">@${escapeIssuerText(handle)}</span>`;
+}
+
 function _txnDriverCell(row) {
-  const parts = [];
+  // Only the driver who actually accepted the lead is shown here. Decliners
+  // and reassignment history are intentionally hidden — operations supervisors
+  // only need to see who took the lead, their email, and the accept time.
   const accepted = row && row.driver_accepted;
   const selected = (row && row.driver_selected_name) || "";
   const history = Array.isArray(row && row.driver_history)
@@ -486,31 +500,27 @@ function _txnDriverCell(row) {
   const emailSuf = _txnDriverEmailSuffix(row);
 
   if (accepted && accepted.driver_name) {
-    parts.push(
-      `<div><strong>${escapeIssuerText(accepted.driver_name)}</strong>${emailSuf}` +
-        (accepted.accepted_at
-          ? ` <span class="small muted">· accepted ${escapeIssuerText(
-              formatNy(accepted.accepted_at)
-            )}</span>`
-          : "") +
-        "</div>"
+    const handleSuf = _txnDriverHandleSuffix(accepted);
+    const acceptedSuf = accepted.accepted_at
+      ? ` <span class="small muted">· accepted ${escapeIssuerText(
+          formatNy(accepted.accepted_at)
+        )}</span>`
+      : "";
+    return (
+      `<div><strong>${escapeIssuerText(accepted.driver_name)}</strong>${emailSuf}${handleSuf}${acceptedSuf}</div>`
     );
-  } else if (selected) {
-    parts.push(
-      `<div><strong>${escapeIssuerText(selected)}</strong>${emailSuf}</div>`
-    );
-  } else if (history.length > 0 && history[0].driver_name) {
-    parts.push(
-      `<div><strong>${escapeIssuerText(history[0].driver_name)}</strong>${emailSuf}</div>`
-    );
-  } else {
-    parts.push('<div class="muted">—</div>');
   }
 
-  // Only show the accepting driver — supervisors don't need the trail of
-  // dispatchers who declined. The full history is still in the API response
-  // for anyone who wants to inspect it.
-  return parts.join("");
+  // No accepted driver yet — fall back to the originally selected driver name
+  // so supervisors at least know who the lead was routed to. Still no decliner
+  // list.
+  if (selected) {
+    return `<div><strong>${escapeIssuerText(selected)}</strong>${emailSuf}</div>`;
+  }
+  if (history.length > 0 && history[0].driver_name) {
+    return `<div><strong>${escapeIssuerText(history[0].driver_name)}</strong>${emailSuf}</div>`;
+  }
+  return '<div class="muted">—</div>';
 }
 
 function _txnIssuerCell(row) {
