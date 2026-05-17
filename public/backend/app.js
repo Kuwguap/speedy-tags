@@ -507,25 +507,9 @@ function _txnDriverCell(row) {
     parts.push('<div class="muted">—</div>');
   }
 
-  const extras = history.filter((h) => {
-    if (!h || !h.driver_name) return false;
-    if (accepted && h.driver_name === accepted.driver_name) return false;
-    return true;
-  });
-  if (extras.length > 0) {
-    const lines = extras
-      .slice(0, 5)
-      .map((h) => {
-        const st = (h.status || "").toLowerCase();
-        const when = h.accepted_at || h.created_at;
-        const whenLabel = when ? ` · ${escapeIssuerText(formatNy(when))}` : "";
-        return `<div class="small muted">↳ ${escapeIssuerText(
-          h.driver_name
-        )}${st ? ` · ${escapeIssuerText(st)}` : ""}${whenLabel}</div>`;
-      })
-      .join("");
-    parts.push(lines);
-  }
+  // Only show the accepting driver — supervisors don't need the trail of
+  // dispatchers who declined. The full history is still in the API response
+  // for anyone who wants to inspect it.
   return parts.join("");
 }
 
