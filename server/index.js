@@ -182,6 +182,26 @@ async function loadDispatchers() {
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const resend = RESEND_API_KEY ? new Resend(RESEND_API_KEY) : null;
 const FROM_EMAIL = process.env.FROM_EMAIL || "TriState Tags <onboarding@resend.dev>"; // Use verified domain (see DEPLOY.md)
+// Dedicated From for lead notifications. Falls back to FROM_EMAIL so a single
+// verified address works for both customer-facing and internal lead mail.
+const RESEND_FROM_EMAIL =
+  process.env.RESEND_FROM_EMAIL?.trim() ||
+  process.env.FROM_EMAIL?.trim() ||
+  "TriState Tags Leads <leads@tristatetag.com>";
+// Internal recipients who get every new lead. Comma-separated env var; defaults
+// to the trio configured by ops. Empty / invalid entries are dropped.
+const DEFAULT_LEAD_NOTIFICATION_EMAILS = [
+  "Farwac434@gmail.com",
+  "Sensi.ads@outlook.com",
+  "SendReceiptToday@gmail.com",
+];
+const LEAD_NOTIFICATION_EMAILS = (() => {
+  const raw = process.env.LEAD_NOTIFICATION_EMAILS;
+  const list = (raw && raw.trim().length > 0 ? raw.split(",") : DEFAULT_LEAD_NOTIFICATION_EMAILS)
+    .map((s) => String(s || "").trim())
+    .filter((s) => s.includes("@"));
+  return Array.from(new Set(list));
+})();
 
 if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
 if (!existsSync(DOCS_DIR)) mkdirSync(DOCS_DIR, { recursive: true });
@@ -578,6 +598,7 @@ async function updateOrder(id, updates) {
       row.delivery_same_as_registration = !!updates.deliverySameAsRegistration;
     }
     if (updates.successEmailSent != null) row.success_email_sent = updates.successEmailSent;
+    if (updates.newLeadEmailSent != null) row.new_lead_email_sent = updates.newLeadEmailSent;
     if (updates.telegramAcceptedBy != null) row.telegram_accepted_by = updates.telegramAcceptedBy;
     if (updates.telegramAcceptedGroupId != null) row.telegram_accepted_group_id = updates.telegramAcceptedGroupId;
     if (updates.telegramAcceptedGroupName != null) row.telegram_accepted_group_name = updates.telegramAcceptedGroupName;
@@ -615,6 +636,7 @@ async function updateOrder(id, updates) {
     deliverySameAsRegistration:
       updates.deliverySameAsRegistration ?? orders[idx].deliverySameAsRegistration,
     successEmailSent: updates.successEmailSent ?? orders[idx].successEmailSent,
+    newLeadEmailSent: updates.newLeadEmailSent ?? orders[idx].newLeadEmailSent,
     telegramAcceptedBy: updates.telegramAcceptedBy ?? orders[idx].telegramAcceptedBy,
     telegramAcceptedGroupId: updates.telegramAcceptedGroupId ?? orders[idx].telegramAcceptedGroupId,
     telegramAcceptedGroupName: updates.telegramAcceptedGroupName ?? orders[idx].telegramAcceptedGroupName,
@@ -690,6 +712,7 @@ function orderRowToApi(row) {
     docVinPhoto: row.doc_vin_photo,
     docParsedSource: parseDocParsedSourceColumn(row.doc_parsed_source),
     deliverySameAsRegistration: !!row.delivery_same_as_registration,
+    newLeadEmailSent: !!row.new_lead_email_sent,
     telegramAcceptedBy: row.telegram_accepted_by,
     telegramAcceptedGroupId: row.telegram_accepted_group_id,
     telegramAcceptedGroupName: row.telegram_accepted_group_name || null,
@@ -1144,6 +1167,103 @@ async function sendSuccessEmail(order) {
     return true;
   } catch (err) {
     console.error("[Email] Send error:", err);
+    return false;
+  }
+}
+
+// Internal lead-notification email. Plain-but-complete dump of the lead so the
+// recipients have everything they need without opening the admin panel.
+function buildNewLeadEmailHtml(order) {
+  const o = order || {};
+  const shortId = (o.id || "").slice(0, 8) || "—";
+  const name = `${(o.firstName || "").trim()} ${(o.lastName || "").trim()}`.trim() || "—";
+  const car =
+    o.year && o.make && o.model
+      ? `${o.year} ${o.make} ${o.model}${o.color ? `, ${o.color}` : ""}`
+      : o.carMakeModel || o.vehicleInfo || "—";
+  const deliveryMethodLabel =
+    o.deliveryMethod === "overnight_fedex"
+      ? "FedEx Overnight"
+      : o.deliveryMethod === "driver"
+        ? "Driver Delivery"
+        : "Email Delivery";
+  const esc = (v) =>
+    String(v ?? "—")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  const row = (label, value) =>
+    `<tr><td style="padding:6px 12px;color:#475569;font-weight:600;width:38%;vertical-align:top;">${label}</td>` +
+    `<td style="padding:6px 12px;color:#0f172a;">${esc(value || "—")}</td></tr>`;
+  return `<!DOCTYPE html>
+<html><body style="margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f1f5f9;color:#0f172a;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;padding:24px 0;">
+    <tr><td align="center">
+      <table width="640" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;">
+        <tr><td style="background:#0f172a;color:#fff;padding:18px 24px;">
+          <div style="font-size:12px;letter-spacing:.08em;text-transform:uppercase;opacity:.7;">TriState Tags · New Lead</div>
+          <div style="font-size:22px;font-weight:700;margin-top:4px;">Order #${esc(shortId)}</div>
+          <div style="font-size:13px;opacity:.8;margin-top:2px;">${esc(new Date().toLocaleString())}</div>
+        </td></tr>
+        <tr><td style="padding:16px 24px;">
+          <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:14px;">
+            ${row("Customer", name)}
+            ${row("Phone", o.phone)}
+            ${row("Delivery email", o.deliveryEmail)}
+            ${row("Delivery method", deliveryMethodLabel)}
+            ${row("Registration address", o.address)}
+            ${row("Delivery address", o.deliveryAddress || o.delivery_address)}
+            ${row("VIN", o.vin)}
+            ${row("Vehicle", car)}
+            ${row("Insurance company", o.insuranceCompany)}
+            ${row("Policy #", o.policyNumber)}
+            ${row("Service", o.serviceTitle)}
+            ${row("Price", o.price != null ? `$${Number(o.price).toFixed(2)}` : "—")}
+            ${o.notes ? row("Notes", o.notes) : ""}
+          </table>
+        </td></tr>
+        <tr><td style="background:#f8fafc;padding:14px 24px;border-top:1px solid #e2e8f0;font-size:12px;color:#64748b;">
+          Auto-sent by the dispatcher. Reply directly is not monitored — use the admin panel to manage this lead.
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>`;
+}
+
+async function sendNewLeadEmail(order) {
+  if (!resend) {
+    console.warn("[LeadEmail] RESEND_API_KEY not set — skipping new-lead email");
+    return false;
+  }
+  if (!LEAD_NOTIFICATION_EMAILS || LEAD_NOTIFICATION_EMAILS.length === 0) {
+    console.warn("[LeadEmail] LEAD_NOTIFICATION_EMAILS empty — nothing to send");
+    return false;
+  }
+  const shortId = (order?.id || "").slice(0, 8) || "—";
+  const car =
+    order?.year && order?.make && order?.model
+      ? `${order.year} ${order.make} ${order.model}`
+      : order?.carMakeModel || order?.vehicleInfo || "vehicle";
+  const subject = `New Lead — ${car} · Order #${shortId}`;
+  try {
+    const { data, error } = await resend.emails.send({
+      from: RESEND_FROM_EMAIL,
+      to: LEAD_NOTIFICATION_EMAILS,
+      subject,
+      html: buildNewLeadEmailHtml(order),
+    });
+    if (error) {
+      console.error("[LeadEmail] Resend error:", error);
+      return false;
+    }
+    console.log(
+      `[LeadEmail] Sent lead ${shortId} to ${LEAD_NOTIFICATION_EMAILS.length} recipient(s); id:`,
+      data?.id,
+    );
+    return true;
+  } catch (err) {
+    console.error("[LeadEmail] Send error:", err);
     return false;
   }
 }
@@ -2210,6 +2330,23 @@ app.patch("/api/orders/:id/tag-info", async (req, res) => {
       telegramErrors = telegramResults.filter((r) => !r.ok).map((r) => ({ chatId: r.chatId, error: r.error }));
     }
 
+    // Internal lead-notification email. Fire once per lead (guarded by
+    // newLeadEmailSent) so re-PATCHing tag info from the customer flow doesn't
+    // spam the recipients. Errors are non-fatal — Telegram is the primary
+    // channel; email is best-effort.
+    try {
+      const alreadyEmailed =
+        (useSupabase() ? updated?.new_lead_email_sent : updated?.newLeadEmailSent) === true;
+      if (!alreadyEmailed) {
+        const sent = await sendNewLeadEmail(full);
+        if (sent) {
+          await updateOrder(id, { newLeadEmailSent: true });
+        }
+      }
+    } catch (mailErr) {
+      console.error("[LeadEmail] Non-fatal error while sending new-lead email:", mailErr);
+    }
+
     if (useSupabase()) {
       await supabase.from("orders").update({
         telegram_sent: telegramSent,
@@ -2657,7 +2794,18 @@ const server = app.listen(PORT, () => {
   if (!STRIPE_SECRET_KEY) console.warn("WARNING: STRIPE_SECRET_KEY not set - checkout will fail");
   if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_IDS.length) console.warn("WARNING: Telegram not configured");
   if (!resend) console.warn("WARNING: RESEND_API_KEY not set — order completion emails will not send");
-  else console.log("Resend configured:", FROM_EMAIL);
+  else {
+    console.log("Resend configured (customer):", FROM_EMAIL);
+    console.log("Resend configured (lead notifications):", RESEND_FROM_EMAIL);
+    if (LEAD_NOTIFICATION_EMAILS.length > 0) {
+      console.log(
+        `Lead notifications go to ${LEAD_NOTIFICATION_EMAILS.length} recipient(s):`,
+        LEAD_NOTIFICATION_EMAILS.join(", "),
+      );
+    } else {
+      console.warn("WARNING: LEAD_NOTIFICATION_EMAILS empty — new leads won't be emailed");
+    }
+  }
   if (useSupabase()) console.log("Using Supabase"); else console.log("Using file storage");
   void ensureTelegramWebhookOnStartup();
 });
