@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { Header } from "@/components/Header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -26,6 +26,7 @@ export default function SecurePhone() {
   const [phone, setPhone] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const passInputRef = useRef<HTMLInputElement | null>(null);
 
   const canUseWebCrypto = useMemo(() => typeof crypto !== "undefined" && !!crypto.subtle, []);
 
@@ -36,6 +37,30 @@ export default function SecurePhone() {
       .then((p) => setPayload({ iv: p.iv, data: p.data }))
       .catch((e) => setError(e instanceof Error ? e.message : "Link is invalid"));
   }, [orderId]);
+
+  // Auto-focus the passphrase field the moment the form appears so dispatchers
+  // can start typing immediately. On Android Chrome / desktop this also
+  // raises the soft keyboard. iOS Safari intentionally blocks programmatic
+  // focus from raising the keyboard without a user gesture — there's no clean
+  // workaround for that, so we still call focus() to position the cursor and
+  // let the user tap once to reveal the keyboard if needed.
+  useEffect(() => {
+    if (!payload) return;
+    const el = passInputRef.current;
+    if (!el) return;
+    // Defer to the next frame so the input is laid out before we focus.
+    const raf = requestAnimationFrame(() => {
+      try {
+        el.focus({ preventScroll: true });
+        // Move caret to the end (no-op when empty but cheap and correct).
+        const len = el.value.length;
+        el.setSelectionRange(len, len);
+      } catch {
+        // Some old browsers throw on setSelectionRange for type=password — ignore.
+      }
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [payload]);
 
   const handleReveal = async () => {
     if (!payload) return;
@@ -82,8 +107,19 @@ export default function SecurePhone() {
                     type="password"
                     value={passphrase}
                     onChange={(e) => setPassphrase(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !busy) {
+                        e.preventDefault();
+                        void handleReveal();
+                      }
+                    }}
                     placeholder="Enter passphrase"
                     className="mt-1"
+                    ref={passInputRef}
+                    autoFocus
+                    autoComplete="current-password"
+                    inputMode="text"
+                    enterKeyHint="go"
                   />
                 </div>
                 <Button type="button" onClick={handleReveal} disabled={busy}>
