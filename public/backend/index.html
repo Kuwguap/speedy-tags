@@ -9,16 +9,16 @@
     />
     <style>
       :root {
-        color-scheme: dark;
-        --bg: #475569;
-        --card: #475569;
-        --accent: #38bdf8;
-        --accent-soft: rgba(56, 189, 248, 0.1);
-        --border-subtle: #64748b;
-        --text-main: #e5e7eb;
-        --text-muted: #9ca3af;
-        --danger: #f97373;
-        --success: #4ade80;
+        color-scheme: light;
+        --bg: #e2e8f0;
+        --card: #f8fafc;
+        --accent: #0284c7;
+        --accent-soft: rgba(2, 132, 199, 0.12);
+        --border-subtle: #cbd5e1;
+        --text-main: #0f172a;
+        --text-muted: #475569;
+        --danger: #b91c1c;
+        --success: #16a34a;
       }
 
       * {
@@ -29,7 +29,7 @@
         margin: 0;
         font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
           sans-serif;
-        background: radial-gradient(circle at top, #475569 0, #475569 50%);
+        background: radial-gradient(circle at top, #f1f5f9 0, #e2e8f0 60%);
         color: var(--text-main);
         text-align: center;
         min-height: 100vh;
@@ -58,8 +58,8 @@
         justify-content: center;
         gap: 0;
         padding: 0.5rem 0.75rem 0;
-        background: #475569;
-        border-bottom: 1px solid rgba(31, 41, 55, 0.95);
+        background: #f8fafc;
+        border-bottom: 1px solid rgba(203, 213, 225, 0.95);
         flex-shrink: 0;
         flex-wrap: wrap;
       }
@@ -67,9 +67,9 @@
       .tab-strip .tab {
         appearance: none;
         font: inherit;
-        background: rgba(100, 116, 139, 0.75);
+        background: rgba(241, 245, 249, 0.95);
         color: var(--text-muted);
-        border: 1px solid rgba(55, 65, 81, 0.9);
+        border: 1px solid rgba(203, 213, 225, 0.9);
         border-bottom: none;
         border-radius: 10px 10px 0 0;
         padding: 0.5rem 1.1rem;
@@ -82,7 +82,7 @@
 
       .tab-strip .tab:hover {
         color: var(--text-main);
-        background: rgba(100, 116, 139, 0.85);
+        background: rgba(226, 232, 240, 0.95);
       }
 
       .tab-strip .tab.tab-active {
@@ -143,7 +143,7 @@
         border-radius: 999px;
         padding: 0.42rem 0.75rem;
         border: 1px solid var(--border-subtle);
-        background: rgba(71, 85, 105, 0.85);
+        background: rgba(255, 255, 255, 0.85);
         color: var(--text-main);
         font-size: 0.83rem;
       }
@@ -164,7 +164,7 @@
         border-radius: 999px;
         padding: 0.35rem 0.7rem;
         border: 1px solid var(--border-subtle);
-        background: rgba(71, 85, 105, 0.85);
+        background: rgba(255, 255, 255, 0.85);
         color: var(--text-main);
         font-size: 0.82rem;
       }
@@ -179,7 +179,7 @@
       #panel-transactions .txn-total-row td {
         position: sticky;
         bottom: 0;
-        background: rgba(71, 85, 105, 0.96);
+        background: rgba(255, 255, 255, 0.96);
         border-top: 1px solid rgba(56, 189, 248, 0.35);
         border-bottom: none;
         padding: 0.65rem 0.7rem;
@@ -194,8 +194,8 @@
         margin-bottom: 0.85rem;
         padding: 0.75rem 0.9rem;
         border-radius: 0.75rem;
-        border: 1px solid rgba(31, 41, 55, 0.95);
-        background: rgba(71, 85, 105, 0.45);
+        border: 1px solid rgba(203, 213, 225, 0.95);
+        background: rgba(255, 255, 255, 0.45);
       }
 
       .issuer-tab-root .assistant-card ul {
@@ -338,7 +338,7 @@
         padding: 0.65rem 0.95rem;
         border-radius: 0.65rem;
         border: 1px solid var(--border-subtle);
-        background: rgba(71, 85, 105, 0.85);
+        background: rgba(255, 255, 255, 0.85);
         color: var(--text-main);
         box-sizing: border-box;
       }
@@ -442,11 +442,11 @@
       }
 
       .card {
-        background: radial-gradient(circle at top left, #475569, #000000 55%);
+        background: radial-gradient(circle at top left, #ffffff, #e2e8f0 55%);
         border-radius: 1.5rem;
         padding: 1.75rem;
         border: 1px solid rgba(148, 163, 184, 0.15);
-        box-shadow: 0 30px 120px rgba(71, 85, 105, 0.9);
+        box-shadow: 0 30px 120px rgba(15, 23, 42, 0.12);
         backdrop-filter: blur(18px);
       }
 
@@ -512,7 +512,7 @@
         padding: 0.3rem 0.75rem;
         border-radius: 999px;
         border: 1px solid var(--border-subtle);
-        background: rgba(71, 85, 105, 0.8);
+        background: rgba(255, 255, 255, 0.8);
         font-size: 0.8rem;
       }
 
@@ -562,8 +562,8 @@
         padding: 1.1rem;
         background: linear-gradient(
           145deg,
-          rgba(71, 85, 105, 0.9),
-          rgba(71, 85, 105, 0.98)
+          rgba(255, 255, 255, 0.9),
+          rgba(255, 255, 255, 0.98)
         );
         border: 1px solid rgba(30, 64, 175, 0.3);
       }
@@ -625,7 +625,7 @@
         border-radius: 999px;
         padding: 0.4rem 0.75rem;
         border: 1px solid var(--border-subtle);
-        background: rgba(71, 85, 105, 0.85);
+        background: rgba(255, 255, 255, 0.85);
         color: var(--text-main);
         font-size: 0.85rem;
       }
@@ -649,7 +649,7 @@
         border-radius: 0.9rem;
         border: 1px solid var(--border-subtle);
         overflow: auto;
-        background: radial-gradient(circle at top left, #475569, #475569 55%);
+        background: radial-gradient(circle at top left, #f8fafc, #f8fafc 55%);
         max-height: 280px;
         -webkit-overflow-scrolling: touch;
         touch-action: auto;
@@ -679,8 +679,8 @@
         padding: 0.75rem;
         border-radius: 0.9rem;
         border: 1px solid var(--border-subtle);
-        background: rgba(71, 85, 105, 0.96);
-        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.65);
+        background: rgba(255, 255, 255, 0.96);
+        box-shadow: 0 24px 80px rgba(15, 23, 42, 0.18);
       }
 
       .tx-table-wrapper.expanded .tx-table-wrap {
@@ -711,8 +711,8 @@
         padding: 0.75rem;
         border-radius: 0.9rem;
         border: 1px solid var(--border-subtle);
-        background: rgba(71, 85, 105, 0.96);
-        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.65);
+        background: rgba(255, 255, 255, 0.96);
+        box-shadow: 0 24px 80px rgba(15, 23, 42, 0.18);
       }
 
       .summary-table-wrapper.expanded .summary-table-wrap {
@@ -744,8 +744,8 @@
         padding: 0.75rem;
         border-radius: 0.9rem;
         border: 1px solid var(--border-subtle);
-        background: rgba(71, 85, 105, 0.96);
-        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.65);
+        background: rgba(255, 255, 255, 0.96);
+        box-shadow: 0 24px 80px rgba(15, 23, 42, 0.18);
       }
 
       .txn-ledger-wrapper.expanded .txn-ledger-table-wrap {
@@ -802,7 +802,7 @@
         padding: 0.6rem;
         border: 1px solid var(--border-subtle);
         border-radius: 0.75rem;
-        background: rgba(71, 85, 105, 0.55);
+        background: rgba(255, 255, 255, 0.55);
       }
 
       .summary-ai .field-row {
@@ -814,7 +814,7 @@
         border-radius: 999px;
         padding: 0.42rem 0.75rem;
         border: 1px solid var(--border-subtle);
-        background: rgba(71, 85, 105, 0.85);
+        background: rgba(255, 255, 255, 0.85);
         color: var(--text-main);
         font-size: 0.83rem;
       }
@@ -822,10 +822,10 @@
       .summary-ai-log {
         max-height: 180px;
         overflow: auto;
-        border: 1px solid rgba(31, 41, 55, 0.8);
+        border: 1px solid rgba(203, 213, 225, 0.8);
         border-radius: 0.65rem;
         padding: 0.5rem;
-        background: rgba(71, 85, 105, 0.45);
+        background: rgba(255, 255, 255, 0.45);
         text-align: left;
       }
 
@@ -853,14 +853,14 @@
       }
 
       thead {
-        background: rgba(71, 85, 105, 0.98);
+        background: rgba(255, 255, 255, 0.98);
       }
 
       th,
       td {
         padding: 0.55rem 0.7rem;
         text-align: center;
-        border-bottom: 1px solid rgba(31, 41, 55, 0.8);
+        border-bottom: 1px solid rgba(203, 213, 225, 0.8);
         white-space: nowrap;
       }
 
@@ -883,7 +883,7 @@
         padding: 0.1rem 0.55rem;
         font-size: 0.7rem;
         border: 1px solid rgba(148, 163, 184, 0.3);
-        background: rgba(71, 85, 105, 0.9);
+        background: rgba(255, 255, 255, 0.9);
       }
 
       .pill.delivered {
@@ -893,7 +893,7 @@
 
       .pill.pending {
         border-color: rgba(234, 179, 8, 0.65);
-        color: #fde68a;
+        color: #92400e;
       }
 
       .pill.failed {
@@ -983,8 +983,8 @@
       .metric {
         padding: 0.5rem 0.6rem;
         border-radius: 0.75rem;
-        border: 1px solid rgba(31, 41, 55, 0.9);
-        background: radial-gradient(circle at top, #475569, #475569 55%);
+        border: 1px solid rgba(203, 213, 225, 0.9);
+        background: radial-gradient(circle at top, #f8fafc, #f8fafc 55%);
       }
 
       .metric-label {
@@ -1004,7 +1004,7 @@
       }
 
       .metric-value.warning {
-        color: #fde68a;
+        color: #92400e;
       }
 
       .metric-value.danger {
@@ -1088,7 +1088,7 @@
                       type="text"
                       id="txn-search-input"
                       placeholder="Search ref / tag / driver / dispatcher"
-                      style="min-width: 220px; border-radius: 999px; padding: 0.35rem 0.7rem; border: 1px solid var(--border-subtle); background: rgba(71, 85, 105, 0.85); color: var(--text-main); font-size: 0.82rem;"
+                      style="min-width: 220px; border-radius: 999px; padding: 0.35rem 0.7rem; border: 1px solid var(--border-subtle); background: rgba(255, 255, 255, 0.85); color: var(--text-main); font-size: 0.82rem;"
                     />
                     <button id="txn-refresh-btn" type="button">
                       ⟳
