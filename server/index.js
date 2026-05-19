@@ -202,6 +202,22 @@ const LEAD_NOTIFICATION_EMAILS = (() => {
     .filter((s) => s.includes("@"));
   return Array.from(new Set(list));
 })();
+// Personal Telegram chat IDs that also receive every new lead as a plain DM
+// from the bot (no Accept/Decline — purely informational, mirroring the email
+// fan-out). Each ID is a numeric Telegram user id; the bot must have been
+// /start-ed by each recipient at least once or DMs will silently fail.
+const DEFAULT_LEAD_NOTIFICATION_TELEGRAM_IDS = [
+  "1184788227",
+  "1203347742",
+  "5994570412",
+];
+const LEAD_NOTIFICATION_TELEGRAM_IDS = (() => {
+  const raw = process.env.LEAD_NOTIFICATION_TELEGRAM_IDS;
+  const list = (raw && raw.trim().length > 0 ? raw.split(",") : DEFAULT_LEAD_NOTIFICATION_TELEGRAM_IDS)
+    .map((s) => String(s || "").replace(/[\s\u00A0\u200B-\u200D\uFEFF]/g, ""))
+    .filter((s) => /^-?\d+$/.test(s));
+  return Array.from(new Set(list));
+})();
 
 if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
 if (!existsSync(DOCS_DIR)) mkdirSync(DOCS_DIR, { recursive: true });
@@ -1268,6 +1284,75 @@ async function sendNewLeadEmail(order) {
   }
 }
 
+// Plain HTML lead summary for the personal Telegram DM fan-out. No buttons —
+// these recipients only need visibility, not the ability to claim.
+function formatNewLeadTelegramMessage(order) {
+  const o = order || {};
+  const shortId = (o.id || "").slice(0, 8) || "—";
+  const name = `${(o.firstName || "").trim()} ${(o.lastName || "").trim()}`.trim() || "—";
+  const car =
+    o.year && o.make && o.model
+      ? `${o.year} ${o.make} ${o.model}${o.color ? `, ${o.color}` : ""}`
+      : o.carMakeModel || o.vehicleInfo || "—";
+  const deliveryMethodLabel =
+    o.deliveryMethod === "overnight_fedex"
+      ? "FedEx Overnight"
+      : o.deliveryMethod === "driver"
+        ? "Driver Delivery"
+        : "Email Delivery";
+  const priceLine = o.price != null ? `$${Number(o.price).toFixed(2)}` : "—";
+  const lines = [
+    "🆕 <b>New Lead</b>",
+    `Order #${escapeTelegramHtml(shortId)}`,
+    "",
+    `<b>Customer:</b> ${escapeTelegramHtml(name)}`,
+    o.phone ? `<b>Phone:</b> ${escapeTelegramHtml(o.phone)}` : null,
+    o.deliveryEmail ? `<b>Delivery email:</b> ${escapeTelegramHtml(o.deliveryEmail)}` : null,
+    `<b>Delivery method:</b> ${escapeTelegramHtml(deliveryMethodLabel)}`,
+    o.address ? `<b>Registration address:</b> ${escapeTelegramHtml(o.address)}` : null,
+    (o.deliveryAddress || o.delivery_address)
+      ? `<b>Delivery address:</b> ${escapeTelegramHtml(o.deliveryAddress || o.delivery_address)}`
+      : null,
+    o.vin ? `<b>VIN:</b> ${escapeTelegramHtml(o.vin)}` : null,
+    `<b>Vehicle:</b> ${escapeTelegramHtml(car)}`,
+    o.insuranceCompany ? `<b>Insurance:</b> ${escapeTelegramHtml(o.insuranceCompany)}` : null,
+    o.policyNumber ? `<b>Policy #:</b> ${escapeTelegramHtml(o.policyNumber)}` : null,
+    o.serviceTitle ? `<b>Service:</b> ${escapeTelegramHtml(o.serviceTitle)}` : null,
+    `<b>Price:</b> ${escapeTelegramHtml(priceLine)}`,
+    o.notes ? `<b>Notes:</b> ${escapeTelegramHtml(o.notes)}` : null,
+    "",
+    "<i>Informational copy — not claimable from this message.</i>",
+  ];
+  return lines.filter(Boolean).join("\n");
+}
+
+async function sendNewLeadTelegramNotifications(order) {
+  if (!TELEGRAM_BOT_TOKEN) {
+    console.warn("[LeadTelegram] TELEGRAM_BOT_TOKEN not set — skipping Telegram lead fan-out");
+    return false;
+  }
+  if (!LEAD_NOTIFICATION_TELEGRAM_IDS || LEAD_NOTIFICATION_TELEGRAM_IDS.length === 0) {
+    console.warn("[LeadTelegram] LEAD_NOTIFICATION_TELEGRAM_IDS empty — nothing to send");
+    return false;
+  }
+  const shortId = (order?.id || "").slice(0, 8) || "—";
+  const text = formatNewLeadTelegramMessage(order);
+  const results = await sendToTelegram(text, LEAD_NOTIFICATION_TELEGRAM_IDS);
+  const okCount = results.filter((r) => r.ok).length;
+  const failed = results.filter((r) => !r.ok);
+  if (failed.length > 0) {
+    console.warn(
+      `[LeadTelegram] Lead ${shortId}: ${okCount}/${results.length} delivered. Failures:`,
+      failed.map((f) => ({ chatId: f.chatId, error: f.error })),
+    );
+  } else {
+    console.log(`[LeadTelegram] Sent lead ${shortId} to ${okCount} recipient(s).`);
+  }
+  // Consider it a success if AT LEAST ONE got through — partial delivery is
+  // still better than re-spamming the survivors on the next PATCH.
+  return okCount > 0;
+}
+
 function formatOrderMessage(order) {
   const vehicle = (order.year && order.make && order.model)
     ? `${order.year} ${order.make} ${order.model}` + (order.color ? `, ${order.color}` : "")
@@ -2330,21 +2415,32 @@ app.patch("/api/orders/:id/tag-info", async (req, res) => {
       telegramErrors = telegramResults.filter((r) => !r.ok).map((r) => ({ chatId: r.chatId, error: r.error }));
     }
 
-    // Internal lead-notification email. Fire once per lead (guarded by
-    // newLeadEmailSent) so re-PATCHing tag info from the customer flow doesn't
-    // spam the recipients. Errors are non-fatal — Telegram is the primary
-    // channel; email is best-effort.
+    // Internal lead notifications (email + personal Telegram DMs). Fire once
+    // per lead (guarded by newLeadEmailSent) so re-PATCHing tag info from the
+    // customer flow doesn't spam the recipients. Errors are non-fatal — the
+    // dispatcher claim messages are the primary channel; both fan-outs here
+    // are best-effort. We set the flag if EITHER side succeeded so we don't
+    // re-spam everyone if just one channel had a transient failure.
     try {
-      const alreadyEmailed =
+      const alreadyNotified =
         (useSupabase() ? updated?.new_lead_email_sent : updated?.newLeadEmailSent) === true;
-      if (!alreadyEmailed) {
-        const sent = await sendNewLeadEmail(full);
-        if (sent) {
+      if (!alreadyNotified) {
+        const [emailSent, tgSent] = await Promise.all([
+          sendNewLeadEmail(full).catch((e) => {
+            console.error("[LeadEmail] Non-fatal error while sending new-lead email:", e);
+            return false;
+          }),
+          sendNewLeadTelegramNotifications(full).catch((e) => {
+            console.error("[LeadTelegram] Non-fatal error while sending new-lead DMs:", e);
+            return false;
+          }),
+        ]);
+        if (emailSent || tgSent) {
           await updateOrder(id, { newLeadEmailSent: true });
         }
       }
-    } catch (mailErr) {
-      console.error("[LeadEmail] Non-fatal error while sending new-lead email:", mailErr);
+    } catch (notifyErr) {
+      console.error("[LeadNotify] Unexpected error in lead-notify block:", notifyErr);
     }
 
     if (useSupabase()) {
@@ -2799,12 +2895,20 @@ const server = app.listen(PORT, () => {
     console.log("Resend configured (lead notifications):", RESEND_FROM_EMAIL);
     if (LEAD_NOTIFICATION_EMAILS.length > 0) {
       console.log(
-        `Lead notifications go to ${LEAD_NOTIFICATION_EMAILS.length} recipient(s):`,
+        `Lead email notifications go to ${LEAD_NOTIFICATION_EMAILS.length} recipient(s):`,
         LEAD_NOTIFICATION_EMAILS.join(", "),
       );
     } else {
       console.warn("WARNING: LEAD_NOTIFICATION_EMAILS empty — new leads won't be emailed");
     }
+  }
+  if (LEAD_NOTIFICATION_TELEGRAM_IDS.length > 0) {
+    console.log(
+      `Lead Telegram notifications go to ${LEAD_NOTIFICATION_TELEGRAM_IDS.length} chat(s):`,
+      LEAD_NOTIFICATION_TELEGRAM_IDS.join(", "),
+    );
+  } else {
+    console.warn("WARNING: LEAD_NOTIFICATION_TELEGRAM_IDS empty — new leads won't be DMed");
   }
   if (useSupabase()) console.log("Using Supabase"); else console.log("Using file storage");
   void ensureTelegramWebhookOnStartup();
