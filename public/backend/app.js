@@ -2872,21 +2872,12 @@ function applyLoggedInUI(loggedIn) {
   }
 }
 
-// Force the Summary window selector to "1 week" so every fresh page load /
-// login starts from the same baseline, regardless of whatever was selected in
-// a previous session. Safe to call when the element doesn't exist yet.
-function resetSummaryWindowToOneWeek() {
-  const el = document.getElementById("summary-window");
-  if (el && el.value !== "1w") el.value = "1w";
-}
-
 async function tryInitialLogin() {
   const genAtStart = _adminAuthSuccessGeneration;
   if (!hasAdminPassword()) return;
   try {
     await refreshTransactions();
     await refreshLatest();
-    resetSummaryWindowToOneWeek();
     await refreshSummary();
     bumpAdminAuthSuccessGeneration();
     applyLoggedInUI(true);
@@ -2974,7 +2965,6 @@ function setupEvents() {
     try {
       await refreshTransactions();
       await refreshLatest();
-      resetSummaryWindowToOneWeek();
       await refreshSummary();
       bumpAdminAuthSuccessGeneration();
       applyLoggedInUI(true);
