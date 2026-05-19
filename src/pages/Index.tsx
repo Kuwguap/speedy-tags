@@ -90,7 +90,7 @@ function ReviewCarouselBlock(props: {
     : "relative mx-auto max-w-3xl";
 
   const frameClass = compact
-    ? "relative mx-auto aspect-[4/5] w-full max-h-[160px] max-w-[200px] sm:max-h-[200px] sm:max-w-[240px] rounded-xl overflow-hidden bg-card border border-border shadow-md cursor-grab active:cursor-grabbing select-none touch-pan-y"
+    ? "relative mx-auto aspect-[4/5] w-full max-h-[120px] max-w-[168px] sm:max-h-[200px] sm:max-w-[240px] rounded-xl overflow-hidden bg-card border border-border shadow-md cursor-grab active:cursor-grabbing select-none touch-pan-y"
     : "relative aspect-[3/4] sm:aspect-[4/3] md:aspect-[16/10] rounded-2xl overflow-hidden bg-card border border-border shadow-lg cursor-grab active:cursor-grabbing select-none touch-pan-y";
 
   const btnClass = compact
@@ -107,7 +107,7 @@ function ReviewCarouselBlock(props: {
     ? "absolute bottom-1.5 right-2 rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-medium text-white"
     : "absolute bottom-2 right-3 rounded-full bg-black/60 px-2.5 py-0.5 text-xs font-medium text-white";
 
-  const dotsWrapClass = compact ? "flex justify-center gap-1.5 mt-2" : "flex justify-center gap-2 mt-4";
+  const dotsWrapClass = compact ? "flex justify-center gap-1.5 mt-1 sm:mt-2" : "flex justify-center gap-2 mt-4";
 
   const dotActiveClass = compact ? "w-5 bg-primary" : "w-6 bg-primary";
   const dotIdleClass = compact ? "w-1.5 bg-border hover:bg-muted-foreground/50" : "w-2 bg-border hover:bg-muted-foreground/50";
@@ -232,7 +232,7 @@ export default function Index() {
       <Header />
 
       {/* Trust bar */}
-      <div className="bg-primary text-primary-foreground py-2.5 text-center text-sm font-medium flex flex-wrap items-center justify-center gap-4 md:gap-8">
+      <div className="bg-primary text-primary-foreground py-1.5 sm:py-2.5 text-center text-xs sm:text-sm font-medium flex flex-wrap items-center justify-center gap-2 sm:gap-4 md:gap-8">
         <span className="flex items-center gap-1.5">
           <ShieldCheck className="h-4 w-4 inline" />
           NJ Licensed Dealer
@@ -247,20 +247,20 @@ export default function Index() {
       <section className="relative overflow-hidden bg-foreground">
         <img src={heroBg} alt="" className="absolute inset-0 w-full h-full object-cover object-center opacity-30" />
         <div className="absolute inset-0 bg-gradient-to-b from-foreground/90 to-foreground" />
-        <div className="relative container py-12 md:py-20 text-center">
-          <h1 className="font-display text-2xl md:text-4xl lg:text-5xl font-extrabold text-white mb-4 leading-tight">
+        <div className="relative container py-6 sm:py-10 md:py-20 text-center">
+          <h1 className="font-display text-xl sm:text-2xl md:text-4xl lg:text-5xl font-extrabold text-white mb-2 sm:mb-4 leading-tight">
             New Jersey Temporary Tags —<br />
             <span className="text-primary">Same Day • DMV Verified</span>
           </h1>
-          <p className="text-lg text-white/90 max-w-2xl mx-auto mb-6">
+          <p className="text-sm sm:text-lg text-white/90 max-w-2xl mx-auto mb-3 sm:mb-6">
             Get legal NJ temporary plates + registration.<br className="hidden sm:block" />
             Instant email, 1-hour local delivery, or FedEx delivery.
           </p>
-          <div className="flex flex-col sm:flex-row gap-3 justify-center mb-8">
+          <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 justify-center mb-4 sm:mb-8">
             <button
               type="button"
               onClick={handleHeroBuy}
-              className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-8 py-4 font-bold text-primary-foreground hover:bg-primary/90 transition-all text-lg"
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-6 sm:px-8 py-3 sm:py-4 font-bold text-primary-foreground hover:bg-primary/90 transition-all text-base sm:text-lg"
             >
               BUY IT NOW
               <ArrowRight className="h-5 w-5" />
@@ -268,12 +268,12 @@ export default function Index() {
             <button
               type="button"
               onClick={handleHeroBuy}
-              className="inline-flex items-center justify-center gap-2 rounded-lg border-2 border-white px-8 py-4 font-bold text-white hover:bg-white/10 transition-all text-lg"
+              className="inline-flex items-center justify-center gap-2 rounded-lg border-2 border-white px-6 sm:px-8 py-3 sm:py-4 font-bold text-white hover:bg-white/10 transition-all text-base sm:text-lg"
             >
               GET MY TEMP TAG
             </button>
           </div>
-          <div className="flex flex-wrap items-center justify-center gap-6 text-sm text-white/80">
+          <div className="hidden sm:flex flex-wrap items-center justify-center gap-6 text-sm text-white/80">
             <span>✔ Licensed Dealer</span>
             <span>✔ Official NJ MVC Processing</span>
             <span>✔ Temp Plates</span>
@@ -283,11 +283,11 @@ export default function Index() {
       </section>
 
       {/* Benefits grid — compact review slideshow sits above Same Day Processing */}
-      <section className="container py-8 md:py-12 -mt-1">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-          <div className="flex flex-col gap-3 sm:gap-4 min-w-0">
-            <div className="rounded-xl border border-border bg-muted/40 p-3 shadow-sm flex flex-col items-center">
-              <p className="text-[11px] font-semibold text-center text-muted-foreground uppercase tracking-wide mb-2">
+      <section className="container pt-2 pb-6 sm:py-8 md:py-12 -mt-6 sm:-mt-2 md:-mt-1">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+          <div className="flex flex-col gap-2 sm:gap-4 min-w-0 -mt-1 sm:mt-0">
+            <div className="rounded-xl border border-border bg-muted/40 p-2 sm:p-3 shadow-sm flex flex-col items-center">
+              <p className="text-[10px] sm:text-[11px] font-semibold text-center text-muted-foreground uppercase tracking-wide mb-1 sm:mb-2">
                 Real customer reviews
               </p>
               <ReviewCarouselBlock
@@ -300,7 +300,7 @@ export default function Index() {
                 onJumpTo={setReviewIndex}
               />
             </div>
-            <div className="flex gap-4 p-6 rounded-xl bg-card border border-border shadow-sm hover:shadow-md transition-shadow">
+            <div className="flex gap-4 p-4 sm:p-6 rounded-xl bg-card border border-border shadow-sm hover:shadow-md transition-shadow">
               <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
                 <FirstBenefitIcon className="h-6 w-6" />
               </div>
