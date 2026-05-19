@@ -946,15 +946,17 @@ async function deleteTelegramMessage(chatId, messageId) {
   }
 }
 
-async function sendClaimMessageToDispatcher(dispatcherChatId, orderId, order) {
+async function sendClaimMessageToDispatcher(dispatcherChatId, orderId, order, opts = {}) {
   if (!TELEGRAM_BOT_TOKEN) return { ok: false, messageId: null };
+  const headerLine = opts.header || "🆕 <b>New Order – Accept to Claim</b>";
+  const footerLine = opts.footer || "Tap <b>Accept</b> to receive full details in your group.";
   const summary = [
-    "🆕 <b>New Order – Accept to Claim</b>",
+    headerLine,
     `Order #${(orderId || "").slice(0, 8)}`,
     `• ${(order?.firstName || "")} ${(order?.lastName || "")}`.trim() || "—",
     `• ${order?.vin || "—"} | ${order?.carMakeModel || order?.vehicleInfo || "—"}`,
     "",
-    "Tap <b>Accept</b> to receive full details in your group.",
+    footerLine,
   ].join("\n");
   const payload = {
     chat_id: dispatcherChatId,
@@ -1471,22 +1473,47 @@ async function answerCallback(callbackQueryId, text) {
 async function tryAcceptOrder(orderId, acceptorsChatId, groupChatId, groupName = "") {
   const acceptedAt = new Date().toISOString();
   const cleanName = groupName ? String(groupName).trim() : "";
+  const acceptorStr = String(acceptorsChatId ?? "").trim();
+  if (!acceptorStr) {
+    // Refuse to "claim" with an empty acceptor — that's the exact pattern that
+    // historically left rows poisoned with telegram_accepted_by="" and made
+    // every later dispatcher see "already accepted by another team".
+    console.warn(`[tryAcceptOrder] Refusing to accept order ${orderId} with empty acceptor id.`);
+    return false;
+  }
   if (useSupabase()) {
+    // Heal stale rows where a previous code path left telegram_accepted_by as
+    // an empty string or whitespace instead of NULL. Those rows can never be
+    // claimed by the atomic update below (WHERE telegram_accepted_by IS NULL),
+    // which produced the "taken by another group" symptom on leads no one
+    // actually accepted. Best-effort — ignore errors.
+    try {
+      await supabase
+        .from("orders")
+        .update({ telegram_accepted_by: null })
+        .eq("id", orderId)
+        .eq("telegram_accepted_by", "");
+    } catch (e) {
+      // best-effort heal; continue regardless
+    }
+
     // Build the update payload with the new metadata. supabaseUpdateResilient
     // gracefully drops missing columns, but here we use a single-shot update
     // because we depend on the WHERE-clause race protection. If the optional
     // columns don't exist yet, retry without them.
     const tryUpdate = async (extra) => {
       const payload = {
-        telegram_accepted_by: String(acceptorsChatId),
-        telegram_accepted_group_id: String(groupChatId),
+        telegram_accepted_by: acceptorStr,
+        telegram_accepted_group_id: String(groupChatId ?? "").trim(),
         ...extra,
       };
+      // Atomic claim: only succeeds when the lead is truly unclaimed (NULL).
+      // We rely on the heal step above to normalize legacy empty-string rows.
       const { data, error } = await supabase
         .from("orders")
         .update(payload)
         .eq("id", orderId)
-        .or("telegram_accepted_by.is.null,telegram_accepted_by.eq.")
+        .is("telegram_accepted_by", null)
         .select("id");
       return { data, error };
     };
@@ -1515,8 +1542,8 @@ async function tryAcceptOrder(orderId, acceptorsChatId, groupChatId, groupName =
     return by == null || String(by).trim() === "";
   });
   if (idx < 0) return false;
-  orders[idx].telegramAcceptedBy = acceptorsChatId;
-  orders[idx].telegramAcceptedGroupId = groupChatId;
+  orders[idx].telegramAcceptedBy = acceptorStr;
+  orders[idx].telegramAcceptedGroupId = String(groupChatId ?? "").trim();
   if (cleanName) orders[idx].telegramAcceptedGroupName = cleanName;
   orders[idx].telegramAcceptedAt = acceptedAt;
   saveJson(ORDERS_FILE, orders);
@@ -1612,15 +1639,16 @@ async function scheduleAutoAssignFallback(orderId, claimMessageIds, dispatchers)
         return;
       }
 
-      // No auto-assign configured: ping dispatchers (and optional fallback group)
-      // that the lead is still open. The Accept/Decline buttons remain live, so any
-      // group can still claim it — we never lock the order from this code path.
-      const reminderText = [
-        "⏰ <b>Lead still unclaimed</b>",
-        `Order #${(orderId || "").slice(0, 8)} has been open for ${(delay / 1000 / 60).toFixed(0)} min.`,
-        "",
-        "Tap <b>Accept</b> on the original claim message to take it.",
-      ].join("\n");
+      // No auto-assign configured: bump the lead by sending a fresh, fully
+      // actionable claim message (with ✅ Accept / ❌ Decline buttons) to every
+      // dispatcher group + DM. We never lock the order here — the lead stays
+      // claimable by any group, both via the original claim buttons AND the
+      // new reminder buttons. New message IDs are merged into the order's
+      // telegram_claim_message_ids map so a later acceptance can update them
+      // too with "Already accepted by …".
+      const minutesOpen = (delay / 1000 / 60).toFixed(0);
+      const reminderHeader = `⏰ <b>Lead still unclaimed – open ${minutesOpen} min</b>`;
+      const reminderFooter = "Tap <b>Accept</b> to take this lead. Both this message and the original are still claimable.";
 
       const targets = new Set();
       for (const d of dispatchers || []) {
@@ -1632,8 +1660,54 @@ async function scheduleAutoAssignFallback(orderId, claimMessageIds, dispatchers)
       targets.delete("");
       if (targets.size === 0) return;
 
-      await sendToTelegram(reminderText, [...targets]);
-      console.log(`[Dispatcher] Reminder ping sent for order ${orderId.slice(0, 8)} to ${targets.size} chat(s); lead still claimable.`);
+      // Load the latest stored claim message ID map so we can merge new IDs in
+      // without dropping the originals.
+      const existingClaimIds = {};
+      const raw =
+        typeof order.telegramClaimMessageIds === "object" && order.telegramClaimMessageIds
+          ? order.telegramClaimMessageIds
+          : order.telegram_claim_message_ids && typeof order.telegram_claim_message_ids === "string"
+            ? (() => { try { return JSON.parse(order.telegram_claim_message_ids || "{}"); } catch { return {}; } })()
+            : (order.telegram_claim_message_ids || {});
+      for (const [k, v] of Object.entries(raw || {})) {
+        if (v) existingClaimIds[canonicalChatId(k)] = v;
+      }
+      // Also accept the in-memory map passed in so we don't lose IDs from
+      // the very first dispatch in case the DB round-trip hasn't landed yet.
+      for (const [k, v] of Object.entries(claimMessageIds || {})) {
+        if (v && !existingClaimIds[canonicalChatId(k)]) {
+          existingClaimIds[canonicalChatId(k)] = v;
+        }
+      }
+
+      const reminderResults = [];
+      for (const chatId of targets) {
+        const res = await sendClaimMessageToDispatcher(chatId, orderId, order, {
+          header: reminderHeader,
+          footer: reminderFooter,
+        });
+        reminderResults.push({ chatId, ok: res.ok, messageId: res.messageId });
+        if (res.ok && res.messageId) {
+          // Newest reminder takes priority for later "Already accepted by …" edits.
+          existingClaimIds[chatId] = res.messageId;
+        }
+      }
+
+      // Persist the merged map so processAcceptClaim/completeOrderDispatch can
+      // edit ALL outstanding claim messages (originals + every reminder) once
+      // someone finally accepts.
+      try {
+        await updateOrder(orderId, { telegramClaimMessageIds: existingClaimIds });
+      } catch (e) {
+        console.warn(`[Dispatcher] Could not persist reminder claim IDs for ${orderId.slice(0, 8)}: ${e?.message || e}`);
+      }
+
+      // Pass the merged map forward so the next reminder cycle sees every ID.
+      claimMessageIds = existingClaimIds;
+      const okCount = reminderResults.filter((r) => r.ok).length;
+      console.log(
+        `[Dispatcher] Reminder claim sent for order ${orderId.slice(0, 8)} to ${okCount}/${targets.size} chat(s); lead still claimable.`,
+      );
 
       // Schedule another reminder so the lead is never silently dropped.
       scheduleAutoAssignFallback(orderId, claimMessageIds, dispatchers);
