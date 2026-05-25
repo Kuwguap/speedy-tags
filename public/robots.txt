@@ -1,8 +1,38 @@
+# https://tristatetag.com/robots.txt
+# Block private/transactional routes from search engines
+
+User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /backend
+Disallow: /checkout
+Disallow: /checkout/
+Disallow: /payment
+Disallow: /payments
+Disallow: /secure/
+Disallow: /api/
+
 User-agent: Googlebot
 Allow: /
+Disallow: /admin
+Disallow: /backend
+Disallow: /checkout
+Disallow: /checkout/
+Disallow: /payment
+Disallow: /payments
+Disallow: /secure/
+Disallow: /api/
 
 User-agent: Bingbot
 Allow: /
+Disallow: /admin
+Disallow: /backend
+Disallow: /checkout
+Disallow: /checkout/
+Disallow: /payment
+Disallow: /payments
+Disallow: /secure/
+Disallow: /api/
 
 User-agent: Twitterbot
 Allow: /
@@ -10,5 +40,4 @@ Allow: /
 User-agent: facebookexternalhit
 Allow: /
 
-User-agent: *
-Allow: /
+Sitemap: https://tristatetag.com/sitemap.xml

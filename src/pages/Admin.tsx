@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, type ServiceRecord, type OrderRecord, type AdminStats, type TelegramDispatcher, type TelegramWebhookInfo } from "@/lib/api";
 import { deliveryMethodLabel, productChoiceLabel } from "@/lib/checkout-pricing";
+import { useSeo } from "@/hooks/useSeo";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -246,6 +247,7 @@ function OrderDetailBlock({
 }
 
 export default function Admin() {
+  useSeo({ title: "Admin | TriStateTags", noindex: true });
   const navigate = useNavigate();
   const { toast } = useToast();
   const [authChecked, setAuthChecked] = useState(false);

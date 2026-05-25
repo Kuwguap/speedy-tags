@@ -17,8 +17,10 @@ import {
 import { api } from "@/lib/api";
 import { DRIVER_EXTENDED_FEE, OVERNIGHT_FEDEX_FEE } from "@/lib/constants";
 import { Shield, Lock, Mail, Truck, Package, Send } from "lucide-react";
+import { useSeo } from "@/hooks/useSeo";
 
 export default function CheckoutGuarantee() {
+  useSeo({ title: "Checkout | TriStateTags", noindex: true });
   const navigate = useNavigate();
   const { state, update } = useCheckout();
   const [email, setEmail] = useState(state.deliveryEmail);

@@ -4,6 +4,7 @@ import { Header } from "@/components/Header";
 import { AddressAutocomplete } from "@/components/AddressAutocomplete";
 import { api, type TagInfoFields } from "@/lib/api";
 import { normalizeProductChoice } from "@/lib/checkout-pricing";
+import { useSeo } from "@/hooks/useSeo";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -35,6 +36,7 @@ const schema = z.object({
 type FormData = z.infer<typeof schema>;
 
 export default function CheckoutTagInfo() {
+  useSeo({ title: "Tag Info | TriStateTags", noindex: true });
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { toast } = useToast();

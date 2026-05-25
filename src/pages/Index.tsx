@@ -23,6 +23,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import heroBg from "@/assets/hero-bg.jpg";
+import { useSeo } from "@/hooks/useSeo";
 
 const benefits = [
   { icon: Clock, title: "Same Day Processing", desc: "Get your temp tags the same day—no waiting." },
@@ -187,6 +188,12 @@ function ReviewCarouselBlock(props: {
 }
 
 export default function Index() {
+  useSeo({
+    title: "NJ Temporary Tags Same Day | TriStateTags — Licensed NJ Dealer",
+    description:
+      "Get your New Jersey temporary plate and registration the same day. NJ MVC licensed dealer. Instant email delivery, free 50-mile driver delivery, or +$33 overnight shipping. From $150.",
+    canonical: "/",
+  });
   const navigate = useNavigate();
   const { update } = useCheckout();
   const [services, setServices] = useState<ServiceRecord[]>([]);

@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
+import { useSeo } from "@/hooks/useSeo";
 
 async function decryptPhone(ivB64: string, dataB64: string, passphrase: string) {
   const enc = new TextEncoder();
@@ -20,6 +21,7 @@ async function decryptPhone(ivB64: string, dataB64: string, passphrase: string) 
 }
 
 export default function SecurePhone() {
+  useSeo({ title: "Secure Phone | TriStateTags", noindex: true });
   const { orderId } = useParams();
   const [payload, setPayload] = useState<{ iv: string; data: string } | null>(null);
   const [passphrase, setPassphrase] = useState("");

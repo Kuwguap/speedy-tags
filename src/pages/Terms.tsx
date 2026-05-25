@@ -1,8 +1,15 @@
 import { Link } from "react-router-dom";
 import { Header } from "@/components/Header";
 import { ArrowLeft } from "lucide-react";
+import { useSeo } from "@/hooks/useSeo";
 
 export default function Terms() {
+  useSeo({
+    title: "Terms of Service | TriStateTags",
+    description:
+      "Terms of service for TriStateTags — NJ MVC licensed dealer providing same-day temporary plates and registration.",
+    canonical: "/terms",
+  });
   return (
     <div className="min-h-screen bg-background">
       <Header />

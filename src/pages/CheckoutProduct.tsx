@@ -21,6 +21,7 @@ import {
 } from "@/lib/checkout-pricing";
 import { api } from "@/lib/api";
 import { ArrowLeft } from "lucide-react";
+import { useSeo } from "@/hooks/useSeo";
 
 const defaultPricingConfig = (): CheckoutPricingConfig => ({
   plateOnlyPrice: PLATE_ONLY_PRICE,
@@ -32,6 +33,7 @@ const defaultPricingConfig = (): CheckoutPricingConfig => ({
 });
 
 export default function CheckoutProduct() {
+  useSeo({ title: "Choose Product | TriStateTags", noindex: true });
   const navigate = useNavigate();
   const { state, update } = useCheckout();
   const [config, setConfig] = useState<CheckoutPricingConfig>(defaultPricingConfig);

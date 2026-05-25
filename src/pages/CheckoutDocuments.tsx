@@ -7,8 +7,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { FileImage, Upload, Loader2 } from "lucide-react";
+import { useSeo } from "@/hooks/useSeo";
 
 export default function CheckoutDocuments() {
+  useSeo({ title: "Upload Documents | TriStateTags", noindex: true });
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { toast } = useToast();

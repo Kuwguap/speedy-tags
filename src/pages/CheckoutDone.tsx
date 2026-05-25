@@ -4,8 +4,10 @@ import { Header } from "@/components/Header";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { CheckCircle2 } from "lucide-react";
+import { useSeo } from "@/hooks/useSeo";
 
 export default function CheckoutDone() {
+  useSeo({ title: "Order Complete | TriStateTags", noindex: true });
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const orderId = searchParams.get("orderId");

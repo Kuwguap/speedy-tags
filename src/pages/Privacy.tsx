@@ -1,8 +1,15 @@
 import { Link } from "react-router-dom";
 import { Header } from "@/components/Header";
 import { ArrowLeft } from "lucide-react";
+import { useSeo } from "@/hooks/useSeo";
 
 export default function Privacy() {
+  useSeo({
+    title: "Privacy Policy | TriStateTags",
+    description:
+      "How TriStateTags collects, uses, and protects information for NJ temporary tag orders.",
+    canonical: "/privacy",
+  });
   return (
     <div className="min-h-screen bg-background">
       <Header />

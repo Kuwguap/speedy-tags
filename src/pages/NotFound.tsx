@@ -1,7 +1,9 @@
 import { Link } from "react-router-dom";
 import { Home, Car } from "lucide-react";
+import { useSeo } from "@/hooks/useSeo";
 
 const NotFound = () => {
+  useSeo({ title: "Page Not Found | TriStateTags", noindex: true });
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-muted/30 to-background">
       <div className="text-center px-6 max-w-md">

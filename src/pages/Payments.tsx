@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { api } from "@/lib/api";
 import { Wallet, Share2, ExternalLink } from "lucide-react";
+import { useSeo } from "@/hooks/useSeo";
 
 const PAYMENT_OPTIONS = [
   { id: "venmo" as const, label: "Venmo" },
@@ -11,6 +12,7 @@ const PAYMENT_OPTIONS = [
 ];
 
 export default function Payments() {
+  useSeo({ title: "Payment | TriStateTags", noindex: true });
   const [logoError, setLogoError] = useState(false);
   const [applePayCopied, setApplePayCopied] = useState(false);
   const [data, setData] = useState<{
