@@ -597,7 +597,7 @@ export default function Index() {
           </div>
           <div className="pt-8 border-t border-white/20 flex flex-col md:flex-row items-center justify-between gap-4">
             <p className="text-sm text-white/70">© {new Date().getFullYear()} TriStateTags. All rights reserved.</p>
-            <p className="text-xs text-white/60">Licensed NJ dealer. Not affiliated with NJ MVC or government agencies.</p>
+            <p className="text-xs text-white/60">NJ Car Dealership Licensed by the NJ MVC (Motor Vehicle Commission)</p>
           </div>
         </div>
       </footer>

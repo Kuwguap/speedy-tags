@@ -76,11 +76,6 @@ export default function CheckoutProduct() {
       const payload = {
         deliveryMethod: state.deliveryMethod,
         deliveryEmail: state.deliveryEmail || undefined,
-        deliverySlot: state.deliveryMethod === "driver" ? state.deliverySlot : undefined,
-        deliveryScheduledAt:
-          state.deliveryMethod === "driver" && state.deliverySlot === "scheduled"
-            ? state.deliveryScheduledAt
-            : undefined,
         deliveryAddress:
           state.deliveryMethod === "driver" ||
           state.deliveryMethod === "overnight_fedex" ||

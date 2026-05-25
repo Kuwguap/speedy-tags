@@ -575,6 +575,12 @@ async function loadSettings() {
   out.telegram_dispatchers = normalizeDispatchers(out.telegram_dispatchers);
   if (!out.payment_links || typeof out.payment_links !== "object") out.payment_links = {};
   if (!out.payment_display || typeof out.payment_display !== "object") out.payment_display = {};
+  // One-time migration: legacy overnight fee of $50 should now be $33.
+  // Only force-correct the legacy value; preserve any custom fee admins set later.
+  if (parseFloat(out.overnight_fedex_fee) === 50) {
+    out.overnight_fedex_fee = 33;
+    saveSettings({ overnight_fedex_fee: 33 }).catch(() => {});
+  }
   return out;
 }
 

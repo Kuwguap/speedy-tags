@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { useCheckout, type DeliveryMethod, type DeliverySlot } from "@/context/CheckoutContext";
+import { useCheckout, type DeliveryMethod } from "@/context/CheckoutContext";
 import {
   DEFAULT_DRIVER_LOCAL_STATES,
   extractStateCode,
@@ -15,7 +15,7 @@ import {
   parseDriverLocalStates,
 } from "@/lib/checkout-pricing";
 import { api } from "@/lib/api";
-import { DRIVER_EXTENDED_FEE } from "@/lib/constants";
+import { DRIVER_EXTENDED_FEE, OVERNIGHT_FEDEX_FEE } from "@/lib/constants";
 import { Shield, Lock, Mail, Truck, Package, Send } from "lucide-react";
 
 export default function CheckoutGuarantee() {
@@ -25,12 +25,12 @@ export default function CheckoutGuarantee() {
   const [address, setAddress] = useState(state.deliveryAddress);
   const [address2, setAddress2] = useState("");
   const [phone, setPhone] = useState(state.deliveryPhone);
-  const [scheduledAt, setScheduledAt] = useState(state.deliveryScheduledAt || "");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [driverLocalStates, setDriverLocalStates] = useState<string[]>([
     ...DEFAULT_DRIVER_LOCAL_STATES,
   ]);
   const [driverExtendedFee, setDriverExtendedFee] = useState(DRIVER_EXTENDED_FEE);
+  const [overnightFee, setOvernightFee] = useState(OVERNIGHT_FEDEX_FEE);
 
   useEffect(() => {
     api
@@ -38,6 +38,7 @@ export default function CheckoutGuarantee() {
       .then((cfg) => {
         setDriverLocalStates(parseDriverLocalStates(cfg.driverLocalStates));
         if (cfg.driverExtendedFee != null) setDriverExtendedFee(cfg.driverExtendedFee);
+        if (cfg.overnightFedexFee != null) setOvernightFee(cfg.overnightFedexFee);
       })
       .catch(() => {});
   }, []);
@@ -89,18 +90,11 @@ export default function CheckoutGuarantee() {
         });
         return;
       }
-      if (state.deliveryMethod === "driver" && state.deliverySlot === "scheduled" && !scheduledAt) {
-        setErrors({ scheduled: "Select date and time for delivery" });
-        return;
-      }
       const fullAddress = address2?.trim() ? `${address}, ${address2}` : address;
       update({
         deliveryAddress: fullAddress,
         deliveryPhone: phone,
-        deliveryScheduledAt:
-          state.deliveryMethod === "driver" && state.deliverySlot === "scheduled"
-            ? scheduledAt
-            : "",
+        deliveryScheduledAt: "",
         ...(email?.includes("@") && { deliveryEmail: email }),
       });
     }
@@ -172,7 +166,7 @@ export default function CheckoutGuarantee() {
                       <Truck className="h-4 w-4" /> Driver Delivery
                     </div>
                     <p className="text-xs text-muted-foreground mt-0.5">
-                      Under 1 hour in NJ — FREE · Out-of-state / over 1 hr — +${driverExtendedFee}
+                      Free within 50-mile GWB radius · Outside the radius +${driverExtendedFee}
                     </p>
                   </Label>
                 </div>
@@ -182,7 +176,7 @@ export default function CheckoutGuarantee() {
                     <div className="flex items-center gap-2 font-medium">
                       <Package className="h-4 w-4" /> Overnight Shipping
                     </div>
-                    <p className="text-xs text-muted-foreground mt-0.5">+$33 — 1-day overnight</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">+${overnightFee} — 1-day overnight</p>
                   </Label>
                 </div>
               </RadioGroup>
@@ -221,42 +215,13 @@ export default function CheckoutGuarantee() {
             )}
 
             {state.deliveryMethod === "driver" && (
-              <div className="space-y-3">
-                <RadioGroup
-                  value={state.deliverySlot}
-                  onValueChange={(v) => update({ deliverySlot: v as DeliverySlot })}
-                  className="flex gap-4"
-                >
-                  <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="1hr" id="1hr" />
-                    <Label htmlFor="1hr" className="text-sm">
-                      1 Hour <span className="text-muted-foreground">(NJ)</span>
-                    </Label>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="2hr" id="2hr" />
-                    <Label htmlFor="2hr" className="text-sm">2 Hours</Label>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="scheduled" id="scheduled" />
-                    <Label htmlFor="scheduled" className="text-sm">Schedule</Label>
-                  </div>
-                </RadioGroup>
-                {state.deliverySlot === "scheduled" && (
-                  <div>
-                    <Label htmlFor="scheduled-datetime">Date & Time (NY time)</Label>
-                    <Input
-                      id="scheduled-datetime"
-                      type="datetime-local"
-                      value={scheduledAt}
-                      onChange={(e) => setScheduledAt(e.target.value)}
-                      className={errors.scheduled ? "border-destructive" : ""}
-                    />
-                    {errors.scheduled && (
-                      <p className="text-destructive text-xs mt-1">{errors.scheduled}</p>
-                    )}
-                  </div>
-                )}
+              <div className="rounded-xl border border-primary/30 bg-primary/5 p-3 text-sm">
+                <p className="font-medium text-foreground">Free driver delivery — 50-mile radius from the GWB</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  We deliver free within roughly 50 miles of the George Washington Bridge.
+                  Outside that area we&apos;ll add a +${driverExtendedFee} long-distance / toll surcharge,
+                  or you can switch to Mail or Overnight Shipping.
+                </p>
               </div>
             )}
 
@@ -334,7 +299,7 @@ export default function CheckoutGuarantee() {
                       {driverStateCode ? ` (${driverStateCode})` : ""}
                     </p>
                     <p className="text-xs mt-1 text-muted-foreground">
-                      NJ and nearby under 1 hour: no delivery surcharge.
+                      Within 50-mile GWB radius: no delivery surcharge.
                     </p>
                   </>
                 )}
