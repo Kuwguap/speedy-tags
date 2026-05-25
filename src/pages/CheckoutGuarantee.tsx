@@ -38,7 +38,9 @@ export default function CheckoutGuarantee() {
       .then((cfg) => {
         setDriverLocalStates(parseDriverLocalStates(cfg.driverLocalStates));
         if (cfg.driverExtendedFee != null) setDriverExtendedFee(cfg.driverExtendedFee);
-        if (cfg.overnightFedexFee != null) setOvernightFee(cfg.overnightFedexFee);
+        if (cfg.overnightFedexFee != null) {
+          setOvernightFee(cfg.overnightFedexFee === 50 ? OVERNIGHT_FEDEX_FEE : cfg.overnightFedexFee);
+        }
       })
       .catch(() => {});
   }, []);
@@ -210,17 +212,6 @@ export default function CheckoutGuarantee() {
                 />
                 <p className="text-xs text-muted-foreground mt-0.5">
                   We&apos;ll send order confirmation to this email
-                </p>
-              </div>
-            )}
-
-            {state.deliveryMethod === "driver" && (
-              <div className="rounded-xl border border-primary/30 bg-primary/5 p-3 text-sm">
-                <p className="font-medium text-foreground">Free driver delivery — 50-mile radius from the GWB</p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  We deliver free within roughly 50 miles of the George Washington Bridge.
-                  Outside that area we&apos;ll add a +${driverExtendedFee} long-distance / toll surcharge,
-                  or you can switch to Mail or Overnight Shipping.
                 </p>
               </div>
             )}

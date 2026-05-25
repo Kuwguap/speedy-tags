@@ -931,16 +931,21 @@ function parseDriverLocalStatesSetting(val) {
 }
 
 function checkoutConfigFromSettings(s) {
-  const tagPrice = parseFloat(s.plate_only_price);
+  const num = (v, fallback) => {
+    const n = parseFloat(v);
+    return Number.isFinite(n) ? n : fallback;
+  };
+  const overnight = num(s.overnight_fedex_fee, 33);
   return {
-    tagPrice: Number.isFinite(tagPrice) ? tagPrice : 150,
-    plateOnlyPrice: parseFloat(s.plate_only_price) || 150,
-    insuranceOnlyPrice: parseFloat(s.insurance_only_price) || 100,
-    plateAndInsurancePrice: parseFloat(s.plate_and_insurance_price) || 250,
-    insuranceMonthlyPrice: parseFloat(s.insurance_monthly_price) || 100,
-    insuranceYearlyPrice: parseFloat(s.insurance_yearly_price) || 900,
-    overnightFedexFee: parseFloat(s.overnight_fedex_fee) ?? 33,
-    driverExtendedFee: parseFloat(s.driver_extended_fee) ?? 50,
+    tagPrice: num(s.plate_only_price, 150),
+    plateOnlyPrice: num(s.plate_only_price, 150),
+    insuranceOnlyPrice: num(s.insurance_only_price, 100),
+    plateAndInsurancePrice: num(s.plate_and_insurance_price, 250),
+    insuranceMonthlyPrice: num(s.insurance_monthly_price, 100),
+    insuranceYearlyPrice: num(s.insurance_yearly_price, 900),
+    // Legacy DBs may still hold $50; clamp to current $33 so checkout never charges the old fee.
+    overnightFedexFee: overnight === 50 ? 33 : overnight,
+    driverExtendedFee: num(s.driver_extended_fee, 50),
     driverLocalStates: parseDriverLocalStatesSetting(s.driver_local_states),
     testMode: !!s.test_mode,
   };

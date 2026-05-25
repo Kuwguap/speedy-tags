@@ -46,7 +46,10 @@ export default function CheckoutProduct() {
           plateOnlyPrice: cfg.plateOnlyPrice ?? PLATE_ONLY_PRICE,
           insuranceOnlyPrice: cfg.insuranceOnlyPrice ?? INSURANCE_ONLY_PRICE,
           plateAndInsurancePrice: cfg.plateAndInsurancePrice ?? PLATE_AND_INSURANCE_PRICE,
-          overnightFedexFee: cfg.overnightFedexFee ?? OVERNIGHT_FEDEX_FEE,
+          overnightFedexFee:
+            cfg.overnightFedexFee == null || cfg.overnightFedexFee === 50
+              ? OVERNIGHT_FEDEX_FEE
+              : cfg.overnightFedexFee,
           driverExtendedFee: cfg.driverExtendedFee ?? DRIVER_EXTENDED_FEE,
           driverLocalStates: parseDriverLocalStates(cfg.driverLocalStates),
         });
