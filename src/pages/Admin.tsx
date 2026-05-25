@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, type ServiceRecord, type OrderRecord, type AdminStats, type TelegramDispatcher, type TelegramWebhookInfo } from "@/lib/api";
+import { deliveryMethodLabel, productChoiceLabel } from "@/lib/checkout-pricing";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -68,11 +69,7 @@ function OrderDetailBlock({
   const vehicleLine = (order.year && order.make && order.model)
     ? `${order.year} ${order.make} ${order.model}`
     : (order.carMakeModel || order.vehicleInfo || "—");
-  const deliveryLabel =
-    order.deliveryMethod === "overnight_fedex" ? "FedEx Delivery" :
-    order.deliveryMethod === "driver" ? "Driver Delivery" :
-    order.deliveryMethod === "email" ? "Email Delivery" :
-    (order.deliveryMethod || "—");
+  const deliveryLabel = deliveryMethodLabel(order.deliveryMethod);
 
   const Field = ({ label, value }: { label: string; value: React.ReactNode }) => (
     <div className="grid grid-cols-3 gap-2 py-1.5 border-b border-border/40 last:border-0">
@@ -118,7 +115,7 @@ function OrderDetailBlock({
         <Field label="Service" value={order.serviceTitle} />
         <Field label="Price" value={`$${formatUsd(order.price)}`} />
         <Field label="Payment" value={order.paymentStatus || "—"} />
-        <Field label="Product choice" value={order.productChoice || "—"} />
+        <Field label="Product choice" value={productChoiceLabel(order.productChoice)} />
       </div>
 
       <div className="rounded-lg border border-border/50 p-3">
@@ -261,9 +258,14 @@ export default function Admin() {
   const [loading, setLoading] = useState(false);
   const [settings, setSettings] = useState<{
     tagPrice: number;
+    plateOnlyPrice: number;
+    insuranceOnlyPrice: number;
+    plateAndInsurancePrice: number;
     insuranceMonthlyPrice: number;
     insuranceYearlyPrice: number;
     overnightFedexFee: number;
+    driverExtendedFee: number;
+    driverLocalStates: string[] | string;
     testMode: boolean;
     telegramDispatchers: TelegramDispatcher[];
     fallbackClaimTimeoutMs: number;
@@ -397,9 +399,14 @@ export default function Admin() {
     setSettingsSaving(true);
     try {
       const updated = await api.updateSettings({
+        plateOnlyPrice: settings.plateOnlyPrice,
+        insuranceOnlyPrice: settings.insuranceOnlyPrice,
+        plateAndInsurancePrice: settings.plateAndInsurancePrice,
         insuranceMonthlyPrice: settings.insuranceMonthlyPrice,
         insuranceYearlyPrice: settings.insuranceYearlyPrice,
-        overnightFedexFee: settings.overnightFedexFee ?? 50,
+        overnightFedexFee: settings.overnightFedexFee ?? 33,
+        driverExtendedFee: settings.driverExtendedFee ?? 50,
+        driverLocalStates: settings.driverLocalStates,
         testMode: settings.testMode,
         telegramDispatchers: settings.telegramDispatchers ?? [],
         fallbackClaimTimeoutMs: settings.fallbackClaimTimeoutMs ?? 300000,
@@ -712,41 +719,84 @@ export default function Admin() {
             <Card className="shadow-card border-border/50">
               <CardHeader>
                 <CardTitle className="text-lg flex items-center gap-2"><SettingsIcon className="h-4 w-4" /> Checkout & Pricing</CardTitle>
-                <p className="text-sm text-muted-foreground">Tag price comes from the first service. Configure insurance options and test mode.</p>
+                <p className="text-sm text-muted-foreground">Flat checkout prices and delivery surcharges shown to customers.</p>
               </CardHeader>
               <CardContent className="space-y-6">
                 {settings && (
                   <>
-                    <p className="text-sm text-muted-foreground">Tag price: ${formatUsd(settings.tagPrice)} (from first service in Services)</p>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <div>
-                        <Label>Insurance Monthly ($/month)</Label>
+                        <Label>Plate Only ($)</Label>
                         <Input
                           type="number"
                           step="0.01"
                           min="0"
-                          value={settings.insuranceMonthlyPrice}
-                          onChange={(e) => setSettings((s) => s ? { ...s, insuranceMonthlyPrice: parseFloat(e.target.value) || 0 } : null)}
+                          value={settings.plateOnlyPrice ?? settings.tagPrice}
+                          onChange={(e) => setSettings((s) => s ? { ...s, plateOnlyPrice: parseFloat(e.target.value) || 0 } : null)}
                         />
                       </div>
                       <div>
-                        <Label>Insurance Yearly ($/year)</Label>
+                        <Label>Insurance Only ($)</Label>
                         <Input
                           type="number"
                           step="0.01"
                           min="0"
-                          value={settings.insuranceYearlyPrice}
-                          onChange={(e) => setSettings((s) => s ? { ...s, insuranceYearlyPrice: parseFloat(e.target.value) || 0 } : null)}
+                          value={settings.insuranceOnlyPrice}
+                          onChange={(e) => setSettings((s) => s ? { ...s, insuranceOnlyPrice: parseFloat(e.target.value) || 0 } : null)}
                         />
                       </div>
                       <div>
-                        <Label>FedEx Delivery Fee ($)</Label>
+                        <Label>Plate + Insurance ($)</Label>
                         <Input
                           type="number"
                           step="0.01"
                           min="0"
-                          value={settings.overnightFedexFee ?? 50}
+                          value={settings.plateAndInsurancePrice}
+                          onChange={(e) => setSettings((s) => s ? { ...s, plateAndInsurancePrice: parseFloat(e.target.value) || 0 } : null)}
+                        />
+                      </div>
+                      <div>
+                        <Label>Overnight Shipping Fee ($)</Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={settings.overnightFedexFee ?? 33}
                           onChange={(e) => setSettings((s) => s ? { ...s, overnightFedexFee: parseFloat(e.target.value) || 0 } : null)}
+                        />
+                      </div>
+                      <div>
+                        <Label>Driver Extended Fee ($)</Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={settings.driverExtendedFee ?? 50}
+                          onChange={(e) => setSettings((s) => s ? { ...s, driverExtendedFee: parseFloat(e.target.value) || 0 } : null)}
+                        />
+                      </div>
+                      <div>
+                        <Label>Local driver states (comma-separated)</Label>
+                        <Input
+                          value={
+                            Array.isArray(settings.driverLocalStates)
+                              ? settings.driverLocalStates.join(", ")
+                              : String(settings.driverLocalStates || "NJ")
+                          }
+                          onChange={(e) =>
+                            setSettings((s) =>
+                              s
+                                ? {
+                                    ...s,
+                                    driverLocalStates: e.target.value
+                                      .split(",")
+                                      .map((x) => x.trim().toUpperCase())
+                                      .filter(Boolean),
+                                  }
+                                : null
+                            )
+                          }
+                          placeholder="NJ"
                         />
                       </div>
                     </div>
@@ -1050,7 +1100,7 @@ export default function Admin() {
                             <TableCell className="text-sm">{new Date(o.createdAt).toLocaleDateString()}</TableCell>
                             <TableCell className="font-medium">{o.firstName} {o.lastName}</TableCell>
                             <TableCell>{o.serviceTitle}</TableCell>
-                            <TableCell>{o.deliveryMethod === "overnight_fedex" ? "FedEx Delivery" : o.deliveryMethod === "driver" ? "Driver" : (o.deliveryMethod === "email" ? "Email" : o.deliveryMethod || "—")}</TableCell>
+                            <TableCell>{deliveryMethodLabel(o.deliveryMethod)}</TableCell>
                             <TableCell className="font-mono text-xs">{o.vin}</TableCell>
                             <TableCell>{o.carMakeModel}</TableCell>
                             <TableCell>{o.color}</TableCell>

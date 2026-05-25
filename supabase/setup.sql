@@ -67,11 +67,21 @@ CREATE TABLE IF NOT EXISTS settings (
   value JSONB NOT NULL
 );
 INSERT INTO settings (key, value) VALUES
+  ('plate_only_price', '150'::jsonb),
+  ('insurance_only_price', '100'::jsonb),
+  ('plate_and_insurance_price', '250'::jsonb),
   ('insurance_monthly_price', '100'::jsonb),
   ('insurance_yearly_price', '900'::jsonb),
   ('test_mode', 'false'::jsonb),
-  ('overnight_fedex_fee', '50'::jsonb)
+  ('overnight_fedex_fee', '33'::jsonb),
+  ('driver_extended_fee', '50'::jsonb),
+  ('driver_local_states', '["NJ"]'::jsonb)
 ON CONFLICT (key) DO NOTHING;
+
+-- Bump overnight fee on existing databases
+INSERT INTO settings (key, value) VALUES
+  ('overnight_fedex_fee', '33'::jsonb)
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
 
 -- Storage bucket for order documents (create in Supabase Dashboard: Storage → New bucket → name: order-documents, Public: yes)
 

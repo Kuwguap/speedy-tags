@@ -1,8 +1,9 @@
 import { createContext, useContext, useState, useCallback, ReactNode } from "react";
+import { normalizeProductChoice, type ProductChoice as NormalizedProductChoice } from "@/lib/checkout-pricing";
 
-export type DeliveryMethod = "email" | "driver" | "overnight_fedex";
+export type DeliveryMethod = "email" | "mail" | "driver" | "overnight_fedex";
 export type DeliverySlot = "1hr" | "2hr" | "scheduled";
-export type ProductChoice = "tag_only" | "insurance_monthly" | "insurance_yearly";
+export type ProductChoice = NormalizedProductChoice;
 
 export interface SelectedService {
   id: string;
@@ -34,13 +35,23 @@ const defaultState: CheckoutState = {
   productChoice: "tag_only",
 };
 
+function migrateLoadedState(parsed: Partial<CheckoutState>): CheckoutState {
+  const next: CheckoutState = { ...defaultState, ...parsed };
+  if (parsed.deliveryMethod === ("cash_on_delivery" as DeliveryMethod)) {
+    next.deliveryMethod = "email";
+  }
+  if (parsed.productChoice) {
+    next.productChoice = normalizeProductChoice(parsed.productChoice);
+  }
+  return next;
+}
+
 function loadState(): CheckoutState {
   try {
     const s = sessionStorage.getItem(STORAGE_KEY);
     if (s) {
       const parsed = JSON.parse(s) as Partial<CheckoutState>;
-      if (parsed.deliveryMethod === "cash_on_delivery") parsed.deliveryMethod = "email";
-      return { ...defaultState, ...parsed };
+      return migrateLoadedState(parsed);
     }
   } catch {}
   return defaultState;
@@ -63,7 +74,13 @@ export function CheckoutProvider({ children }: { children: ReactNode }) {
 
   const update = useCallback((partial: Partial<CheckoutState>) => {
     setState((prev) => {
-      const next = { ...prev, ...partial };
+      const next: CheckoutState = {
+        ...prev,
+        ...partial,
+        ...(partial.productChoice != null
+          ? { productChoice: normalizeProductChoice(partial.productChoice) }
+          : {}),
+      };
       saveState(next);
       return next;
     });

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Header } from "@/components/Header";
 import { AddressAutocomplete } from "@/components/AddressAutocomplete";
@@ -8,7 +8,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { useCheckout, type DeliveryMethod, type DeliverySlot } from "@/context/CheckoutContext";
-import { Shield, Lock, Mail, Truck, Package } from "lucide-react";
+import {
+  DEFAULT_DRIVER_LOCAL_STATES,
+  extractStateCode,
+  isExtendedDriverState,
+  parseDriverLocalStates,
+} from "@/lib/checkout-pricing";
+import { api } from "@/lib/api";
+import { DRIVER_EXTENDED_FEE } from "@/lib/constants";
+import { Shield, Lock, Mail, Truck, Package, Send } from "lucide-react";
 
 export default function CheckoutGuarantee() {
   const navigate = useNavigate();
@@ -19,6 +27,45 @@ export default function CheckoutGuarantee() {
   const [phone, setPhone] = useState(state.deliveryPhone);
   const [scheduledAt, setScheduledAt] = useState(state.deliveryScheduledAt || "");
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [driverLocalStates, setDriverLocalStates] = useState<string[]>([
+    ...DEFAULT_DRIVER_LOCAL_STATES,
+  ]);
+  const [driverExtendedFee, setDriverExtendedFee] = useState(DRIVER_EXTENDED_FEE);
+
+  useEffect(() => {
+    api
+      .getCheckoutConfig()
+      .then((cfg) => {
+        setDriverLocalStates(parseDriverLocalStates(cfg.driverLocalStates));
+        if (cfg.driverExtendedFee != null) setDriverExtendedFee(cfg.driverExtendedFee);
+      })
+      .catch(() => {});
+  }, []);
+
+  const fullAddressPreview = useMemo(() => {
+    const line1 = address?.trim() || "";
+    const line2 = address2?.trim() || "";
+    if (!line1) return "";
+    return line2 ? `${line1}, ${line2}` : line1;
+  }, [address, address2]);
+
+  const driverStateCode = useMemo(
+    () => extractStateCode(fullAddressPreview),
+    [fullAddressPreview],
+  );
+
+  const driverExtended = useMemo(
+    () =>
+      state.deliveryMethod === "driver" &&
+      fullAddressPreview.trim() !== "" &&
+      isExtendedDriverState(fullAddressPreview, driverLocalStates),
+    [state.deliveryMethod, fullAddressPreview, driverLocalStates],
+  );
+
+  const needsShippingAddress =
+    state.deliveryMethod === "driver" ||
+    state.deliveryMethod === "overnight_fedex" ||
+    state.deliveryMethod === "mail";
 
   const handleContinue = () => {
     setErrors({});
@@ -28,32 +75,21 @@ export default function CheckoutGuarantee() {
         return;
       }
       update({ deliveryEmail: email });
-    } else if (state.deliveryMethod === "overnight_fedex") {
+    } else if (needsShippingAddress) {
       if (!address?.trim()) {
         setErrors({ address: "Delivery address is required" });
         return;
       }
       if (!phone?.trim()) {
-        setErrors({ phone: "Phone is required for shipping" });
+        setErrors({
+          phone:
+            state.deliveryMethod === "mail"
+              ? "Phone is required for shipping"
+              : "Phone is required for driver to contact you",
+        });
         return;
       }
-      const fullAddress = address2?.trim() ? `${address}, ${address2}` : address;
-      update({
-        deliveryAddress: fullAddress,
-        deliveryPhone: phone,
-        deliveryScheduledAt: "",
-        ...(email?.includes("@") && { deliveryEmail: email }),
-      });
-    } else {
-      if (!address?.trim()) {
-        setErrors({ address: "Delivery address is required" });
-        return;
-      }
-      if (!phone?.trim()) {
-        setErrors({ phone: "Phone is required for driver to contact you" });
-        return;
-      }
-      if (state.deliverySlot === "scheduled" && !scheduledAt) {
+      if (state.deliveryMethod === "driver" && state.deliverySlot === "scheduled" && !scheduledAt) {
         setErrors({ scheduled: "Select date and time for delivery" });
         return;
       }
@@ -61,12 +97,24 @@ export default function CheckoutGuarantee() {
       update({
         deliveryAddress: fullAddress,
         deliveryPhone: phone,
-        deliveryScheduledAt: state.deliverySlot === "scheduled" ? scheduledAt : "",
+        deliveryScheduledAt:
+          state.deliveryMethod === "driver" && state.deliverySlot === "scheduled"
+            ? scheduledAt
+            : "",
         ...(email?.includes("@") && { deliveryEmail: email }),
       });
     }
     navigate("/checkout/product");
   };
+
+  const continueLabel =
+    state.deliveryMethod === "email"
+      ? "Email My Tag"
+      : state.deliveryMethod === "driver"
+        ? "Deliver My Tag"
+        : state.deliveryMethod === "mail"
+          ? "Ship My Tag (Mail)"
+          : "Ship My Tag";
 
   return (
     <div className="min-h-screen bg-background">
@@ -91,7 +139,9 @@ export default function CheckoutGuarantee() {
             </div>
 
             <div>
-              <h3 className="font-display font-semibold text-foreground mb-3">How would you like to receive your tag?</h3>
+              <h3 className="font-display font-semibold text-foreground mb-3">
+                How would you like to receive your tag?
+              </h3>
               <RadioGroup
                 value={state.deliveryMethod}
                 onValueChange={(v) => update({ deliveryMethod: v as DeliveryMethod })}
@@ -103,7 +153,16 @@ export default function CheckoutGuarantee() {
                     <div className="flex items-center gap-2 font-medium">
                       <Mail className="h-4 w-4" /> Email Delivery
                     </div>
-                    <p className="text-xs text-muted-foreground mt-0.5">Instant delivery to your inbox</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">Instant delivery to your inbox — FREE</p>
+                  </Label>
+                </div>
+                <div className="flex items-start space-x-3 p-3 rounded-xl border border-border hover:bg-accent/30 transition-colors">
+                  <RadioGroupItem value="mail" id="mail" />
+                  <Label htmlFor="mail" className="flex-1 cursor-pointer">
+                    <div className="flex items-center gap-2 font-medium">
+                      <Send className="h-4 w-4" /> Mail (3-day priority)
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">USPS priority shipping — FREE</p>
                   </Label>
                 </div>
                 <div className="flex items-start space-x-3 p-3 rounded-xl border border-border hover:bg-accent/30 transition-colors">
@@ -112,16 +171,18 @@ export default function CheckoutGuarantee() {
                     <div className="flex items-center gap-2 font-medium">
                       <Truck className="h-4 w-4" /> Driver Delivery
                     </div>
-                    <p className="text-xs text-muted-foreground mt-0.5">1hr, 2hr, or schedule (NY time)</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Under 1 hour in NJ — FREE · Out-of-state / over 1 hr — +${driverExtendedFee}
+                    </p>
                   </Label>
                 </div>
                 <div className="flex items-start space-x-3 p-3 rounded-xl border border-border hover:bg-accent/30 transition-colors">
                   <RadioGroupItem value="overnight_fedex" id="overnight_fedex" />
                   <Label htmlFor="overnight_fedex" className="flex-1 cursor-pointer">
                     <div className="flex items-center gap-2 font-medium">
-                      <Package className="h-4 w-4" /> FedEx Delivery
+                      <Package className="h-4 w-4" /> Overnight Shipping
                     </div>
-                    <p className="text-xs text-muted-foreground mt-0.5">+$50 — Next business day</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">+$33 — 1-day overnight</p>
                   </Label>
                 </div>
               </RadioGroup>
@@ -142,7 +203,7 @@ export default function CheckoutGuarantee() {
               </div>
             )}
 
-            {(state.deliveryMethod === "driver" || state.deliveryMethod === "overnight_fedex") && (
+            {needsShippingAddress && (
               <div>
                 <Label htmlFor="confirmation-email">Email for order confirmation (optional)</Label>
                 <Input
@@ -153,7 +214,9 @@ export default function CheckoutGuarantee() {
                   onChange={(e) => setEmail(e.target.value)}
                   className="mt-1"
                 />
-                <p className="text-xs text-muted-foreground mt-0.5">We&apos;ll send order confirmation to this email</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  We&apos;ll send order confirmation to this email
+                </p>
               </div>
             )}
 
@@ -166,7 +229,9 @@ export default function CheckoutGuarantee() {
                 >
                   <div className="flex items-center space-x-2">
                     <RadioGroupItem value="1hr" id="1hr" />
-                    <Label htmlFor="1hr" className="text-sm">1 Hour</Label>
+                    <Label htmlFor="1hr" className="text-sm">
+                      1 Hour <span className="text-muted-foreground">(NJ)</span>
+                    </Label>
                   </div>
                   <div className="flex items-center space-x-2">
                     <RadioGroupItem value="2hr" id="2hr" />
@@ -187,12 +252,25 @@ export default function CheckoutGuarantee() {
                       onChange={(e) => setScheduledAt(e.target.value)}
                       className={errors.scheduled ? "border-destructive" : ""}
                     />
-                    {errors.scheduled && <p className="text-destructive text-xs mt-1">{errors.scheduled}</p>}
+                    {errors.scheduled && (
+                      <p className="text-destructive text-xs mt-1">{errors.scheduled}</p>
+                    )}
                   </div>
                 )}
+              </div>
+            )}
+
+            {needsShippingAddress && (
+              <div className="space-y-3">
                 <div>
-                  <Label htmlFor="delivery-address">Delivery Address</Label>
-                  <p className="text-xs text-muted-foreground mb-1">Start typing to see suggestions, or enter manually</p>
+                  <Label htmlFor="delivery-address">
+                    {state.deliveryMethod === "overnight_fedex"
+                      ? "Shipping Address"
+                      : "Delivery Address"}
+                  </Label>
+                  <p className="text-xs text-muted-foreground mb-1">
+                    Start typing to see suggestions, or enter manually
+                  </p>
                   <AddressAutocomplete
                     id="delivery-address"
                     value={address}
@@ -200,49 +278,14 @@ export default function CheckoutGuarantee() {
                     placeholder="123 Main St, City, State ZIP"
                     error={!!errors.address}
                   />
-                  {errors.address && <p className="text-destructive text-xs mt-1">{errors.address}</p>}
+                  {errors.address && (
+                    <p className="text-destructive text-xs mt-1">{errors.address}</p>
+                  )}
                 </div>
                 <div>
                   <Label htmlFor="delivery-address-2">Address line 2 (apt / suite / floor)</Label>
                   <Input
                     id="delivery-address-2"
-                    placeholder="Apt 4B, Building 2"
-                    value={address2}
-                    onChange={(e) => setAddress2(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="delivery-phone">Phone (for driver)</Label>
-                  <Input
-                    id="delivery-phone"
-                    placeholder="(555) 123-4567"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    className={errors.phone ? "border-destructive" : ""}
-                  />
-                  {errors.phone && <p className="text-destructive text-xs mt-1">{errors.phone}</p>}
-                </div>
-              </div>
-            )}
-
-            {state.deliveryMethod === "overnight_fedex" && (
-              <div className="space-y-3">
-                <div>
-                  <Label htmlFor="delivery-address-fedex">Shipping Address</Label>
-                  <p className="text-xs text-muted-foreground mb-1">Start typing to see suggestions, or enter manually</p>
-                  <AddressAutocomplete
-                    id="delivery-address-fedex"
-                    value={address}
-                    onChange={setAddress}
-                    placeholder="123 Main St, City, State ZIP"
-                    error={!!errors.address}
-                  />
-                  {errors.address && <p className="text-destructive text-xs mt-1">{errors.address}</p>}
-                </div>
-                <div>
-                  <Label htmlFor="delivery-address-fedex-2">Address line 2 (apt / suite / floor)</Label>
-                  <Input
-                    id="delivery-address-fedex-2"
                     placeholder="Apt 4B, Building 2"
                     value={address2}
                     onChange={(e) => setAddress2(e.target.value)}
@@ -257,13 +300,49 @@ export default function CheckoutGuarantee() {
                     onChange={(e) => setPhone(e.target.value)}
                     className={errors.phone ? "border-destructive" : ""}
                   />
-                  {errors.phone && <p className="text-destructive text-xs mt-1">{errors.phone}</p>}
+                  {errors.phone && (
+                    <p className="text-destructive text-xs mt-1">{errors.phone}</p>
+                  )}
                 </div>
               </div>
             )}
 
+            {state.deliveryMethod === "driver" && fullAddressPreview.trim() !== "" && (
+              <div
+                className={`rounded-xl border p-3 text-sm ${
+                  driverExtended
+                    ? "border-amber-500/50 bg-amber-500/10 text-amber-950 dark:text-amber-100"
+                    : "border-primary/30 bg-primary/5 text-foreground"
+                }`}
+              >
+                {driverExtended ? (
+                  <>
+                    <p className="font-medium">
+                      Out-of-state delivery detected
+                      {driverStateCode ? ` (${driverStateCode})` : ""}
+                    </p>
+                    <p className="text-xs mt-1 opacity-90">
+                      Addresses outside {driverLocalStates.join(", ")} add a +$
+                      {driverExtendedFee} long-distance / toll surcharge at checkout. Switch to Mail or
+                      Overnight if you prefer.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="font-medium">
+                      Local driver delivery — FREE
+                      {driverStateCode ? ` (${driverStateCode})` : ""}
+                    </p>
+                    <p className="text-xs mt-1 text-muted-foreground">
+                      NJ and nearby under 1 hour: no delivery surcharge.
+                    </p>
+                  </>
+                )}
+              </div>
+            )}
+
             <Button onClick={handleContinue} className="w-full" size="lg">
-              {state.deliveryMethod === "email" ? "Email My Tag" : state.deliveryMethod === "driver" ? "Deliver My Tag" : "Ship My Tag"}
+              {continueLabel}
             </Button>
           </CardContent>
         </Card>

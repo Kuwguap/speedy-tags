@@ -20,10 +20,15 @@ const ACTIVITY_FILE = join(DATA_DIR, "activity.json");
 const SETTINGS_FILE = join(DATA_DIR, "settings.json");
 
 const defaultSettings = {
+  plate_only_price: 150,
+  insurance_only_price: 100,
+  plate_and_insurance_price: 250,
   insurance_monthly_price: 100,
   insurance_yearly_price: 900,
   test_mode: false,
-  overnight_fedex_fee: 50,
+  overnight_fedex_fee: 33,
+  driver_extended_fee: 50,
+  driver_local_states: ["NJ"],
   fallback_claim_timeout_ms: 300000,
   payment_links: {},
   payment_display: {},
@@ -538,9 +543,22 @@ async function loadSettings() {
     const out = { ...defaultSettings, telegram_dispatchers: [] };
     (data || []).forEach((r) => {
       if (r.key === "test_mode") out.test_mode = r.value === true || String(r.value) === "true";
-      else if (["insurance_monthly_price", "insurance_yearly_price", "overnight_fedex_fee", "fallback_claim_timeout_ms"].includes(r.key))
+      else if (
+        [
+          "plate_only_price",
+          "insurance_only_price",
+          "plate_and_insurance_price",
+          "insurance_monthly_price",
+          "insurance_yearly_price",
+          "overnight_fedex_fee",
+          "driver_extended_fee",
+          "fallback_claim_timeout_ms",
+        ].includes(r.key)
+      ) {
         out[r.key] = typeof r.value === "number" ? r.value : parseFloat(r.value) || out[r.key];
-      else if (r.key === "telegram_dispatchers") out.telegram_dispatchers = normalizeDispatchers(r.value);
+      } else if (r.key === "driver_local_states") {
+        out.driver_local_states = parseDriverLocalStatesSetting(r.value);
+      } else if (r.key === "telegram_dispatchers") out.telegram_dispatchers = normalizeDispatchers(r.value);
       else if (r.key === "payment_links") {
         const v = typeof r.value === "string" ? (() => { try { return JSON.parse(r.value); } catch { return {}; } })() : r.value;
         out.payment_links = typeof v === "object" && v !== null ? v : {};
@@ -869,6 +887,59 @@ function escapeTelegramHtml(val) {
     .replace(/>/g, "&gt;");
 }
 
+function productChoiceTitle(choice) {
+  const c = String(choice || "").trim();
+  if (c === "insurance_only") return "Insurance Only";
+  if (c === "tag_and_insurance" || c === "insurance_monthly" || c === "insurance_yearly") {
+    return "Plate + Insurance";
+  }
+  return "Plate Only";
+}
+
+function deliveryMethodLabel(method) {
+  const m = String(method || "email");
+  if (m === "mail") return "Mail (3-day priority)";
+  if (m === "overnight_fedex") return "FedEx Overnight";
+  if (m === "driver") return "Driver Delivery";
+  return "Email Delivery";
+}
+
+function parseDriverLocalStatesSetting(val) {
+  if (Array.isArray(val)) {
+    return val.map((s) => String(s || "").trim().toUpperCase()).filter(Boolean);
+  }
+  if (typeof val === "string" && val.trim()) {
+    if (val.trim().startsWith("[")) {
+      try {
+        return parseDriverLocalStatesSetting(JSON.parse(val));
+      } catch {
+        return ["NJ"];
+      }
+    }
+    return val
+      .split(",")
+      .map((s) => s.trim().toUpperCase())
+      .filter(Boolean);
+  }
+  return ["NJ"];
+}
+
+function checkoutConfigFromSettings(s) {
+  const tagPrice = parseFloat(s.plate_only_price);
+  return {
+    tagPrice: Number.isFinite(tagPrice) ? tagPrice : 150,
+    plateOnlyPrice: parseFloat(s.plate_only_price) || 150,
+    insuranceOnlyPrice: parseFloat(s.insurance_only_price) || 100,
+    plateAndInsurancePrice: parseFloat(s.plate_and_insurance_price) || 250,
+    insuranceMonthlyPrice: parseFloat(s.insurance_monthly_price) || 100,
+    insuranceYearlyPrice: parseFloat(s.insurance_yearly_price) || 900,
+    overnightFedexFee: parseFloat(s.overnight_fedex_fee) ?? 33,
+    driverExtendedFee: parseFloat(s.driver_extended_fee) ?? 50,
+    driverLocalStates: parseDriverLocalStatesSetting(s.driver_local_states),
+    testMode: !!s.test_mode,
+  };
+}
+
 function formatDispatchMessage(order, phoneLink) {
   const o = order;
   const name = escapeTelegramHtml(`${(o.firstName || "").trim()} ${(o.lastName || "").trim()}`.trim() || "—");
@@ -879,11 +950,7 @@ function formatDispatchMessage(order, phoneLink) {
   const deliveryStreet = escapeTelegramHtml(deliv.street || o.deliveryAddress || "—");
   const deliveryCityStateZip = escapeTelegramHtml(deliv.cityStateZip || "—");
   const car = escapeTelegramHtml((o.year && o.make && o.model) ? `${o.year} ${o.make} ${o.model}` : (o.carMakeModel || o.vehicleInfo || "—"));
-  const deliveryMethodLabel = o.deliveryMethod === "overnight_fedex"
-    ? "FedEx Delivery"
-    : o.deliveryMethod === "driver"
-      ? "Driver Delivery"
-      : "Email Delivery";
+  const deliveryMethodLabelText = deliveryMethodLabel(o.deliveryMethod);
   const sameDeliv =
     !!(o.deliverySameAsRegistration ?? o.delivery_same_as_registration)
     || (
@@ -899,7 +966,7 @@ function formatDispatchMessage(order, phoneLink) {
       ? `✅ <b>Accepted by:</b> ${escapeTelegramHtml(acceptedByName)}${acceptedAtLabel ? ` <i>at ${escapeTelegramHtml(acceptedAtLabel)}</i>` : ""}`
       : null,
     acceptedByName ? "" : null,
-    "<b>Delivery method:</b> " + deliveryMethodLabel,
+    "<b>Delivery method:</b> " + deliveryMethodLabelText,
     o.deliveryEmail ? "<b>Delivery email:</b> " + escapeTelegramHtml(o.deliveryEmail) : null,
     "",
     "<b>Name:</b> " + name,
@@ -1106,9 +1173,11 @@ function buildSuccessEmailHtml(order) {
   const isEmailDelivery = order.deliveryMethod === "email";
   const deliveryText = isEmailDelivery
     ? "Your temporary tag package has been processed and will be delivered to your email shortly. Check your inbox for your temp tag, registration, and insurance card."
-    : order.deliveryMethod === "overnight_fedex"
-      ? "Your order is confirmed. We'll ship your temp tag via FedEx delivery next business day."
-      : "Your order is confirmed. A driver will deliver your temp tag in the time frame you selected.";
+    : order.deliveryMethod === "mail"
+      ? "Your order is confirmed. We'll ship your temp tag via USPS 3-day priority mail."
+      : order.deliveryMethod === "overnight_fedex"
+        ? "Your order is confirmed. We'll ship your temp tag via overnight delivery."
+        : "Your order is confirmed. A driver will deliver your temp tag in the time frame you selected.";
   return `
 <!DOCTYPE html>
 <html>
@@ -1197,12 +1266,7 @@ function buildNewLeadEmailHtml(order) {
     o.year && o.make && o.model
       ? `${o.year} ${o.make} ${o.model}${o.color ? `, ${o.color}` : ""}`
       : o.carMakeModel || o.vehicleInfo || "—";
-  const deliveryMethodLabel =
-    o.deliveryMethod === "overnight_fedex"
-      ? "FedEx Overnight"
-      : o.deliveryMethod === "driver"
-        ? "Driver Delivery"
-        : "Email Delivery";
+  const deliveryLabel = deliveryMethodLabel(o.deliveryMethod);
   const esc = (v) =>
     String(v ?? "—")
       .replace(/&/g, "&amp;")
@@ -1226,7 +1290,7 @@ function buildNewLeadEmailHtml(order) {
             ${row("Customer", name)}
             ${row("Phone", o.phone)}
             ${row("Delivery email", o.deliveryEmail)}
-            ${row("Delivery method", deliveryMethodLabel)}
+            ${row("Delivery method", deliveryLabel)}
             ${row("Registration address", o.address)}
             ${row("Delivery address", o.deliveryAddress || o.delivery_address)}
             ${row("VIN", o.vin)}
@@ -1294,12 +1358,7 @@ function formatNewLeadTelegramMessage(order) {
     o.year && o.make && o.model
       ? `${o.year} ${o.make} ${o.model}${o.color ? `, ${o.color}` : ""}`
       : o.carMakeModel || o.vehicleInfo || "—";
-  const deliveryMethodLabel =
-    o.deliveryMethod === "overnight_fedex"
-      ? "FedEx Overnight"
-      : o.deliveryMethod === "driver"
-        ? "Driver Delivery"
-        : "Email Delivery";
+  const deliveryLabel = deliveryMethodLabel(o.deliveryMethod);
   const priceLine = o.price != null ? `$${Number(o.price).toFixed(2)}` : "—";
   const lines = [
     "🆕 <b>New Lead</b>",
@@ -1308,7 +1367,7 @@ function formatNewLeadTelegramMessage(order) {
     `<b>Customer:</b> ${escapeTelegramHtml(name)}`,
     o.phone ? `<b>Phone:</b> ${escapeTelegramHtml(o.phone)}` : null,
     o.deliveryEmail ? `<b>Delivery email:</b> ${escapeTelegramHtml(o.deliveryEmail)}` : null,
-    `<b>Delivery method:</b> ${escapeTelegramHtml(deliveryMethodLabel)}`,
+    `<b>Delivery method:</b> ${escapeTelegramHtml(deliveryLabel)}`,
     o.address ? `<b>Registration address:</b> ${escapeTelegramHtml(o.address)}` : null,
     (o.deliveryAddress || o.delivery_address)
       ? `<b>Delivery address:</b> ${escapeTelegramHtml(o.deliveryAddress || o.delivery_address)}`
@@ -1374,7 +1433,7 @@ function formatOrderMessage(order) {
     `<b>Product:</b> ${order.serviceTitle} — $${(order.price || 0).toFixed(2)}`,
     "",
     "<b>Delivery:</b>",
-    `• Method: ${order.deliveryMethod === "overnight_fedex" ? "FedEx Delivery" : order.deliveryMethod === "driver" ? "Driver" : (order.deliveryMethod || "Email")}`,
+    `• Method: ${deliveryMethodLabel(order.deliveryMethod)}`,
     order.deliveryEmail ? `• Email: ${order.deliveryEmail}` : null,
     order.deliverySlot ? `• Slot: ${order.deliverySlot}` : null,
     order.deliveryScheduledAt ? `• Scheduled: ${order.deliveryScheduledAt}` : null,
@@ -2002,19 +2061,11 @@ app.get("/api/services", async (req, res) => {
   }
 });
 
-// Public: Checkout config (tag price from first service, insurance from settings, test mode)
+// Public: Checkout config (flat product prices + delivery fees from settings)
 app.get("/api/checkout/config", async (req, res) => {
   try {
-    const [s, services] = await Promise.all([loadSettings(), loadServices()]);
-    const firstService = services[0];
-    const tagPrice = firstService ? (parseFloat(firstService.price) || 150) : 150;
-    res.json({
-      tagPrice,
-      insuranceMonthlyPrice: s.insurance_monthly_price,
-      insuranceYearlyPrice: s.insurance_yearly_price,
-      overnightFedexFee: s.overnight_fedex_fee ?? 50,
-      testMode: s.test_mode,
-    });
+    const s = await loadSettings();
+    res.json(checkoutConfigFromSettings(s));
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -2023,8 +2074,21 @@ app.get("/api/checkout/config", async (req, res) => {
 // Stripe Checkout: create session and redirect to payment (or test URL if test mode)
 app.post("/api/checkout/create-session", async (req, res) => {
   const body = req.body;
-  if ((body.deliveryMethod === "email" || !body.deliveryMethod) && (!body.deliveryEmail || !String(body.deliveryEmail).includes("@"))) {
+  const dm = String(body.deliveryMethod || "email");
+  if (dm === "email" && (!body.deliveryEmail || !String(body.deliveryEmail).includes("@"))) {
     return res.status(400).json({ error: "Delivery email is required for email delivery." });
+  }
+  if (
+    (dm === "mail" || dm === "driver" || dm === "overnight_fedex") &&
+    (!body.deliveryAddress || !String(body.deliveryAddress).trim())
+  ) {
+    return res.status(400).json({ error: "Delivery address is required for this delivery method." });
+  }
+  if (
+    (dm === "mail" || dm === "driver" || dm === "overnight_fedex") &&
+    (!body.deliveryPhone || !String(body.deliveryPhone).trim())
+  ) {
+    return res.status(400).json({ error: "Phone is required for this delivery method." });
   }
   const amount = parseFloat(body.amount);
   if (isNaN(amount) || amount <= 0) return res.status(400).json({ error: "Invalid amount" });
@@ -2055,7 +2119,7 @@ app.post("/api/checkout/create-session", async (req, res) => {
       deliveryPhone: body.deliveryPhone || "",
       productChoice: body.productChoice,
       serviceId: body.serviceId || "checkout",
-      serviceTitle: body.serviceTitle || (body.productChoice === "tag_only" ? "Temporary Tag" : "Tag + Insurance"),
+      serviceTitle: body.serviceTitle || productChoiceTitle(body.productChoice),
       amount: String(amount),
     };
     const order = {
@@ -2093,7 +2157,17 @@ app.post("/api/checkout/create-session", async (req, res) => {
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
       payment_method_types: ["card"],
-      line_items: [{ price_data: { currency: "usd", unit_amount: Math.round(amount * 100), product_data: { name: "Temporary Tag", description: "NJ temp tag" } }, quantity: 1 }],
+      line_items: [{
+        price_data: {
+          currency: "usd",
+          unit_amount: Math.round(amount * 100),
+          product_data: {
+            name: productChoiceTitle(body.productChoice),
+            description: `${deliveryMethodLabel(body.deliveryMethod)} — TriState Tags`,
+          },
+        },
+        quantity: 1,
+      }],
       success_url: `${baseUrl}/checkout/tag-info?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${baseUrl}/checkout/product`,
       metadata: {
@@ -2137,7 +2211,7 @@ app.get("/api/checkout/verify", async (req, res) => {
     const existing = await findOrderByStripeSessionId(sessionId);
     if (existing) return res.json(useSupabase() ? orderRowToApi(existing) : existing);
 
-    const serviceTitle = meta.serviceTitle || (meta.productChoice === "insurance_monthly" ? "Tag + Insurance (Monthly)" : meta.productChoice === "insurance_yearly" ? "Tag + Insurance (Yearly)" : "Temporary Tag");
+    const serviceTitle = meta.serviceTitle || productChoiceTitle(meta.productChoice);
     const order = {
       id: randomUUID(),
       serviceId: meta.serviceId || "checkout",
@@ -2682,18 +2756,14 @@ app.delete("/api/admin/services/:id", authMiddleware, async (req, res) => {
 
 app.get("/api/admin/settings", authMiddleware, async (req, res) => {
   try {
-    const [s, services] = await Promise.all([loadSettings(), loadServices()]);
-    const firstService = services[0];
-    const tagPrice = firstService ? (parseFloat(firstService.price) || 150) : 150;
+    const s = await loadSettings();
+    const pricing = checkoutConfigFromSettings(s);
     const telegramDispatchers = Array.isArray(s.telegram_dispatchers) ? s.telegram_dispatchers : [];
     const fallbackMs = s.fallback_claim_timeout_ms ?? FALLBACK_CLAIM_TIMEOUT_MS;
     const paymentLinksRaw = s.payment_links && typeof s.payment_links === "object" ? s.payment_links : {};
     const paymentDisplayRaw = s.payment_display && typeof s.payment_display === "object" ? s.payment_display : {};
     res.json({
-      tagPrice,
-      insuranceMonthlyPrice: s.insurance_monthly_price,
-      insuranceYearlyPrice: s.insurance_yearly_price,
-      overnightFedexFee: s.overnight_fedex_fee ?? 50,
+      ...pricing,
       testMode: s.test_mode,
       telegramDispatchers,
       fallbackClaimTimeoutMs: fallbackMs,
@@ -2721,9 +2791,16 @@ app.patch("/api/admin/settings", authMiddleware, async (req, res) => {
   const body = req.body;
   try {
     const updates = {};
+    if (body.plateOnlyPrice != null) updates.plate_only_price = parseFloat(body.plateOnlyPrice);
+    if (body.insuranceOnlyPrice != null) updates.insurance_only_price = parseFloat(body.insuranceOnlyPrice);
+    if (body.plateAndInsurancePrice != null) updates.plate_and_insurance_price = parseFloat(body.plateAndInsurancePrice);
     if (body.insuranceMonthlyPrice != null) updates.insurance_monthly_price = parseFloat(body.insuranceMonthlyPrice);
     if (body.insuranceYearlyPrice != null) updates.insurance_yearly_price = parseFloat(body.insuranceYearlyPrice);
     if (body.overnightFedexFee != null) updates.overnight_fedex_fee = parseFloat(body.overnightFedexFee);
+    if (body.driverExtendedFee != null) updates.driver_extended_fee = parseFloat(body.driverExtendedFee);
+    if (body.driverLocalStates != null) {
+      updates.driver_local_states = parseDriverLocalStatesSetting(body.driverLocalStates);
+    }
     if (body.fallbackClaimTimeoutMs != null) {
       const v = parseInt(String(body.fallbackClaimTimeoutMs), 10);
       if (!isNaN(v) && v > 0) updates.fallback_claim_timeout_ms = v;
@@ -2758,18 +2835,14 @@ app.patch("/api/admin/settings", authMiddleware, async (req, res) => {
       });
     }
     await saveSettings(updates);
-    const [s, services] = await Promise.all([loadSettings(), loadServices()]);
-    const firstService = services[0];
-    const tagPrice = firstService ? (parseFloat(firstService.price) || 150) : 150;
+    const s = await loadSettings();
+    const pricing = checkoutConfigFromSettings(s);
     const telegramDispatchers = Array.isArray(s.telegram_dispatchers) ? s.telegram_dispatchers : [];
     const fallbackMs = s.fallback_claim_timeout_ms ?? FALLBACK_CLAIM_TIMEOUT_MS;
     const paymentLinks = s.payment_links && typeof s.payment_links === "object" ? s.payment_links : {};
     const paymentDisplay = s.payment_display && typeof s.payment_display === "object" ? s.payment_display : {};
     res.json({
-      tagPrice,
-      insuranceMonthlyPrice: s.insurance_monthly_price,
-      insuranceYearlyPrice: s.insurance_yearly_price,
-      overnightFedexFee: s.overnight_fedex_fee ?? 50,
+      ...pricing,
       testMode: s.test_mode,
       telegramDispatchers,
       fallbackClaimTimeoutMs: fallbackMs,

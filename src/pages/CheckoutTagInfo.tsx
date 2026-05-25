@@ -3,6 +3,7 @@ import { useSearchParams, useNavigate } from "react-router-dom";
 import { Header } from "@/components/Header";
 import { AddressAutocomplete } from "@/components/AddressAutocomplete";
 import { api, type TagInfoFields } from "@/lib/api";
+import { normalizeProductChoice } from "@/lib/checkout-pricing";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -67,7 +68,7 @@ export default function CheckoutTagInfo() {
   const [parseText, setParseText] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const needsOwnInsurance = order?.productChoice === "tag_only";
+  const needsOwnInsurance = normalizeProductChoice(order?.productChoice) === "tag_only";
 
   // Only override fields the AI is confident about (non-empty strings).
   const applyParsedFields = (fields: Partial<TagInfoFields>) => {
@@ -259,7 +260,10 @@ export default function CheckoutTagInfo() {
       const isDriver = updated?.deliveryMethod === "driver";
       const isOvernightFedex = updated?.deliveryMethod === "overnight_fedex";
       const isEmail = updated?.deliveryMethod === "email";
-      navigate(`/checkout/documents?orderId=${order.id}${isDriver ? "&driver=1" : ""}${isOvernightFedex ? "&fedex=1" : ""}${isEmail ? "&email=1" : ""}`);
+      const isMail = updated?.deliveryMethod === "mail";
+      navigate(
+        `/checkout/documents?orderId=${order.id}${isDriver ? "&driver=1" : ""}${isOvernightFedex ? "&fedex=1" : ""}${isEmail ? "&email=1" : ""}${isMail ? "&mail=1" : ""}`,
+      );
     } catch (err) {
       toast({
         title: "Failed to submit",

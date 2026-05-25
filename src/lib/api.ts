@@ -28,7 +28,18 @@ export const api = {
     "/services"
   ),
   getCheckoutConfig: () =>
-    request<{ tagPrice: number; insuranceMonthlyPrice: number; insuranceYearlyPrice: number; testMode: boolean }>("/checkout/config"),
+    request<{
+      tagPrice: number;
+      plateOnlyPrice: number;
+      insuranceOnlyPrice: number;
+      plateAndInsurancePrice: number;
+      insuranceMonthlyPrice: number;
+      insuranceYearlyPrice: number;
+      overnightFedexFee: number;
+      driverExtendedFee: number;
+      driverLocalStates: string[] | string;
+      testMode: boolean;
+    }>("/checkout/config"),
   createCheckoutSession: (data: Record<string, unknown>) =>
     request<{ url: string }>("/checkout/create-session", {
       method: "POST",
@@ -76,8 +87,37 @@ export const api = {
   getSecurePhone: (orderId: string) =>
     request<{ iv: string; data: string }>(`/secure/phone/${encodeURIComponent(orderId)}`),
   getSettings: () =>
-    request<{ tagPrice: number; insuranceMonthlyPrice: number; insuranceYearlyPrice: number; overnightFedexFee: number; testMode: boolean; telegramDispatchers: TelegramDispatcher[]; fallbackClaimTimeoutMs: number; paymentLinks: { venmo: string; cashApp: string; paypal: string; zelle: string; applePay: string }; paymentDisplay: { venmo: string; cashApp: string; paypal: string; zelle: string; applePay: string } }>("/admin/settings"),
-  updateSettings: (s: { insuranceMonthlyPrice?: number; insuranceYearlyPrice?: number; overnightFedexFee?: number; testMode?: boolean; telegramDispatchers?: TelegramDispatcher[]; fallbackClaimTimeoutMs?: number; paymentLinks?: { venmo: string; cashApp: string; paypal: string; zelle: string; applePay: string }; paymentDisplay?: { venmo: string; cashApp: string; paypal: string; zelle: string; applePay: string } }) =>
+    request<{
+      tagPrice: number;
+      plateOnlyPrice: number;
+      insuranceOnlyPrice: number;
+      plateAndInsurancePrice: number;
+      insuranceMonthlyPrice: number;
+      insuranceYearlyPrice: number;
+      overnightFedexFee: number;
+      driverExtendedFee: number;
+      driverLocalStates: string[] | string;
+      testMode: boolean;
+      telegramDispatchers: TelegramDispatcher[];
+      fallbackClaimTimeoutMs: number;
+      paymentLinks: { venmo: string; cashApp: string; paypal: string; zelle: string; applePay: string };
+      paymentDisplay: { venmo: string; cashApp: string; paypal: string; zelle: string; applePay: string };
+    }>("/admin/settings"),
+  updateSettings: (s: {
+    plateOnlyPrice?: number;
+    insuranceOnlyPrice?: number;
+    plateAndInsurancePrice?: number;
+    insuranceMonthlyPrice?: number;
+    insuranceYearlyPrice?: number;
+    overnightFedexFee?: number;
+    driverExtendedFee?: number;
+    driverLocalStates?: string[] | string;
+    testMode?: boolean;
+    telegramDispatchers?: TelegramDispatcher[];
+    fallbackClaimTimeoutMs?: number;
+    paymentLinks?: { venmo: string; cashApp: string; paypal: string; zelle: string; applePay: string };
+    paymentDisplay?: { venmo: string; cashApp: string; paypal: string; zelle: string; applePay: string };
+  }) =>
     request<{ tagPrice: number; insuranceMonthlyPrice: number; insuranceYearlyPrice: number; overnightFedexFee: number; testMode: boolean; telegramDispatchers: TelegramDispatcher[]; fallbackClaimTimeoutMs: number; paymentLinks: { venmo: string; cashApp: string; paypal: string; zelle: string; applePay: string }; paymentDisplay: { venmo: string; cashApp: string; paypal: string; zelle: string; applePay: string } }>("/admin/settings", { method: "PATCH", body: JSON.stringify(s) }),
   getTelegramWebhook: () =>
     request<{ info: TelegramWebhookInfo; expectedUrl: string }>("/admin/telegram/webhook"),

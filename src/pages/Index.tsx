@@ -358,7 +358,7 @@ export default function Index() {
               <Package className="h-10 w-10 text-primary shrink-0" />
               <div>
                 <h3 className="font-display font-semibold text-foreground mb-1">FedEx Delivery</h3>
-                <p className="text-sm text-muted-foreground">Next business day delivery anywhere. Add $50 at checkout.</p>
+                <p className="text-sm text-muted-foreground">Next business day delivery anywhere. Add $33 at checkout.</p>
               </div>
             </div>
           </div>
@@ -476,6 +476,9 @@ export default function Index() {
                 </li>
               ))}
             </ul>
+            <p className="text-xs text-muted-foreground mb-4">
+              Need insurance too? Choose Plate + Insurance ($250) or Insurance Only ($100) at checkout.
+            </p>
             <a
               href="/checkout"
               className="inline-flex items-center gap-2 rounded-lg bg-primary px-8 py-4 font-bold text-primary-foreground hover:bg-primary/90 transition-all w-full justify-center"
