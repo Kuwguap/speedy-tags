@@ -8,11 +8,16 @@ interface SeoOptions {
   ogImage?: string;
 }
 
-const SITE_ORIGIN = "https://tristatetag.com";
+const FALLBACK_ORIGIN = "https://tristatetags.com";
 const DEFAULT_TITLE =
   "NJ Temporary Tags Same Day | TriStateTags — Licensed NJ Dealer";
 const DEFAULT_DESCRIPTION =
   "Get your New Jersey temporary plate and registration the same day. NJ MVC licensed dealer. Instant email delivery, free 50-mile driver delivery, or +$33 overnight shipping. From $150.";
+
+function getSiteOrigin(): string {
+  if (typeof window === "undefined") return FALLBACK_ORIGIN;
+  return window.location.origin || FALLBACK_ORIGIN;
+}
 
 function setMetaByName(name: string, content: string) {
   let el = document.querySelector<HTMLMetaElement>(`meta[name="${name}"]`);
@@ -58,14 +63,15 @@ export function useSeo({
   ogImage,
 }: SeoOptions) {
   useEffect(() => {
+    const siteOrigin = getSiteOrigin();
     const finalTitle = title ?? DEFAULT_TITLE;
     const finalDescription = description ?? DEFAULT_DESCRIPTION;
     const finalCanonical = canonical
       ? canonical.startsWith("http")
         ? canonical
-        : `${SITE_ORIGIN}${canonical.startsWith("/") ? "" : "/"}${canonical}`
-      : `${SITE_ORIGIN}${window.location.pathname}`;
-    const finalImage = ogImage ?? `${SITE_ORIGIN}/og-image.png`;
+        : `${siteOrigin}${canonical.startsWith("/") ? "" : "/"}${canonical}`
+      : `${siteOrigin}${window.location.pathname}`;
+    const finalImage = ogImage ?? `${siteOrigin}/og-image.png`;
 
     document.title = finalTitle;
     setMetaByName("description", finalDescription);

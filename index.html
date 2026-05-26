@@ -7,7 +7,44 @@
 
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="apple-touch-icon" href="/favicon.ico" />
-    <link rel="canonical" href="https://tristatetag.com/" />
+    <link rel="canonical" href="https://tristatetags.com/" />
+
+    <script>
+      // Self-canonicalize: both tristatetag.com and tristatetags.com point to
+      // this build, so each domain should canonicalize to itself instead of
+      // the other one. Runs synchronously before React mounts so crawlers and
+      // social scrapers see the correct origin.
+      (function () {
+        try {
+          var origin = window.location.origin;
+          if (!origin) return;
+          var path = window.location.pathname || "/";
+          var canonicalHref = origin + path;
+          var canon = document.querySelector('link[rel="canonical"]');
+          if (canon) canon.setAttribute("href", canonicalHref);
+          ["og:url", "og:image"].forEach(function (prop) {
+            var el = document.querySelector('meta[property="' + prop + '"]');
+            if (!el) return;
+            var v = el.getAttribute("content") || "";
+            el.setAttribute(
+              "content",
+              v.replace(/^https?:\/\/(www\.)?tristatetag(s?)\.com/i, origin),
+            );
+          });
+          ["twitter:image"].forEach(function (name) {
+            var el = document.querySelector('meta[name="' + name + '"]');
+            if (!el) return;
+            var v = el.getAttribute("content") || "";
+            el.setAttribute(
+              "content",
+              v.replace(/^https?:\/\/(www\.)?tristatetag(s?)\.com/i, origin),
+            );
+          });
+        } catch (e) {
+          /* no-op */
+        }
+      })();
+    </script>
 
     <title>NJ Temporary Tags Same Day | TriStateTags — Licensed NJ Dealer</title>
     <meta
@@ -36,8 +73,8 @@
       property="og:description"
       content="NJ MVC licensed dealer. Same-day temporary plates and registration from $150. Email, mail, driver, or overnight delivery."
     />
-    <meta property="og:url" content="https://tristatetag.com/" />
-    <meta property="og:image" content="https://tristatetag.com/og-image.png" />
+    <meta property="og:url" content="https://tristatetags.com/" />
+    <meta property="og:image" content="https://tristatetags.com/og-image.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta property="og:image:alt" content="TriStateTags — Same-day NJ temporary tags" />
@@ -50,7 +87,7 @@
       name="twitter:description"
       content="NJ MVC licensed dealer. Same-day temp plates and registration. Instant email or driver delivery from $150."
     />
-    <meta name="twitter:image" content="https://tristatetag.com/og-image.png" />
+    <meta name="twitter:image" content="https://tristatetags.com/og-image.png" />
 
     <!-- Structured Data: Organization + LocalBusiness -->
     <script type="application/ld+json">
