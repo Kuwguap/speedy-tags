@@ -2,6 +2,26 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "framework": null,
+  "redirects": [
+    {
+      "source": "/:path*",
+      "has": [{ "type": "host", "value": "tristatetag.com" }],
+      "destination": "https://tristatetags.com/:path*",
+      "permanent": true
+    },
+    {
+      "source": "/:path*",
+      "has": [{ "type": "host", "value": "www.tristatetag.com" }],
+      "destination": "https://tristatetags.com/:path*",
+      "permanent": true
+    },
+    {
+      "source": "/:path*",
+      "has": [{ "type": "host", "value": "www.tristatetags.com" }],
+      "destination": "https://tristatetags.com/:path*",
+      "permanent": true
+    }
+  ],
   "headers": [
     {
       "source": "/backend/app.js",
