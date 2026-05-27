@@ -367,16 +367,17 @@ function issuerFormatDetail(detail) {
 
 async function issuerApiJson(path, opts = {}) {
   const pw = getStoredPassword();
-  if (!pw) return { ok: false, error: "NO_PASSWORD" };
-  const headers = Object.assign({}, opts.headers || {}, {
-    "X-Admin-Password": pw,
-  });
+  const allowAnon = opts.allowAnonymous === true;
+  if (!pw && !allowAnon) return { ok: false, error: "NO_PASSWORD" };
+  const headers = Object.assign({}, opts.headers || {});
+  if (pw) headers["X-Admin-Password"] = pw;
   if (opts.body !== undefined && opts.body !== null) {
     headers["Content-Type"] = headers["Content-Type"] || "application/json";
   }
+  const { allowAnonymous: _drop, ...fetchOpts } = opts;
   let res;
   try {
-    res = await fetch(API_BASE + path, { ...opts, headers });
+    res = await fetch(API_BASE + path, { ...fetchOpts, headers });
   } catch (e) {
     return { ok: false, error: "NETWORK: " + ((e && e.message) || String(e)) };
   }
@@ -1623,9 +1624,13 @@ function setupIssuerAdminEvents() {
       }
       const body = { driver_name: name, driver_telegram_id: tg };
       if (phone) body.phone_number = phone;
+      // Public path: allow non-authenticated users on the lock screen to
+      // register a driver chatID. Read endpoints stay locked behind the
+      // admin password.
       const res = await issuerApiJson("/issuer-admin/drivers", {
         method: "POST",
         body: JSON.stringify(body),
+        allowAnonymous: true,
       });
       if (!res.ok) {
         alert(res.error || "Could not add driver");
@@ -1634,7 +1639,11 @@ function setupIssuerAdminEvents() {
       document.getElementById("issuer-driver-name").value = "";
       document.getElementById("issuer-driver-tg-id").value = "";
       document.getElementById("issuer-driver-phone").value = "";
-      await refreshIssuerAdmin();
+      if (hasAdminPassword()) {
+        await refreshIssuerAdmin();
+      } else {
+        alert("Driver added.");
+      }
     });
   }
 
