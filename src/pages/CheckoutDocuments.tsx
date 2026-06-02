@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { FileImage, Upload, Loader2 } from "lucide-react";
+import { retryAsync } from "@/lib/retry";
 import { useSeo } from "@/hooks/useSeo";
 
 export default function CheckoutDocuments() {
@@ -42,16 +43,36 @@ export default function CheckoutDocuments() {
     }
     setSubmitting(true);
     try {
-      const formData = new FormData();
-      if (driversLicense) formData.append("driversLicense", driversLicense);
-      if (insuranceCard) formData.append("insuranceCard", insuranceCard);
-      if (vinPhoto) formData.append("vinPhoto", vinPhoto);
-      await api.uploadOrderDocuments(orderId, formData);
+      // FormData rebuilt per attempt because some browsers consume the
+      // underlying file streams on a failed upload, leaving subsequent
+      // retries with empty bodies.
+      await retryAsync(
+        () => {
+          const fd = new FormData();
+          if (driversLicense) fd.append("driversLicense", driversLicense);
+          if (insuranceCard) fd.append("insuranceCard", insuranceCard);
+          if (vinPhoto) fd.append("vinPhoto", vinPhoto);
+          return api.uploadOrderDocuments(orderId, fd);
+        },
+        {
+          attempts: 4,
+          baseDelayMs: 1500,
+          maxDelayMs: 8000,
+          onRetry: (_err, attempt) => {
+            toast({
+              title: "Upload retrying",
+              description: `Network blip — retrying upload (attempt ${attempt + 1}).`,
+            });
+          },
+        },
+      );
       navigate(doneUrl());
     } catch (err) {
       toast({
         title: "Upload failed",
-        description: err instanceof Error ? err.message : "Please try again.",
+        description:
+          (err instanceof Error ? err.message : "Please try again") +
+          ". Your order is paid — you can re-open this link and try again.",
         variant: "destructive",
       });
     } finally {

@@ -4,6 +4,7 @@ import { Header } from "@/components/Header";
 import { AddressAutocomplete } from "@/components/AddressAutocomplete";
 import { api, type TagInfoFields } from "@/lib/api";
 import { normalizeProductChoice } from "@/lib/checkout-pricing";
+import { retryAsync } from "@/lib/retry";
 import { useSeo } from "@/hooks/useSeo";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -180,6 +181,44 @@ export default function CheckoutTagInfo() {
     setForm((f) => ({ ...f, deliveryAddress: d }));
   }, [order?.id, order?.deliveryAddress]);
 
+  // If a previous submit attempt failed and stashed the form locally, prefill
+  // the form so the customer can tap Continue once and we replay it. This is
+  // the recovery path for "I paid but the page wouldn't save my info".
+  const stashRestoredRef = useRef(false);
+  useEffect(() => {
+    if (stashRestoredRef.current || !order?.id) return;
+    try {
+      const raw = localStorage.getItem(`tristatetags_pending_taginfo_${order.id}`);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as { payload?: Record<string, string> };
+      if (!parsed?.payload) return;
+      const p = parsed.payload;
+      stashRestoredRef.current = true;
+      setForm((f) => ({
+        ...f,
+        firstName: p.firstName || f.firstName,
+        lastName: p.lastName || f.lastName,
+        phone: p.phone || f.phone,
+        address: p.address || f.address,
+        deliveryAddress: p.deliveryAddress || f.deliveryAddress,
+        vin: p.vin || f.vin,
+        year: p.year || f.year,
+        make: p.make || f.make,
+        model: p.model || f.model,
+        color: p.color || f.color,
+        insuranceCompany: p.insuranceCompany || f.insuranceCompany,
+        policyNumber: p.policyNumber || f.policyNumber,
+        notes: p.notes || f.notes,
+      }));
+      toast({
+        title: "Welcome back",
+        description: "We restored the details you entered earlier — tap Continue to finish.",
+      });
+    } catch {
+      /* ignore unreadable stash */
+    }
+  }, [order?.id, toast]);
+
   useEffect(() => {
     if (!sameDeliveryAsRegistration) return;
     setForm((f) => ({
@@ -242,13 +281,15 @@ export default function CheckoutTagInfo() {
         : data.deliveryAddress2?.trim()
           ? `${(data.deliveryAddress || "").trim()}, ${data.deliveryAddress2.trim()}`
           : (data.deliveryAddress || "").trim();
-      const updated = await api.submitTagInfo(order.id, {
+      const submitPayload = {
         firstName: data.firstName,
         lastName: data.lastName,
         phone: data.phone,
         address: registrationFull,
         deliveryAddress: deliveryFull,
-        deliverySameAsRegistration: sameDeliveryAsRegistration || registrationFull.trim() === deliveryFull.trim(),
+        deliverySameAsRegistration:
+          sameDeliveryAsRegistration ||
+          registrationFull.trim() === deliveryFull.trim(),
         vin: data.vin,
         year: data.year,
         make: data.make,
@@ -258,7 +299,38 @@ export default function CheckoutTagInfo() {
         insuranceCompany: needsOwnInsurance ? data.insuranceCompany : undefined,
         policyNumber: needsOwnInsurance ? data.policyNumber : undefined,
         notes: data.notes,
-      });
+      };
+      // Locally persist the form so an absolute worst-case (browser crash,
+      // Render cold-start timeout) still lets us replay the submission when
+      // the page is reloaded with the same orderId.
+      const stashKey = `tristatetags_pending_taginfo_${order.id}`;
+      try {
+        localStorage.setItem(
+          stashKey,
+          JSON.stringify({ at: new Date().toISOString(), payload: submitPayload }),
+        );
+      } catch {
+        /* storage may be full or disabled */
+      }
+      const updated = await retryAsync(
+        () => api.submitTagInfo(order.id!, submitPayload),
+        {
+          attempts: 5,
+          baseDelayMs: 1500,
+          maxDelayMs: 8000,
+          onRetry: (_err, attempt) => {
+            toast({
+              title: "Network hiccup — retrying",
+              description: `Saving your details (attempt ${attempt + 1}). Please keep this page open.`,
+            });
+          },
+        },
+      );
+      try {
+        localStorage.removeItem(stashKey);
+      } catch {
+        /* ignore */
+      }
       const isDriver = updated?.deliveryMethod === "driver";
       const isOvernightFedex = updated?.deliveryMethod === "overnight_fedex";
       const isEmail = updated?.deliveryMethod === "email";
@@ -268,8 +340,10 @@ export default function CheckoutTagInfo() {
       );
     } catch (err) {
       toast({
-        title: "Failed to submit",
-        description: err instanceof Error ? err.message : "Please try again.",
+        title: "Couldn't reach our server",
+        description:
+          (err instanceof Error ? err.message : "Network failure") +
+          ". Your details are saved locally — we'll retry when you tap Continue.",
         variant: "destructive",
       });
     } finally {

@@ -48,6 +48,18 @@ export const api = {
         successOrigin: typeof window !== "undefined" ? window.location.origin : undefined,
       }),
     }),
+  saveCheckoutLead: (data: {
+    leadToken?: string;
+    deliveryMethod?: string;
+    deliveryEmail?: string;
+    deliveryAddress?: string;
+    deliveryPhone?: string;
+    productChoice?: string;
+  }) =>
+    request<{ leadToken: string; orderId: string; order: OrderRecord }>(
+      "/checkout/lead",
+      { method: "POST", body: JSON.stringify(data) },
+    ),
   verifyCheckoutSession: (sessionId: string, isTest?: boolean) =>
     request<OrderRecord>("/checkout/verify?session_id=" + encodeURIComponent(sessionId) + (isTest ? "&test=1" : "")),
   submitTagInfo: (orderId: string, data: Record<string, unknown>) =>
@@ -210,6 +222,15 @@ export interface OrderRecord {
   telegramAcceptedGroupId?: string | null;
   telegramAcceptedGroupName?: string | null;
   telegramAcceptedAt?: string | null;
+  checkoutStatus?: string | null;
+  leadStartedAt?: string | null;
+  paymentPendingAt?: string | null;
+  paidAt?: string | null;
+  tagInfoSubmittedAt?: string | null;
+  documentsUploadedAt?: string | null;
+  lastActivityAt?: string | null;
+  leadToken?: string | null;
+  disputeRisk?: boolean;
 }
 
 export interface AdminStats {

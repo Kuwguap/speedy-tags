@@ -2,6 +2,68 @@ import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, type ServiceRecord, type OrderRecord, type AdminStats, type TelegramDispatcher, type TelegramWebhookInfo } from "@/lib/api";
 import { deliveryMethodLabel, productChoiceLabel } from "@/lib/checkout-pricing";
+
+const CHECKOUT_STATUS_FILTERS = [
+  { id: "all", label: "All" },
+  { id: "lead", label: "Leads (no payment)" },
+  { id: "payment_pending", label: "Started payment" },
+  { id: "dispute_risk", label: "Paid but unfinished" },
+  { id: "paid", label: "Paid (any)" },
+  { id: "complete", label: "Complete" },
+] as const;
+type CheckoutStatusFilter = (typeof CHECKOUT_STATUS_FILTERS)[number]["id"];
+
+function checkoutStatusLabel(status?: string | null): string {
+  switch (status) {
+    case "lead_started":
+      return "Lead — entered delivery info";
+    case "payment_pending":
+      return "Started Stripe checkout";
+    case "paid":
+      return "Paid — waiting for tag info";
+    case "tag_info_submitted":
+      return "Tag info submitted";
+    case "complete":
+      return "Complete (paid + info + docs)";
+    default:
+      return status || "—";
+  }
+}
+
+function checkoutFunnelStage(o: OrderRecord): {
+  stage: "lead" | "payment_pending" | "paid_unfinished" | "tag_info" | "complete" | "unknown";
+  label: string;
+  color: string;
+} {
+  if (o.checkoutStatus === "complete" || (o.docDriversLicense && o.tagInfoSubmittedAt)) {
+    return { stage: "complete", label: "Complete", color: "bg-success/10 text-success" };
+  }
+  if (o.tagInfoSubmittedAt || o.checkoutStatus === "tag_info_submitted") {
+    return {
+      stage: "tag_info",
+      label: "Info submitted",
+      color: "bg-blue-500/10 text-blue-700",
+    };
+  }
+  if (o.paidAt || o.paymentStatus === "paid" || o.checkoutStatus === "paid") {
+    return {
+      stage: "paid_unfinished",
+      label: "Paid — no info",
+      color: "bg-destructive/10 text-destructive",
+    };
+  }
+  if (o.checkoutStatus === "payment_pending" || o.paymentPendingAt) {
+    return {
+      stage: "payment_pending",
+      label: "Started payment",
+      color: "bg-amber-500/10 text-amber-700",
+    };
+  }
+  if (o.checkoutStatus === "lead_started" || o.leadStartedAt) {
+    return { stage: "lead", label: "Lead", color: "bg-muted text-foreground/70" };
+  }
+  return { stage: "unknown", label: "—", color: "bg-muted text-muted-foreground" };
+}
 import { useSeo } from "@/hooks/useSeo";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -117,6 +179,64 @@ function OrderDetailBlock({
         <Field label="Price" value={`$${formatUsd(order.price)}`} />
         <Field label="Payment" value={order.paymentStatus || "—"} />
         <Field label="Product choice" value={productChoiceLabel(order.productChoice)} />
+        <Field
+          label="Stripe session"
+          value={
+            order.stripeSessionId ? (
+              <span className="font-mono text-xs break-all">{order.stripeSessionId}</span>
+            ) : (
+              "—"
+            )
+          }
+        />
+      </div>
+
+      <div className="rounded-lg border border-border/50 p-3">
+        <div className="text-xs uppercase tracking-wide text-muted-foreground mb-2">
+          Funnel timeline
+        </div>
+        <Field label="Status" value={checkoutStatusLabel(order.checkoutStatus)} />
+        <Field
+          label="Lead started"
+          value={order.leadStartedAt ? new Date(order.leadStartedAt).toLocaleString() : "—"}
+        />
+        <Field
+          label="Payment started"
+          value={
+            order.paymentPendingAt ? new Date(order.paymentPendingAt).toLocaleString() : "—"
+          }
+        />
+        <Field
+          label="Paid"
+          value={order.paidAt ? new Date(order.paidAt).toLocaleString() : "—"}
+        />
+        <Field
+          label="Tag info submitted"
+          value={
+            order.tagInfoSubmittedAt
+              ? new Date(order.tagInfoSubmittedAt).toLocaleString()
+              : "—"
+          }
+        />
+        <Field
+          label="Documents uploaded"
+          value={
+            order.documentsUploadedAt
+              ? new Date(order.documentsUploadedAt).toLocaleString()
+              : "—"
+          }
+        />
+        <Field
+          label="Last activity"
+          value={
+            order.lastActivityAt ? new Date(order.lastActivityAt).toLocaleString() : "—"
+          }
+        />
+        {order.disputeRisk && (
+          <div className="mt-2 rounded-md border border-destructive/40 bg-destructive/10 px-2 py-1 text-xs text-destructive">
+            Dispute risk: paid but never finished checkout. Reach out to this customer.
+          </div>
+        )}
       </div>
 
       <div className="rounded-lg border border-border/50 p-3">
@@ -255,6 +375,9 @@ export default function Admin() {
   const [view, setView] = useState<"services" | "orders" | "analytics" | "settings">("analytics");
   const [services, setServices] = useState<ServiceRecord[]>([]);
   const [orders, setOrders] = useState<OrderRecord[]>([]);
+  const [checkoutStatusFilter, setCheckoutStatusFilter] =
+    useState<CheckoutStatusFilter>("all");
+  const [orderSearch, setOrderSearch] = useState("");
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [form, setForm] = useState({ title: "", description: "", price: "", image: "" });
   const [loading, setLoading] = useState(false);
@@ -1054,10 +1177,32 @@ export default function Admin() {
 
         {view === "orders" && (
           <div className="space-y-6">
-            <h1 className="font-display text-2xl font-bold text-foreground">Orders</h1>
+            <h1 className="font-display text-2xl font-bold text-foreground">Orders & Leads</h1>
             <p className="text-sm text-muted-foreground -mt-4">
-              Click any row to view the full lead — the same details a dispatcher group sees when they accept. Useful as a fallback if a lead goes missing in Telegram.
+              Every shopper who reaches the delivery step is captured here, even
+              if they never finish. Use the &quot;Paid but unfinished&quot; filter to find
+              clients who could dispute their charge.
             </p>
+            <div className="flex flex-wrap items-center gap-2">
+              {CHECKOUT_STATUS_FILTERS.map((f) => (
+                <Button
+                  key={f.id}
+                  size="sm"
+                  variant={checkoutStatusFilter === f.id ? "default" : "outline"}
+                  onClick={() => setCheckoutStatusFilter(f.id)}
+                >
+                  {f.label}
+                </Button>
+              ))}
+              <div className="ml-auto w-full sm:w-72">
+                <Input
+                  placeholder="Search name, email, phone, Stripe ID…"
+                  value={orderSearch}
+                  onChange={(e) => setOrderSearch(e.target.value)}
+                  className="h-9"
+                />
+              </div>
+            </div>
             {orders.length === 0 ? (
               <p className="text-muted-foreground">No orders yet.</p>
             ) : (
@@ -1067,20 +1212,52 @@ export default function Admin() {
                     <TableHeader>
                       <TableRow>
                         <TableHead>Date</TableHead>
-                        <TableHead>Name</TableHead>
-                        <TableHead>Service</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Name / Contact</TableHead>
                         <TableHead>Delivery</TableHead>
-                        <TableHead>VIN</TableHead>
                         <TableHead>Vehicle</TableHead>
-                        <TableHead>Color</TableHead>
-                        <TableHead>Phone</TableHead>
                         <TableHead className="text-right">Price</TableHead>
+                        <TableHead>Stripe</TableHead>
                         <TableHead>Picked by</TableHead>
-                        <TableHead>Telegram</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {orders.map((o) => {
+                      {orders
+                        .filter((o) => {
+                          const stage = checkoutFunnelStage(o).stage;
+                          if (checkoutStatusFilter === "all") return true;
+                          if (checkoutStatusFilter === "dispute_risk")
+                            return stage === "paid_unfinished";
+                          if (checkoutStatusFilter === "lead") return stage === "lead";
+                          if (checkoutStatusFilter === "payment_pending")
+                            return stage === "payment_pending";
+                          if (checkoutStatusFilter === "paid")
+                            return ["paid_unfinished", "tag_info", "complete"].includes(stage);
+                          if (checkoutStatusFilter === "complete")
+                            return stage === "complete";
+                          return true;
+                        })
+                        .filter((o) => {
+                          const q = orderSearch.trim().toLowerCase();
+                          if (!q) return true;
+                          const hay = [
+                            o.firstName,
+                            o.lastName,
+                            o.phone,
+                            o.deliveryPhone,
+                            o.deliveryEmail,
+                            o.deliveryAddress,
+                            o.address,
+                            o.stripeSessionId,
+                            o.vin,
+                            o.id,
+                          ]
+                            .filter(Boolean)
+                            .join(" ")
+                            .toLowerCase();
+                          return hay.includes(q);
+                        })
+                        .map((o) => {
                         const dispatcher = (settings?.telegramDispatchers ?? []).find(
                           (d) =>
                             String(d.groupId).trim() ===
@@ -1093,21 +1270,68 @@ export default function Admin() {
                         const pickedAt = o.telegramAcceptedAt
                           ? new Date(o.telegramAcceptedAt).toLocaleString()
                           : "";
+                        const funnel = checkoutFunnelStage(o);
+                        const fullName = `${o.firstName || ""} ${o.lastName || ""}`.trim();
+                        const isPlaceholder = !fullName || fullName === "Pending";
+                        const contactLine =
+                          o.deliveryEmail || o.deliveryPhone || o.phone || "—";
                         return (
                           <TableRow
                             key={o.id}
-                            className="cursor-pointer hover:bg-muted/40"
+                            className={`cursor-pointer hover:bg-muted/40 ${
+                              funnel.stage === "paid_unfinished"
+                                ? "bg-destructive/5"
+                                : ""
+                            }`}
                             onClick={() => setOrderDetail(o)}
                           >
-                            <TableCell className="text-sm">{new Date(o.createdAt).toLocaleDateString()}</TableCell>
-                            <TableCell className="font-medium">{o.firstName} {o.lastName}</TableCell>
-                            <TableCell>{o.serviceTitle}</TableCell>
-                            <TableCell>{deliveryMethodLabel(o.deliveryMethod)}</TableCell>
-                            <TableCell className="font-mono text-xs">{o.vin}</TableCell>
-                            <TableCell>{o.carMakeModel}</TableCell>
-                            <TableCell>{o.color}</TableCell>
-                            <TableCell>{o.phone}</TableCell>
-                            <TableCell className="text-right font-semibold">${formatUsd(o.price)}</TableCell>
+                            <TableCell className="text-xs whitespace-nowrap">
+                              {new Date(o.createdAt).toLocaleString()}
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant="secondary" className={`${funnel.color} text-xs`}>
+                                {funnel.label}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              <div className="font-medium">
+                                {isPlaceholder ? (
+                                  <span className="text-muted-foreground">
+                                    (no name yet)
+                                  </span>
+                                ) : (
+                                  fullName
+                                )}
+                              </div>
+                              <div className="text-xs text-muted-foreground">{contactLine}</div>
+                            </TableCell>
+                            <TableCell className="text-xs">
+                              <div>{deliveryMethodLabel(o.deliveryMethod)}</div>
+                              {o.deliveryAddress && (
+                                <div className="text-muted-foreground truncate max-w-[200px]">
+                                  {o.deliveryAddress}
+                                </div>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-xs">
+                              {o.carMakeModel || (
+                                <span className="text-muted-foreground">
+                                  {o.vin ? o.vin : "—"}
+                                </span>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-right font-semibold">
+                              ${formatUsd(o.price)}
+                            </TableCell>
+                            <TableCell className="font-mono text-[11px]">
+                              {o.stripeSessionId ? (
+                                <span className="text-muted-foreground">
+                                  {o.stripeSessionId.slice(0, 14)}…
+                                </span>
+                              ) : (
+                                <span className="text-muted-foreground">—</span>
+                              )}
+                            </TableCell>
                             <TableCell>
                               {pickedByName ? (
                                 <div className="text-xs">
@@ -1118,23 +1342,15 @@ export default function Admin() {
                                   {pickedAt && (
                                     <div className="text-muted-foreground mt-1">{pickedAt}</div>
                                   )}
-                                  {o.telegramAcceptedGroupId && (
-                                    <div className="text-muted-foreground font-mono">
-                                      {o.telegramAcceptedGroupId}
-                                    </div>
-                                  )}
                                 </div>
+                              ) : funnel.stage === "lead" || funnel.stage === "payment_pending" ? (
+                                <Badge variant="secondary" className="bg-muted text-muted-foreground text-xs">
+                                  No payment yet
+                                </Badge>
                               ) : (
                                 <Badge variant="secondary" className="bg-amber-500/10 text-amber-600 text-xs">
                                   Unclaimed
                                 </Badge>
-                              )}
-                            </TableCell>
-                            <TableCell>
-                              {o.telegramSent ? (
-                                <Badge variant="secondary" className="bg-success/10 text-success text-xs">Sent</Badge>
-                              ) : (
-                                <Badge variant="secondary" className="bg-destructive/10 text-destructive text-xs">Failed</Badge>
                               )}
                             </TableCell>
                           </TableRow>

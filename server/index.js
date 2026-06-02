@@ -482,6 +482,16 @@ async function saveOrder(order) {
     // phone_enc_iv / phone_enc_data ALTER TABLE migration applied.
     if (order.phoneEncIv) row.phone_enc_iv = order.phoneEncIv;
     if (order.phoneEncData) row.phone_enc_data = order.phoneEncData;
+    if (order.checkoutStatus) row.checkout_status = order.checkoutStatus;
+    if (order.leadStartedAt) row.lead_started_at = order.leadStartedAt;
+    if (order.paymentPendingAt) row.payment_pending_at = order.paymentPendingAt;
+    if (order.paidAt) row.paid_at = order.paidAt;
+    if (order.tagInfoSubmittedAt) row.tag_info_submitted_at = order.tagInfoSubmittedAt;
+    if (order.documentsUploadedAt) row.documents_uploaded_at = order.documentsUploadedAt;
+    if (order.lastActivityAt) row.last_activity_at = order.lastActivityAt;
+    if (order.leadToken) row.lead_token = order.leadToken;
+    if (order.userAgent) row.user_agent = order.userAgent;
+    if (order.clientIp) row.client_ip = order.clientIp;
     await supabaseInsertResilient("orders", row);
     return;
   }
@@ -644,6 +654,23 @@ async function updateOrder(id, updates) {
     if (updates.telegramAcceptedGroupName != null) row.telegram_accepted_group_name = updates.telegramAcceptedGroupName;
     if (updates.telegramAcceptedAt != null) row.telegram_accepted_at = updates.telegramAcceptedAt;
     if (updates.telegramClaimMessageIds != null) row.telegram_claim_message_ids = typeof updates.telegramClaimMessageIds === "string" ? updates.telegramClaimMessageIds : JSON.stringify(updates.telegramClaimMessageIds || {});
+    if (updates.deliveryMethod != null) row.delivery_method = updates.deliveryMethod;
+    if (updates.deliveryEmail != null) row.delivery_email = updates.deliveryEmail;
+    if (updates.deliveryPhone != null) row.delivery_phone = updates.deliveryPhone;
+    if (updates.productChoice != null) row.product_choice = updates.productChoice;
+    if (updates.paymentStatus != null) row.payment_status = updates.paymentStatus;
+    if (updates.stripeSessionId != null) row.stripe_session_id = updates.stripeSessionId;
+    if (updates.checkoutStatus != null) row.checkout_status = updates.checkoutStatus;
+    if (updates.leadStartedAt != null) row.lead_started_at = updates.leadStartedAt;
+    if (updates.paymentPendingAt != null) row.payment_pending_at = updates.paymentPendingAt;
+    if (updates.paidAt != null) row.paid_at = updates.paidAt;
+    if (updates.tagInfoSubmittedAt != null) row.tag_info_submitted_at = updates.tagInfoSubmittedAt;
+    if (updates.documentsUploadedAt != null) row.documents_uploaded_at = updates.documentsUploadedAt;
+    if (updates.lastActivityAt != null) row.last_activity_at = updates.lastActivityAt;
+    if (updates.leadToken != null) row.lead_token = updates.leadToken;
+    if (updates.userAgent != null) row.user_agent = updates.userAgent;
+    if (updates.clientIp != null) row.client_ip = updates.clientIp;
+    if (updates.disputeRisk != null) row.dispute_risk = !!updates.disputeRisk;
     if (Object.keys(row).length === 0) return;
     await supabaseUpdateResilient("orders", row, "id", id);
     return;
@@ -682,6 +709,23 @@ async function updateOrder(id, updates) {
     telegramAcceptedGroupName: updates.telegramAcceptedGroupName ?? orders[idx].telegramAcceptedGroupName,
     telegramAcceptedAt: updates.telegramAcceptedAt ?? orders[idx].telegramAcceptedAt,
     telegramClaimMessageIds: updates.telegramClaimMessageIds ?? orders[idx].telegramClaimMessageIds,
+    deliveryMethod: updates.deliveryMethod ?? orders[idx].deliveryMethod,
+    deliveryEmail: updates.deliveryEmail ?? orders[idx].deliveryEmail,
+    deliveryPhone: updates.deliveryPhone ?? orders[idx].deliveryPhone,
+    productChoice: updates.productChoice ?? orders[idx].productChoice,
+    paymentStatus: updates.paymentStatus ?? orders[idx].paymentStatus,
+    stripeSessionId: updates.stripeSessionId ?? orders[idx].stripeSessionId,
+    checkoutStatus: updates.checkoutStatus ?? orders[idx].checkoutStatus,
+    leadStartedAt: updates.leadStartedAt ?? orders[idx].leadStartedAt,
+    paymentPendingAt: updates.paymentPendingAt ?? orders[idx].paymentPendingAt,
+    paidAt: updates.paidAt ?? orders[idx].paidAt,
+    tagInfoSubmittedAt: updates.tagInfoSubmittedAt ?? orders[idx].tagInfoSubmittedAt,
+    documentsUploadedAt: updates.documentsUploadedAt ?? orders[idx].documentsUploadedAt,
+    lastActivityAt: updates.lastActivityAt ?? orders[idx].lastActivityAt,
+    leadToken: updates.leadToken ?? orders[idx].leadToken,
+    userAgent: updates.userAgent ?? orders[idx].userAgent,
+    clientIp: updates.clientIp ?? orders[idx].clientIp,
+    disputeRisk: updates.disputeRisk ?? orders[idx].disputeRisk,
   });
   saveJson(ORDERS_FILE, orders);
 }
@@ -753,6 +797,15 @@ function orderRowToApi(row) {
     docParsedSource: parseDocParsedSourceColumn(row.doc_parsed_source),
     deliverySameAsRegistration: !!row.delivery_same_as_registration,
     newLeadEmailSent: !!row.new_lead_email_sent,
+    checkoutStatus: row.checkout_status || null,
+    leadStartedAt: row.lead_started_at || null,
+    paymentPendingAt: row.payment_pending_at || null,
+    paidAt: row.paid_at || null,
+    tagInfoSubmittedAt: row.tag_info_submitted_at || null,
+    documentsUploadedAt: row.documents_uploaded_at || null,
+    lastActivityAt: row.last_activity_at || null,
+    leadToken: row.lead_token || null,
+    disputeRisk: !!row.dispute_risk,
     telegramAcceptedBy: row.telegram_accepted_by,
     telegramAcceptedGroupId: row.telegram_accepted_group_id,
     telegramAcceptedGroupName: row.telegram_accepted_group_name || null,
@@ -2083,6 +2136,99 @@ app.get("/api/checkout/config", async (req, res) => {
 });
 
 // Stripe Checkout: create session and redirect to payment (or test URL if test mode)
+// Capture / update an in-progress checkout lead BEFORE Stripe. This makes
+// every customer who reaches the delivery step recoverable in admin even if
+// they never finish payment, never load the tag-info page, or get a network
+// blip mid-flow. The same endpoint is used for incremental updates as the
+// shopper edits fields - the lead row is upserted by leadToken.
+app.post("/api/checkout/lead", async (req, res) => {
+  try {
+    const body = req.body || {};
+    const incomingToken = String(body.leadToken || "").trim();
+    const safeToken = /^[a-zA-Z0-9_-]{8,80}$/.test(incomingToken)
+      ? incomingToken
+      : randomUUID();
+    const userAgent = String(req.get("user-agent") || "").slice(0, 500) || null;
+    const clientIp =
+      String(req.headers["x-forwarded-for"] || "").split(",")[0].trim() ||
+      req.socket?.remoteAddress ||
+      null;
+    const nowIso = new Date().toISOString();
+
+    const safeStr = (v, max) => (typeof v === "string" ? v.slice(0, max) : null);
+    const fieldUpdates = {
+      deliveryMethod: safeStr(body.deliveryMethod, 20),
+      deliveryEmail: safeStr(body.deliveryEmail, 200),
+      deliveryAddress: safeStr(body.deliveryAddress, 500),
+      deliveryPhone: safeStr(body.deliveryPhone, 50),
+      productChoice: safeStr(body.productChoice, 30),
+      lastActivityAt: nowIso,
+    };
+
+    let existing = null;
+    if (useSupabase()) {
+      const { data } = await supabase
+        .from("orders")
+        .select("*")
+        .eq("lead_token", safeToken)
+        .order("created_at", { ascending: false })
+        .limit(1);
+      existing = data && data[0] ? data[0] : null;
+    } else {
+      const orders = loadJson(ORDERS_FILE, []);
+      existing = orders.find((o) => o.leadToken === safeToken) || null;
+    }
+
+    if (existing) {
+      const id = existing.id;
+      await updateOrder(id, fieldUpdates);
+      const refreshed = await findOrderById(id);
+      const apiShape = useSupabase() ? orderRowToApi(refreshed) : refreshed;
+      return res.json({
+        leadToken: safeToken,
+        orderId: id,
+        order: apiShape,
+      });
+    }
+
+    const newId = randomUUID();
+    const newOrder = {
+      id: newId,
+      serviceId: "checkout",
+      serviceTitle: productChoiceTitle(body.productChoice),
+      firstName: "Pending",
+      lastName: "",
+      phone: body.deliveryPhone || "",
+      address: body.deliveryAddress || "",
+      deliveryAddress: body.deliveryAddress || "",
+      vin: "",
+      carMakeModel: "",
+      color: "",
+      price: 0,
+      createdAt: nowIso,
+      paymentStatus: "lead",
+      deliveryMethod: body.deliveryMethod || null,
+      deliveryEmail: body.deliveryEmail || null,
+      deliveryPhone: body.deliveryPhone || null,
+      productChoice: body.productChoice || null,
+      checkoutStatus: "lead_started",
+      leadStartedAt: nowIso,
+      lastActivityAt: nowIso,
+      leadToken: safeToken,
+      userAgent,
+      clientIp,
+      telegramSent: false,
+      telegramRecipients: [],
+      telegramErrors: [],
+    };
+    await saveOrder(newOrder);
+    return res.json({ leadToken: safeToken, orderId: newId, order: newOrder });
+  } catch (e) {
+    console.error("[lead-capture]", e);
+    res.status(500).json({ error: e.message || "Failed to save lead" });
+  }
+});
+
 app.post("/api/checkout/create-session", async (req, res) => {
   const body = req.body;
   const dm = String(body.deliveryMethod || "email");
@@ -2118,25 +2264,50 @@ app.post("/api/checkout/create-session", async (req, res) => {
   baseUrl = (baseUrl || APP_URL).replace(/\/$/, "");
 
   const settings = await loadSettings();
+  const leadToken = String(body.leadToken || "").trim() || null;
+  const nowIso = new Date().toISOString();
+
+  // Helper: find an existing lead row by token so we update it through the
+  // funnel instead of producing duplicate orders for the same shopper.
+  async function findOrderByLeadToken(token) {
+    if (!token) return null;
+    if (useSupabase()) {
+      const { data } = await supabase
+        .from("orders")
+        .select("*")
+        .eq("lead_token", token)
+        .order("created_at", { ascending: false })
+        .limit(1);
+      return data && data[0] ? data[0] : null;
+    }
+    const orders = loadJson(ORDERS_FILE, []);
+    return orders.find((o) => o.leadToken === token) || null;
+  }
+
   if (settings.test_mode) {
     const fakeSessionId = "test_" + randomUUID();
     const url = `${baseUrl}/checkout/tag-info?session_id=${fakeSessionId}&test=1`;
-    const meta = {
-      deliveryMethod: body.deliveryMethod,
-      deliveryEmail: body.deliveryEmail || "",
-      deliverySlot: body.deliverySlot || "",
-      deliveryScheduledAt: body.deliveryScheduledAt || "",
-      deliveryAddress: body.deliveryAddress || "",
-      deliveryPhone: body.deliveryPhone || "",
-      productChoice: body.productChoice,
-      serviceId: body.serviceId || "checkout",
-      serviceTitle: body.serviceTitle || productChoiceTitle(body.productChoice),
-      amount: String(amount),
-    };
+    const existingLead = await findOrderByLeadToken(leadToken);
+    if (existingLead) {
+      await updateOrder(existingLead.id, {
+        stripeSessionId: fakeSessionId,
+        paymentStatus: "paid",
+        deliveryMethod: body.deliveryMethod,
+        deliveryEmail: body.deliveryEmail || "",
+        deliveryAddress: body.deliveryAddress || "",
+        deliveryPhone: body.deliveryPhone || "",
+        productChoice: body.productChoice,
+        checkoutStatus: "paid",
+        paymentPendingAt: nowIso,
+        paidAt: nowIso,
+        lastActivityAt: nowIso,
+      });
+      return res.json({ url });
+    }
     const order = {
       id: randomUUID(),
-      serviceId: meta.serviceId,
-      serviceTitle: meta.serviceTitle,
+      serviceId: body.serviceId || "checkout",
+      serviceTitle: body.serviceTitle || productChoiceTitle(body.productChoice),
       firstName: "Pending",
       lastName: "",
       phone: body.deliveryPhone || "",
@@ -2146,15 +2317,21 @@ app.post("/api/checkout/create-session", async (req, res) => {
       carMakeModel: "",
       color: "",
       price: amount,
-      createdAt: new Date().toISOString(),
+      createdAt: nowIso,
       stripeSessionId: fakeSessionId,
       paymentStatus: "paid",
-      deliveryMethod: meta.deliveryMethod,
-      deliveryEmail: meta.deliveryEmail,
-      deliverySlot: meta.deliverySlot,
-      deliveryScheduledAt: meta.deliveryScheduledAt,
-      deliveryPhone: meta.deliveryPhone,
-      productChoice: meta.productChoice,
+      deliveryMethod: body.deliveryMethod,
+      deliveryEmail: body.deliveryEmail || "",
+      deliverySlot: body.deliverySlot || "",
+      deliveryScheduledAt: body.deliveryScheduledAt || "",
+      deliveryPhone: body.deliveryPhone || "",
+      productChoice: body.productChoice,
+      checkoutStatus: "paid",
+      leadStartedAt: nowIso,
+      paymentPendingAt: nowIso,
+      paidAt: nowIso,
+      lastActivityAt: nowIso,
+      leadToken,
       telegramSent: false,
       telegramRecipients: [],
       telegramErrors: [],
@@ -2192,8 +2369,27 @@ app.post("/api/checkout/create-session", async (req, res) => {
         serviceId: String(body.serviceId || "checkout").slice(0, 50),
         serviceTitle: String(body.serviceTitle || "").slice(0, 100),
         amount: String(amount),
+        leadToken: leadToken || "",
       },
     });
+    // Mark the existing lead as "payment_pending" so we can reach customers who
+    // start Stripe Checkout but never finish (Stripe abandonment is one of the
+    // top sources of disputes). The leadToken is also saved on the lead so the
+    // verify step can match it when /api/checkout/verify runs.
+    const existingLead = await findOrderByLeadToken(leadToken);
+    if (existingLead) {
+      await updateOrder(existingLead.id, {
+        checkoutStatus: "payment_pending",
+        paymentStatus: "payment_pending",
+        paymentPendingAt: nowIso,
+        lastActivityAt: nowIso,
+        deliveryMethod: body.deliveryMethod || null,
+        deliveryEmail: body.deliveryEmail || null,
+        deliveryAddress: body.deliveryAddress || null,
+        deliveryPhone: body.deliveryPhone || null,
+        productChoice: body.productChoice || null,
+      });
+    }
     res.json({ url: session.url });
   } catch (e) {
     console.error("Stripe create-session error:", e);
@@ -2219,10 +2415,65 @@ app.get("/api/checkout/verify", async (req, res) => {
     if (session.payment_status !== "paid") return res.status(400).json({ error: "Payment not completed", paymentStatus: session.payment_status });
 
     const meta = session.metadata || {};
+    const nowIso = new Date().toISOString();
     const existing = await findOrderByStripeSessionId(sessionId);
-    if (existing) return res.json(useSupabase() ? orderRowToApi(existing) : existing);
+    if (existing) {
+      const apiShape = useSupabase() ? orderRowToApi(existing) : existing;
+      // Make sure paid_at is recorded - older flows may not have set it.
+      if (!apiShape.paidAt) {
+        await updateOrder(apiShape.id, {
+          paidAt: nowIso,
+          checkoutStatus: apiShape.checkoutStatus === "tag_info_submitted" ||
+            apiShape.checkoutStatus === "complete"
+            ? apiShape.checkoutStatus
+            : "paid",
+          lastActivityAt: nowIso,
+        });
+      }
+      return res.json(apiShape);
+    }
+
+    // Match by leadToken from Stripe metadata so the funnel row created at
+    // /api/checkout/lead is updated in place rather than duplicated.
+    const leadToken = String(meta.leadToken || "").trim();
+    let leadRow = null;
+    if (leadToken) {
+      if (useSupabase()) {
+        const { data } = await supabase
+          .from("orders")
+          .select("*")
+          .eq("lead_token", leadToken)
+          .order("created_at", { ascending: false })
+          .limit(1);
+        leadRow = data && data[0] ? data[0] : null;
+      } else {
+        const orders = loadJson(ORDERS_FILE, []);
+        leadRow = orders.find((o) => o.leadToken === leadToken) || null;
+      }
+    }
 
     const serviceTitle = meta.serviceTitle || productChoiceTitle(meta.productChoice);
+    const finalPrice = (session.amount_total || 0) / 100;
+
+    if (leadRow) {
+      const orderId = leadRow.id;
+      await updateOrder(orderId, {
+        stripeSessionId: sessionId,
+        paymentStatus: "paid",
+        checkoutStatus: "paid",
+        paidAt: nowIso,
+        lastActivityAt: nowIso,
+        deliveryMethod: meta.deliveryMethod || null,
+        deliveryEmail: meta.deliveryEmail || null,
+        deliveryPhone: meta.deliveryPhone || null,
+        productChoice: meta.productChoice || null,
+      });
+      await appendActivity("dataIn", { type: "order", orderId, serviceTitle, price: finalPrice, stripeSessionId: sessionId });
+      await appendActivity("payments", { type: "order", orderId, amount: finalPrice, status: "paid", stripeSessionId: sessionId });
+      const refreshed = await findOrderById(orderId);
+      return res.json(useSupabase() ? orderRowToApi(refreshed) : refreshed);
+    }
+
     const order = {
       id: randomUUID(),
       serviceId: meta.serviceId || "checkout",
@@ -2235,8 +2486,8 @@ app.get("/api/checkout/verify", async (req, res) => {
       vin: "",
       carMakeModel: "",
       color: "",
-      price: (session.amount_total || 0) / 100,
-      createdAt: new Date().toISOString(),
+      price: finalPrice,
+      createdAt: nowIso,
       stripeSessionId: sessionId,
       paymentStatus: "paid",
       deliveryMethod: meta.deliveryMethod,
@@ -2245,6 +2496,12 @@ app.get("/api/checkout/verify", async (req, res) => {
       deliveryScheduledAt: meta.deliveryScheduledAt,
       deliveryPhone: meta.deliveryPhone,
       productChoice: meta.productChoice,
+      checkoutStatus: "paid",
+      leadStartedAt: nowIso,
+      paymentPendingAt: nowIso,
+      paidAt: nowIso,
+      lastActivityAt: nowIso,
+      leadToken: leadToken || null,
       telegramSent: false,
       telegramRecipients: [],
       telegramErrors: [],
@@ -2439,6 +2696,7 @@ app.patch("/api/orders/:id/tag-info", async (req, res) => {
         ? bodyDelivRaw
         : (o.deliveryAddress || o.delivery_address || "");
 
+    const tagInfoNow = new Date().toISOString();
     await updateOrder(id, {
       firstName: body.firstName,
       lastName: body.lastName,
@@ -2456,6 +2714,9 @@ app.patch("/api/orders/:id/tag-info", async (req, res) => {
       insuranceCompany: body.insuranceCompany,
       policyNumber: body.policyNumber,
       notes: body.notes,
+      checkoutStatus: "tag_info_submitted",
+      tagInfoSubmittedAt: tagInfoNow,
+      lastActivityAt: tagInfoNow,
     });
 
     const updated = await findOrderById(id);
@@ -2659,6 +2920,10 @@ app.post("/api/orders/:id/documents", upload.fields([
       updates.docVinPhoto = await uploadDocToStorage(id, "vin-photo", buf, ext);
     }
     if (Object.keys(updates).length > 0) {
+      const docsNow = new Date().toISOString();
+      updates.documentsUploadedAt = docsNow;
+      updates.lastActivityAt = docsNow;
+      updates.checkoutStatus = "complete";
       await updateOrder(id, updates);
       const updated = await findOrderById(id);
       const full = useSupabase() ? orderRowToApi(updated) : updated;

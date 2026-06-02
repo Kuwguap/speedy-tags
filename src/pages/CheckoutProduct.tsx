@@ -81,6 +81,7 @@ export default function CheckoutProduct() {
       const payload = {
         deliveryMethod: state.deliveryMethod,
         deliveryEmail: state.deliveryEmail || undefined,
+        leadToken: state.leadToken || undefined,
         deliveryAddress:
           state.deliveryMethod === "driver" ||
           state.deliveryMethod === "overnight_fedex" ||

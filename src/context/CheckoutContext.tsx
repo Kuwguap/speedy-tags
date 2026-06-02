@@ -20,6 +20,9 @@ export interface CheckoutState {
   deliveryAddress: string;
   deliveryPhone: string;
   productChoice: ProductChoice;
+  /** Server-issued tracking token for the in-progress lead. Persists across
+   *  Stripe redirects so the paid order links back to the partial-lead row. */
+  leadToken: string;
 }
 
 const STORAGE_KEY = "tristatetags_checkout";
@@ -33,6 +36,7 @@ const defaultState: CheckoutState = {
   deliveryAddress: "",
   deliveryPhone: "",
   productChoice: "tag_only",
+  leadToken: "",
 };
 
 function migrateLoadedState(parsed: Partial<CheckoutState>): CheckoutState {

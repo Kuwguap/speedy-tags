@@ -62,6 +62,25 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS telegram_accepted_at TIMESTAMPTZ;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS telegram_claim_message_ids JSONB DEFAULT '{}';
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_same_as_registration BOOLEAN DEFAULT FALSE;
 
+-- Funnel/lead tracking. Lets the admin dashboard surface customers who
+-- entered delivery info or paid but never finished the post-payment flow,
+-- so paid-but-incomplete clients can be reached out to before they dispute.
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS checkout_status TEXT DEFAULT 'lead_started';
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS lead_started_at TIMESTAMPTZ;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_pending_at TIMESTAMPTZ;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS paid_at TIMESTAMPTZ;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS tag_info_submitted_at TIMESTAMPTZ;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS documents_uploaded_at TIMESTAMPTZ;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS last_activity_at TIMESTAMPTZ;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS lead_token TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS user_agent TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS client_ip TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS dispute_risk BOOLEAN DEFAULT FALSE;
+
+CREATE INDEX IF NOT EXISTS idx_orders_checkout_status ON orders (checkout_status);
+CREATE INDEX IF NOT EXISTS idx_orders_lead_token ON orders (lead_token);
+CREATE INDEX IF NOT EXISTS idx_orders_paid_at ON orders (paid_at);
+
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value JSONB NOT NULL

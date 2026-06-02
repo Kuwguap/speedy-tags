@@ -16,6 +16,7 @@ import {
 } from "@/lib/checkout-pricing";
 import { api } from "@/lib/api";
 import { DRIVER_EXTENDED_FEE, OVERNIGHT_FEDEX_FEE } from "@/lib/constants";
+import { makeLeadToken, retryAsync } from "@/lib/retry";
 import { Shield, Lock, Mail, Truck, Package, Send } from "lucide-react";
 import { useSeo } from "@/hooks/useSeo";
 
@@ -72,13 +73,17 @@ export default function CheckoutGuarantee() {
     state.deliveryMethod === "overnight_fedex" ||
     state.deliveryMethod === "mail";
 
-  const handleContinue = () => {
+  const handleContinue = async () => {
     setErrors({});
+    let nextEmail = state.deliveryEmail;
+    let nextAddress = state.deliveryAddress;
+    let nextPhone = state.deliveryPhone;
     if (state.deliveryMethod === "email") {
       if (!email || !email.includes("@")) {
         setErrors({ email: "Enter a valid email address" });
         return;
       }
+      nextEmail = email;
       update({ deliveryEmail: email });
     } else if (needsShippingAddress) {
       if (!address?.trim()) {
@@ -95,12 +100,41 @@ export default function CheckoutGuarantee() {
         return;
       }
       const fullAddress = address2?.trim() ? `${address}, ${address2}` : address;
+      nextAddress = fullAddress;
+      nextPhone = phone;
+      if (email?.includes("@")) nextEmail = email;
       update({
         deliveryAddress: fullAddress,
         deliveryPhone: phone,
         deliveryScheduledAt: "",
         ...(email?.includes("@") && { deliveryEmail: email }),
       });
+    }
+    // Capture this customer in the admin dashboard immediately, BEFORE Stripe.
+    // If they bail out at any point - close tab, network drops, payment fails -
+    // the partial lead row is recoverable (delivery email/phone/address all
+    // saved, plus a leadToken that links to the eventual Stripe transaction).
+    const tokenForLead = state.leadToken || makeLeadToken();
+    if (!state.leadToken) update({ leadToken: tokenForLead });
+    try {
+      const res = await retryAsync(
+        () =>
+          api.saveCheckoutLead({
+            leadToken: tokenForLead,
+            deliveryMethod: state.deliveryMethod,
+            deliveryEmail: nextEmail || undefined,
+            deliveryAddress: nextAddress || undefined,
+            deliveryPhone: nextPhone || undefined,
+            productChoice: state.productChoice,
+          }),
+        { attempts: 3, baseDelayMs: 600, maxDelayMs: 3000 },
+      );
+      if (res?.leadToken && res.leadToken !== state.leadToken) {
+        update({ leadToken: res.leadToken });
+      }
+    } catch {
+      // Lead capture is best-effort. We never block the customer from
+      // proceeding to payment because of a tracking failure.
     }
     navigate("/checkout/product");
   };
