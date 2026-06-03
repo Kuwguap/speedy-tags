@@ -42,21 +42,15 @@
       ]
     }
   ],
-  "rewrites": {
-    "beforeFiles": [
-      {
-        "source": "/api/interview/:path*",
-        "destination": "/api/interview-proxy?path=:path*"
-      }
-    ],
-    "afterFiles": [
-      { "source": "/sitemap.xml", "destination": "/api/sitemap" },
-      { "source": "/robots.txt", "destination": "/api/robots" },
-      { "source": "/backend", "destination": "/backend/index.html" },
-      { "source": "/backend/", "destination": "/backend/index.html" }
-    ],
-    "fallback": [
-      { "source": "/(.*)", "destination": "/index.html" }
-    ]
-  }
+  "rewrites": [
+    { "source": "/sitemap.xml", "destination": "/api/sitemap" },
+    { "source": "/robots.txt", "destination": "/api/robots" },
+    { "source": "/backend", "destination": "/backend/index.html" },
+    { "source": "/backend/", "destination": "/backend/index.html" },
+    {
+      "source": "/api/interview/:path*",
+      "destination": "/api/interview-proxy?path=:path*"
+    },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
 }
