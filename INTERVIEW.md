@@ -15,7 +15,7 @@ Source: `src/pages/interview/`, layout `src/components/interview/InterviewLayout
 
 ## API (Vercel)
 
-`/api/interview/*` is proxied by **`api/interview-proxy.js`** via a `vercel.json` rewrite (`/api/interview/(.*)` → `/api/interview-proxy?path=$1`). Non-Next Vercel apps cannot use `api/interview/[...path].js` catch-alls for multi-segment routes.
+`/api/interview/*` is proxied to Render via explicit Vercel serverless files under `api/interview/` (e.g. `resolve-telegram.js`, `draft.js`, `draft/[id].js`) plus `api/interview-proxy.js` as a `beforeFiles` rewrite fallback. Non-Next Vercel apps cannot use `api/interview/[...path].js` catch-alls.
 
 Set **`KRAB_INTERVIEWER_URL`** on Vercel (optional; defaults to `https://krab-interviewer-bot.onrender.com`).
 
