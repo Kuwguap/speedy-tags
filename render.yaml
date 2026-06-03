@@ -53,6 +53,7 @@ services:
         sync: false
       - key: APP_URL
         sync: false
+      # Interview form proxy target — must return {"ok":true} at /api/health (Render web service)
       - key: KRAB_INTERVIEWER_URL
         value: https://krab-interviewer-bot.onrender.com
       - key: RESEND_API_KEY

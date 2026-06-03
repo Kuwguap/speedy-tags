@@ -21,6 +21,8 @@ Set **`KRAB_INTERVIEWER_URL`** on Vercel (optional; defaults to `https://krab-in
 
 Upstream **krab-interviewer-bot** must be a **Render web** service with `/api/health` returning `{ ok: true }`.
 
+**404 on `/api/interview/*`?** Vercel proxy is fine; Render is not. See [`krab-interviewer/DEPLOY-RENDER.md`](https://github.com/Kuwguap/krab-issuer-dispatcher/blob/main/krab-interviewer/DEPLOY-RENDER.md) in the unity repo (or local copy under `unity/krab-interviewer/`).
+
 ## Dev
 
 ```bash
