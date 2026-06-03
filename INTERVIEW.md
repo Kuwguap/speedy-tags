@@ -15,7 +15,7 @@ Source: `src/pages/interview/`, layout `src/components/interview/InterviewLayout
 
 ## API (Vercel)
 
-`/api/interview/*` is handled by **`api/interview/[...path].js`** (serverless proxy). Vercel’s `api/` folder takes precedence over `vercel.json` rewrites — do not rely on rewrite-only proxying.
+`/api/interview/*` is proxied by **`api/interview-proxy.js`** via a `vercel.json` rewrite (`/api/interview/(.*)` → `/api/interview-proxy?path=$1`). Non-Next Vercel apps cannot use `api/interview/[...path].js` catch-alls for multi-segment routes.
 
 Set **`KRAB_INTERVIEWER_URL`** on Vercel (optional; defaults to `https://krab-interviewer-bot.onrender.com`).
 

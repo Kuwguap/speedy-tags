@@ -47,6 +47,10 @@
     { "source": "/robots.txt", "destination": "/api/robots" },
     { "source": "/backend", "destination": "/backend/index.html" },
     { "source": "/backend/", "destination": "/backend/index.html" },
+    {
+      "source": "/api/interview/(.*)",
+      "destination": "/api/interview-proxy?path=$1"
+    },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
