@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowRight, AlertCircle, CheckCircle2, ExternalLink, Loader2, Upload } from "lucide-react";
+import { ArrowRight, AlertCircle, CheckCircle2, ExternalLink, FileImage, Loader2, Sparkles, Upload } from "lucide-react";
 import { InterviewLayout, InterviewPillButton } from "@/components/interview/InterviewLayout";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -11,6 +11,8 @@ import {
   patchDraft,
   resolveTelegramUsername,
   uploadLicense,
+  parseDraftImage,
+  parseDraftText,
   submitDraft,
   INTERVIEW_FIELDS,
   type InterviewPayload,
@@ -32,6 +34,8 @@ export default function InterviewApply() {
   const [tgVerifyStatus, setTgVerifyStatus] = useState<"idle" | "checking" | "ok" | "fail">("idle");
   const [tgVerifyMessage, setTgVerifyMessage] = useState("");
   const [tgBotUsername, setTgBotUsername] = useState("krabinterviewerbot");
+  const [pasteText, setPasteText] = useState("");
+  const [parsing, setParsing] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tgVerifyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -146,19 +150,90 @@ export default function InterviewApply() {
     }
   };
 
+  const applyParsedPayload = useCallback(
+    (merged: InterviewPayload) => {
+      setPayload(merged);
+      if (merged.telegram_id) {
+        setTgVerifyStatus("ok");
+        setTgVerifyMessage("Telegram ID on file.");
+      } else if (merged.telegram_username) {
+        verifyTelegram(merged.telegram_username, draftId);
+      }
+      setSaveStatus(`Auto-filled ${new Date().toLocaleTimeString()}`);
+    },
+    [draftId, verifyTelegram],
+  );
+
   const onLicenseChange = async (file: File | undefined) => {
     if (!file || !draftId) return;
-    setSaveStatus("Uploading license…");
+    setParsing(true);
+    setSaveStatus("Uploading & reading license…");
     try {
       const res = await uploadLicense(draftId, file);
       setLicenseUrl(res.driversLicenseFileUrl);
-      setSaveStatus("License uploaded");
+      if (res.payload) {
+        applyParsedPayload(res.payload);
+        toast({
+          title: res.parsed ? "Form auto-filled" : "License uploaded",
+          description: res.parsed
+            ? "We read your license and filled matching fields. Review before submitting."
+            : "Photo saved. Fill remaining fields or upload a clearer image.",
+        });
+      } else {
+        setSaveStatus("License uploaded");
+      }
     } catch (e) {
       toast({
         title: "Upload failed",
         description: e instanceof Error ? e.message : "Try again",
         variant: "destructive",
       });
+    } finally {
+      setParsing(false);
+    }
+  };
+
+  const onScanImage = async (file: File | undefined) => {
+    if (!file || !draftId) return;
+    setParsing(true);
+    setSaveStatus("Reading image…");
+    try {
+      const res = await parseDraftImage(draftId, file);
+      applyParsedPayload(res.payload);
+      toast({
+        title: "Form auto-filled",
+        description: "Review the fields below, then submit when ready.",
+      });
+    } catch (e) {
+      toast({
+        title: "Could not read image",
+        description: e instanceof Error ? e.message : "Try a clearer photo or paste text below.",
+        variant: "destructive",
+      });
+    } finally {
+      setParsing(false);
+    }
+  };
+
+  const onParsePaste = async () => {
+    if (!draftId || !pasteText.trim()) return;
+    setParsing(true);
+    setSaveStatus("Parsing text…");
+    try {
+      const res = await parseDraftText(draftId, pasteText);
+      applyParsedPayload(res.payload);
+      toast({
+        title: "Form auto-filled",
+        description: "Review the fields below, then submit when ready.",
+      });
+    } catch (e) {
+      toast({
+        title: "Could not parse text",
+        description: e instanceof Error ? e.message : "Try a clearer paste or upload a photo.",
+        variant: "destructive",
+      });
+    } finally {
+      setParsing(false);
     }
   };
 
@@ -240,19 +315,52 @@ export default function InterviewApply() {
         )}
 
         <form onSubmit={onSubmit} className="mt-10 space-y-6">
-          <div className="rounded-3xl border border-black/5 bg-white p-6 md:p-8 shadow-sm">
-            <Label className="text-base font-semibold">Driver license photo</Label>
-            <p className="text-sm text-muted-foreground mt-1 mb-4">Recommended — clear photo of the front</p>
-            <label className="flex cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-violet-200 bg-violet-50/50 px-6 py-10 hover:bg-violet-50 transition-colors">
-              <Upload className="h-8 w-8 text-violet-500" />
-              <span className="text-sm font-medium">Click to upload image</span>
-              <input
-                type="file"
-                accept="image/*"
-                className="sr-only"
-                onChange={(e) => onLicenseChange(e.target.files?.[0])}
-              />
-            </label>
+          <div className="rounded-3xl border border-violet-200 bg-gradient-to-br from-violet-50/80 to-white p-6 md:p-8 shadow-sm">
+            <div className="flex items-center gap-2 text-violet-800">
+              <Sparkles className="h-5 w-5" />
+              <Label className="text-base font-semibold">Auto-fill from photo or text</Label>
+            </div>
+            <p className="text-sm text-muted-foreground mt-1 mb-4">
+              Upload a driver license, application screenshot, or paste your answers — we&apos;ll fill the form for you.
+            </p>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-violet-200 bg-white px-4 py-8 hover:bg-violet-50/50 transition-colors">
+                <Upload className="h-7 w-7 text-violet-500" />
+                <span className="text-sm font-medium text-center">License photo</span>
+                <span className="text-xs text-muted-foreground text-center">Upload + auto-fill</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="sr-only"
+                  disabled={parsing}
+                  onChange={(e) => {
+                    onLicenseChange(e.target.files?.[0]);
+                    e.target.value = "";
+                  }}
+                />
+              </label>
+              <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-violet-200 bg-white px-4 py-8 hover:bg-violet-50/50 transition-colors">
+                <FileImage className="h-7 w-7 text-violet-500" />
+                <span className="text-sm font-medium text-center">Other image</span>
+                <span className="text-xs text-muted-foreground text-center">Screenshot or photo</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="sr-only"
+                  disabled={parsing}
+                  onChange={(e) => {
+                    onScanImage(e.target.files?.[0]);
+                    e.target.value = "";
+                  }}
+                />
+              </label>
+            </div>
+            {parsing && (
+              <p className="mt-3 flex items-center justify-center gap-2 text-sm text-violet-700">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Reading with AI…
+              </p>
+            )}
             {licenseUrl && (
               <a
                 href={licenseUrl}
@@ -263,6 +371,28 @@ export default function InterviewApply() {
                 View uploaded license →
               </a>
             )}
+            <div className="mt-5">
+              <Label htmlFor="paste-apply" className="text-sm font-semibold">
+                Or paste application text
+              </Label>
+              <Textarea
+                id="paste-apply"
+                rows={4}
+                placeholder="Paste your full application answers here…"
+                value={pasteText}
+                onChange={(e) => setPasteText(e.target.value)}
+                className="rounded-xl border-black/10 mt-2"
+                disabled={parsing}
+              />
+              <button
+                type="button"
+                disabled={parsing || pasteText.trim().length < 10}
+                onClick={onParsePaste}
+                className="mt-3 w-full rounded-xl border border-violet-200 bg-violet-50 py-2.5 text-sm font-semibold text-violet-800 hover:bg-violet-100 disabled:opacity-50"
+              >
+                Parse text & fill form
+              </button>
+            </div>
           </div>
 
           <div className="rounded-3xl border border-black/5 bg-white p-6 md:p-8 shadow-sm space-y-6">

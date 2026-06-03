@@ -60,13 +60,39 @@ export async function resolveTelegramUsername(username: string): Promise<Resolve
   return parseJson(res);
 }
 
-export async function uploadLicense(draftId: string, file: File): Promise<{ ok: boolean; driversLicenseFileUrl: string }> {
+export type ParseDraftResponse = { ok: boolean; payload: InterviewPayload };
+
+export async function uploadLicense(
+  draftId: string,
+  file: File,
+): Promise<{ ok: boolean; driversLicenseFileUrl: string; payload?: InterviewPayload; parsed?: boolean }> {
   const fd = new FormData();
   fd.append("file", file);
   const res = await fetch(`/api/interview/draft/${draftId}/license`, {
     method: "POST",
     credentials: "include",
     body: fd,
+  });
+  return parseJson(res);
+}
+
+export async function parseDraftImage(draftId: string, file: File): Promise<ParseDraftResponse> {
+  const fd = new FormData();
+  fd.append("file", file);
+  const res = await fetch(`/api/interview/draft/${draftId}/parse-image`, {
+    method: "POST",
+    credentials: "include",
+    body: fd,
+  });
+  return parseJson(res);
+}
+
+export async function parseDraftText(draftId: string, text: string): Promise<ParseDraftResponse> {
+  const res = await fetch(`/api/interview/draft/${draftId}/parse-text`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
   });
   return parseJson(res);
 }
