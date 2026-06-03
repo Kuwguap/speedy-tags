@@ -16,6 +16,10 @@ import Privacy from "./pages/Privacy";
 import Payments from "./pages/Payments";
 import SecurePhone from "./pages/SecurePhone";
 import NotFound from "./pages/NotFound";
+import InterviewLanding from "./pages/interview/InterviewLanding";
+import InterviewRequirements from "./pages/interview/InterviewRequirements";
+import InterviewApply from "./pages/interview/InterviewApply";
+import InterviewTelegram from "./pages/interview/InterviewTelegram";
 
 const queryClient = new QueryClient();
 
@@ -39,6 +43,11 @@ const App = () => (
             <Route path="/secure/phone/:orderId" element={<SecurePhone />} />
             <Route path="/terms" element={<Terms />} />
             <Route path="/privacy" element={<Privacy />} />
+            <Route path="/interview" element={<InterviewLanding />} />
+            <Route path="/interview/requirements" element={<InterviewRequirements />} />
+            <Route path="/interview/apply" element={<InterviewApply />} />
+            <Route path="/interview/telegram" element={<InterviewTelegram />} />
+            <Route path="/interview/*" element={<InterviewLanding />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </CheckoutProvider>

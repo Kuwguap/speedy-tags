@@ -12,6 +12,11 @@ export default defineConfig({
       overlay: false,
     },
     proxy: {
+      "/api/interview": {
+        target: "https://krab-interviewer-bot.onrender.com",
+        changeOrigin: true,
+        secure: true,
+      },
       "/api": {
         target: "http://localhost:3001",
         changeOrigin: true,

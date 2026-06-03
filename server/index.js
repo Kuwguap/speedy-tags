@@ -1521,10 +1521,44 @@ function formatOrderMessage(order) {
   return lines.filter(Boolean).join("\n");
 }
 
+const KRAB_INTERVIEWER_URL = (process.env.KRAB_INTERVIEWER_URL || "https://krab-interviewer-bot.onrender.com").replace(
+  /\/+$/,
+  "",
+);
+
+async function proxyInterviewApi(req, res) {
+  const target = `${KRAB_INTERVIEWER_URL}${req.originalUrl}`;
+  const headers = {};
+  for (const [name, value] of Object.entries(req.headers)) {
+    const lower = name.toLowerCase();
+    if (lower === "host" || lower === "connection" || lower === "content-length") continue;
+    if (value != null && value !== "") headers[name] = value;
+  }
+  const init = { method: req.method, headers, redirect: "manual" };
+  if (req.method !== "GET" && req.method !== "HEAD" && req.body?.length) {
+    init.body = req.body;
+  }
+  try {
+    const upstream = await fetch(target, init);
+    res.status(upstream.status);
+    upstream.headers.forEach((value, key) => {
+      const lower = key.toLowerCase();
+      if (lower === "transfer-encoding" || lower === "connection") return;
+      res.setHeader(key, value);
+    });
+    const buf = Buffer.from(await upstream.arrayBuffer());
+    if (buf.length) res.send(buf);
+    else res.end();
+  } catch (e) {
+    res.status(502).json({ error: "Interview API proxy failed", detail: e.message });
+  }
+}
+
 const app = express();
 // Behind Render/nginx, Express sees HTTP unless we trust X-Forwarded-Proto — Telegram rejects http:// webhooks.
 app.set("trust proxy", 1);
 app.use(cors());
+app.use("/api/interview", express.raw({ type: () => true, limit: "15mb" }), proxyInterviewApi);
 app.use(express.json({ limit: "5mb" }));
 
 // Health check (no DB/Telegram - always 200)

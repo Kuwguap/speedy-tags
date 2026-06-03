@@ -53,6 +53,8 @@ services:
         sync: false
       - key: APP_URL
         sync: false
+      - key: KRAB_INTERVIEWER_URL
+        value: https://krab-interviewer-bot.onrender.com
       - key: RESEND_API_KEY
         sync: false
       - key: FROM_EMAIL

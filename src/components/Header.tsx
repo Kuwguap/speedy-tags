@@ -57,6 +57,7 @@ export function Header() {
           <a href="#pricing" className="text-sm font-medium text-muted-foreground hover:text-foreground">Pricing</a>
           <a href="#services" className="text-sm font-medium text-muted-foreground hover:text-foreground">Services</a>
           <a href="#faq" className="text-sm font-medium text-muted-foreground hover:text-foreground">FAQ</a>
+          <Link to="/interview" className="text-sm font-medium text-muted-foreground hover:text-foreground">Become a driver</Link>
           <a href="/checkout" className="inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-bold text-primary-foreground hover:bg-primary/90 transition-all">
             BUY IT NOW
           </a>

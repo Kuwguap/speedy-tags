@@ -587,6 +587,7 @@ export default function Index() {
                 <li><a href="#services" className="hover:text-white">Services</a></li>
                 <li><a href="#pricing" className="hover:text-white">Pricing</a></li>
                 <li><a href="#faq" className="hover:text-white">FAQ</a></li>
+                <li><a href="/interview" className="hover:text-white">Become a driver</a></li>
               </ul>
             </div>
             <div>
