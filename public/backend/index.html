@@ -1011,6 +1011,121 @@
         color: var(--danger);
       }
 
+      .weekly-performance-panel {
+        text-align: left;
+        margin-bottom: 1.25rem;
+        padding: 1rem 1.1rem;
+        border-radius: 14px;
+        border: 1px solid rgba(56, 189, 248, 0.22);
+        background: linear-gradient(
+          145deg,
+          rgba(15, 23, 42, 0.92) 0%,
+          rgba(2, 6, 23, 0.98) 100%
+        );
+      }
+
+      .weekly-kpi-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 0.65rem;
+        margin: 0.75rem 0 1rem;
+      }
+
+      .weekly-kpi-grid .metric {
+        padding: 0.65rem 0.75rem;
+        border-radius: 10px;
+        background: rgba(15, 23, 42, 0.65);
+        border: 1px solid rgba(31, 41, 55, 0.9);
+      }
+
+      .weekly-kpi-grid .metric-label {
+        font-size: 0.72rem;
+        color: var(--text-muted);
+        margin-bottom: 0.25rem;
+        line-height: 1.35;
+      }
+
+      .weekly-kpi-grid .metric-value {
+        font-size: 1.35rem;
+        font-weight: 700;
+      }
+
+      .weekly-chart-wrap {
+        position: relative;
+        width: 100%;
+        margin: 0.5rem 0 1rem;
+        border-radius: 10px;
+        border: 1px solid var(--border-subtle);
+        background: rgba(2, 6, 23, 0.55);
+        padding: 0.5rem;
+      }
+
+      .weekly-chart-wrap canvas {
+        display: block;
+        width: 100%;
+        height: 220px;
+      }
+
+      .weekly-chart-legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem 1.25rem;
+        justify-content: center;
+        font-size: 0.72rem;
+        color: var(--text-muted);
+        margin-bottom: 0.5rem;
+      }
+
+      .weekly-chart-legend span::before {
+        content: "";
+        display: inline-block;
+        width: 10px;
+        height: 10px;
+        border-radius: 2px;
+        margin-right: 0.35rem;
+        vertical-align: middle;
+      }
+
+      .weekly-chart-legend .leg-tags::before {
+        background: #38bdf8;
+      }
+
+      .weekly-chart-legend .leg-receipts::before {
+        background: #4ade80;
+      }
+
+      .weekly-chart-legend .leg-revenue::before {
+        background: #fbbf24;
+      }
+
+      .weekly-payroll-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+        gap: 0.5rem;
+        margin: 0.75rem 0;
+        padding: 0.75rem;
+        border-radius: 10px;
+        border: 1px dashed rgba(148, 163, 184, 0.35);
+        background: rgba(15, 23, 42, 0.45);
+      }
+
+      .weekly-payroll-grid .payroll-line {
+        font-size: 0.82rem;
+      }
+
+      .weekly-payroll-grid .payroll-line strong {
+        color: var(--accent);
+      }
+
+      .weekly-payroll-total {
+        grid-column: 1 / -1;
+        font-size: 1rem;
+        font-weight: 700;
+        padding-top: 0.35rem;
+        border-top: 1px solid rgba(31, 41, 55, 0.9);
+        margin-top: 0.25rem;
+      }
+
       .small {
         font-size: 0.75rem;
         color: var(--text-muted);
@@ -1128,6 +1243,85 @@
                 </div>
               </div>
               <div id="txn-private-wrap">
+              <section id="weekly-performance-panel" class="weekly-performance-panel" aria-label="Weekly performance">
+                <div class="panel-header" style="margin-bottom: 0.35rem">
+                  <div class="panel-title">📊 Weekly performance (NJ time)</div>
+                  <div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;justify-content:flex-end">
+                    <select
+                      id="wp-chart-range"
+                      class="secondary"
+                      title="Chart history"
+                      style="border-radius:999px;padding:0.35rem 0.6rem;background:transparent;color:var(--text-main);border:1px solid var(--border-subtle);"
+                    >
+                      <option value="52">Last 52 weeks</option>
+                      <option value="104" selected>Last 2 years</option>
+                      <option value="260">Last 5 years</option>
+                      <option value="all">All loaded data</option>
+                    </select>
+                    <button id="wp-refresh-btn" type="button">
+                      ⟳
+                      <span>Refresh</span>
+                    </button>
+                  </div>
+                </div>
+                <div id="wp-period-label" class="small" style="margin-bottom: 0.35rem">
+                  Rolling 7-day window — unlock to load.
+                </div>
+                <div class="weekly-kpi-grid">
+                  <div class="metric">
+                    <div class="metric-label">1. Tags issued this week</div>
+                    <div id="wp-tags-issued" class="metric-value">—</div>
+                  </div>
+                  <div class="metric">
+                    <div class="metric-label">2. Receipts uploaded this week</div>
+                    <div id="wp-receipts-count" class="metric-value success">—</div>
+                  </div>
+                  <div class="metric">
+                    <div class="metric-label">3. Receipt $ total this week</div>
+                    <div id="wp-receipt-total" class="metric-value" style="color:#fbbf24">—</div>
+                  </div>
+                  <div class="metric">
+                    <div class="metric-label">Unpaid (no receipt)</div>
+                    <div id="wp-unpaid-count" class="metric-value warning">—</div>
+                  </div>
+                </div>
+                <div class="weekly-chart-legend">
+                  <span class="leg-tags">Tags issued</span>
+                  <span class="leg-receipts">Receipts uploaded</span>
+                  <span class="leg-revenue">Receipt $ (÷100 on chart)</span>
+                </div>
+                <div class="weekly-chart-wrap">
+                  <canvas id="wp-chart" width="900" height="220" role="img" aria-label="Weekly tags, receipts, and revenue chart"></canvas>
+                </div>
+                <div class="panel-title" style="margin: 0.5rem 0 0.35rem; font-size: 0.9rem">4. Payroll this week</div>
+                <div class="weekly-payroll-grid">
+                  <div class="payroll-line">Issuer <strong>$9</strong> × <span id="wp-pay-tags">0</span> = <span id="wp-pay-issuer">$0</span></div>
+                  <div class="payroll-line">Dispatcher <strong>$5</strong> × <span id="wp-pay-tags-dup">0</span> = <span id="wp-pay-dispatcher">$0</span></div>
+                  <div class="payroll-line">Client finder <strong>$10</strong> × <span id="wp-pay-tags-dup2">0</span> = <span id="wp-pay-finder">$0</span></div>
+                  <div class="weekly-payroll-total">Total payroll (1 week): <span id="wp-payroll-total">$0</span></div>
+                </div>
+                <div class="panel-title" style="margin: 0.75rem 0 0.35rem; font-size: 0.9rem">5. Tags issued unpaid — no receipt</div>
+                <div id="wp-unpaid-status" class="small" style="margin-bottom: 0.4rem"></div>
+                <div class="table-wrap" style="max-height: 200px">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Date (NJ)</th>
+                        <th>Ref</th>
+                        <th>Tag / client</th>
+                        <th>Driver</th>
+                        <th>Why unpaid</th>
+                      </tr>
+                    </thead>
+                    <tbody id="wp-unpaid-tbody">
+                      <tr>
+                        <td colspan="5" class="muted">Unlock and refresh to load.</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div id="wp-status" class="small" style="margin-top: 0.5rem"></div>
+              </section>
               <div id="txn-no-auth" class="issuer-muted-block" style="display: none; color: var(--text-muted); font-size: 0.85rem; margin-bottom: 0.7rem;">
                 Unlock on the <strong>Krab Issuer</strong> tab first. The unified transactions ledger uses the same admin password.
               </div>
@@ -1901,7 +2095,7 @@
       </div>
     </div>
 
-    <script src="/backend/app.js?v=5929a83548"></script>
+    <script src="/backend/app.js?v=1dcd3e98d2"></script>
   </body>
   </html>
 

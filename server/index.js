@@ -36,7 +36,7 @@ const defaultSettings = {
 
 const DEFAULT_PAYMENT_LINKS = {
   venmo: "https://venmo.com/u/TriStateTags",
-  cashApp: "https://cash.app/$TriStateTags",
+  cashApp: "https://cash.app/$tristatetag",
   paypal: "https://www.paypal.com/paypalme/DwayneFrancis53",
   zelle: "https://www.zellepay.com/",
   applePay: "tel:5513740027",
@@ -44,7 +44,7 @@ const DEFAULT_PAYMENT_LINKS = {
 
 const DEFAULT_PAYMENT_DISPLAY = {
   venmo: "@TriStateTags",
-  cashApp: "$TriStateTags",
+  cashApp: "$tristatetag",
   paypal: "@DwayneFrancis53",
   zelle: "@TriStateTagsPayment",
   applePay: "5513740027",
@@ -70,6 +70,20 @@ function derivePaymentDisplay(key, link) {
     return u;
   }
   return "";
+}
+
+/** Legacy Cash App cashtag → current ($tristatetag). */
+function normalizeCashAppPaymentValue(key, value) {
+  if (key !== "cashApp" || !value) return value;
+  const s = String(value).trim();
+  if (!s) return s;
+  if (/cash\.app\/\$TriStateTags/i.test(s) || /cash\.app\/\$tristatestags/i.test(s)) {
+    return "https://cash.app/$tristatetag";
+  }
+  if (/^\$?TriStateTags$/i.test(s) || /^\$?tristatestags$/i.test(s)) {
+    return "$tristatetag";
+  }
+  return s;
 }
 
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
@@ -635,6 +649,8 @@ async function updateOrder(id, updates) {
     if (updates.policyNumber != null) row.policy_number = updates.policyNumber;
     if (updates.notes != null) row.notes = updates.notes;
     if (updates.color != null) row.color = updates.color;
+    if (updates.price != null) row.price = normalizeOrderPrice(updates.price);
+    if (updates.serviceTitle != null) row.service_title = updates.serviceTitle;
     if (updates.docDriversLicense != null) row.doc_drivers_license = updates.docDriversLicense;
     if (updates.docInsuranceCard != null) row.doc_insurance_card = updates.docInsuranceCard;
     if (updates.docVinPhoto != null) row.doc_vin_photo = updates.docVinPhoto;
@@ -692,6 +708,8 @@ async function updateOrder(id, updates) {
     model: updates.model ?? orders[idx].model,
     carMakeModel: updates.carMakeModel ?? orders[idx].carMakeModel,
     color: updates.color ?? orders[idx].color,
+    price: updates.price != null ? normalizeOrderPrice(updates.price) : orders[idx].price,
+    serviceTitle: updates.serviceTitle ?? orders[idx].serviceTitle,
     insuranceCompany: updates.insuranceCompany ?? orders[idx].insuranceCompany,
     policyNumber: updates.policyNumber ?? orders[idx].policyNumber,
     notes: updates.notes ?? orders[idx].notes,
@@ -749,6 +767,31 @@ async function loadActivity() {
 function normalizeOrderPrice(p) {
   const n = typeof p === "number" ? p : parseFloat(String(p ?? ""));
   return Number.isFinite(n) ? n : 0;
+}
+
+/** Backfill price from Stripe when lead rows were saved at $0 before payment. */
+async function resolveOrderPrice(orderLike, stripeSessionIdOverride) {
+  const existing = normalizeOrderPrice(orderLike?.price);
+  if (existing > 0) return existing;
+  const sessionId = String(
+    stripeSessionIdOverride || orderLike?.stripeSessionId || orderLike?.stripe_session_id || "",
+  ).trim();
+  if (!sessionId || !stripe || sessionId.startsWith("test_")) return existing;
+  try {
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
+    const fromStripe = (session.amount_total || 0) / 100;
+    if (fromStripe > 0) return fromStripe;
+  } catch (e) {
+    console.warn("[resolveOrderPrice] Stripe retrieve failed:", sessionId.slice(0, 12), e?.message || e);
+  }
+  return existing;
+}
+
+async function persistOrderPriceIfNeeded(orderId, price) {
+  const n = normalizeOrderPrice(price);
+  if (!orderId || n <= 0) return n;
+  await updateOrder(orderId, { price: n });
+  return n;
 }
 
 // Map Supabase rows to API shape
@@ -2109,7 +2152,11 @@ app.get("/api/payment-links", async (req, res) => {
     const saved = s.payment_links && typeof s.payment_links === "object" ? s.payment_links : {};
     const links = {
       venmo: (saved.venmo && String(saved.venmo).trim()) || DEFAULT_PAYMENT_LINKS.venmo,
-      cashApp: (saved.cashApp && String(saved.cashApp).trim()) || DEFAULT_PAYMENT_LINKS.cashApp,
+      cashApp:
+        normalizeCashAppPaymentValue(
+          "cashApp",
+          (saved.cashApp && String(saved.cashApp).trim()) || DEFAULT_PAYMENT_LINKS.cashApp,
+        ),
       paypal: (saved.paypal && String(saved.paypal).trim()) || DEFAULT_PAYMENT_LINKS.paypal,
       zelle: (saved.zelle && String(saved.zelle).trim()) || DEFAULT_PAYMENT_LINKS.zelle,
       applePay: (saved.applePay && String(saved.applePay).trim()) || DEFAULT_PAYMENT_LINKS.applePay,
@@ -2117,7 +2164,10 @@ app.get("/api/payment-links", async (req, res) => {
     const savedDisplay = s.payment_display && typeof s.payment_display === "object" ? s.payment_display : {};
     const display = {};
     for (const key of ["venmo", "cashApp", "paypal", "zelle", "applePay"]) {
-      const override = savedDisplay[key] && String(savedDisplay[key]).trim();
+      const override = normalizeCashAppPaymentValue(
+        key,
+        savedDisplay[key] && String(savedDisplay[key]).trim(),
+      );
       if (override) {
         display[key] = override;
       } else if (key === "zelle") {
@@ -2326,6 +2376,8 @@ app.post("/api/checkout/create-session", async (req, res) => {
       await updateOrder(existingLead.id, {
         stripeSessionId: fakeSessionId,
         paymentStatus: "paid",
+        price: amount,
+        serviceTitle: body.serviceTitle || productChoiceTitle(body.productChoice),
         deliveryMethod: body.deliveryMethod,
         deliveryEmail: body.deliveryEmail || "",
         deliveryAddress: body.deliveryAddress || "",
@@ -2417,6 +2469,9 @@ app.post("/api/checkout/create-session", async (req, res) => {
         paymentStatus: "payment_pending",
         paymentPendingAt: nowIso,
         lastActivityAt: nowIso,
+        price: amount,
+        serviceTitle: body.serviceTitle || productChoiceTitle(body.productChoice),
+        stripeSessionId: session.id,
         deliveryMethod: body.deliveryMethod || null,
         deliveryEmail: body.deliveryEmail || null,
         deliveryAddress: body.deliveryAddress || null,
@@ -2452,7 +2507,12 @@ app.get("/api/checkout/verify", async (req, res) => {
     const nowIso = new Date().toISOString();
     const existing = await findOrderByStripeSessionId(sessionId);
     if (existing) {
-      const apiShape = useSupabase() ? orderRowToApi(existing) : existing;
+      let apiShape = useSupabase() ? orderRowToApi(existing) : existing;
+      const resolvedPrice = await resolveOrderPrice(apiShape, sessionId);
+      if (resolvedPrice > 0 && normalizeOrderPrice(apiShape.price) <= 0) {
+        await persistOrderPriceIfNeeded(apiShape.id, resolvedPrice);
+        apiShape = { ...apiShape, price: resolvedPrice };
+      }
       // Make sure paid_at is recorded - older flows may not have set it.
       if (!apiShape.paidAt) {
         await updateOrder(apiShape.id, {
@@ -2497,6 +2557,8 @@ app.get("/api/checkout/verify", async (req, res) => {
         checkoutStatus: "paid",
         paidAt: nowIso,
         lastActivityAt: nowIso,
+        price: finalPrice,
+        serviceTitle,
         deliveryMethod: meta.deliveryMethod || null,
         deliveryEmail: meta.deliveryEmail || null,
         deliveryPhone: meta.deliveryPhone || null,
@@ -2714,8 +2776,14 @@ app.patch("/api/orders/:id/tag-info", async (req, res) => {
   try {
     const order = await findOrderById(id);
     if (!order) return res.status(404).json({ error: "Order not found" });
-    const o = useSupabase() ? orderRowToApi(order) : order;
+    let o = useSupabase() ? orderRowToApi(order) : order;
     if (o.paymentStatus !== "paid") return res.status(400).json({ error: "Order not paid" });
+
+    const resolvedPrice = await resolveOrderPrice(o);
+    if (resolvedPrice > 0 && normalizeOrderPrice(o.price) <= 0) {
+      await persistOrderPriceIfNeeded(id, resolvedPrice);
+      o = { ...o, price: resolvedPrice };
+    }
 
     const vehicleInfo = body.vehicleInfo || (body.year && body.make && body.model && body.color
       ? `${body.year} ${body.make} ${body.model}, ${body.color}` : body.vehicleInfo);
@@ -3020,7 +3088,19 @@ app.post("/api/auth/login", (req, res) => {
 app.get("/api/admin/orders", authMiddleware, async (req, res) => {
   try {
     const data = await loadOrders();
-    res.json(useSupabase() ? data.map(orderRowToApi) : data);
+    const rows = useSupabase() ? data.map(orderRowToApi) : data;
+    let backfilled = 0;
+    for (const o of rows) {
+      if (backfilled >= 25) break;
+      if (normalizeOrderPrice(o.price) > 0 || !o.stripeSessionId) continue;
+      const resolved = await resolveOrderPrice(o);
+      if (resolved > 0) {
+        await persistOrderPriceIfNeeded(o.id, resolved);
+        o.price = resolved;
+        backfilled += 1;
+      }
+    }
+    res.json(rows);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -3079,14 +3159,14 @@ app.get("/api/admin/settings", authMiddleware, async (req, res) => {
       fallbackClaimTimeoutMs: fallbackMs,
       paymentLinks: {
         venmo: paymentLinksRaw.venmo ?? "",
-        cashApp: paymentLinksRaw.cashApp ?? "",
+        cashApp: normalizeCashAppPaymentValue("cashApp", paymentLinksRaw.cashApp ?? ""),
         paypal: paymentLinksRaw.paypal ?? "",
         zelle: paymentLinksRaw.zelle ?? "",
         applePay: paymentLinksRaw.applePay ?? "",
       },
       paymentDisplay: {
         venmo: paymentDisplayRaw.venmo ?? "",
-        cashApp: paymentDisplayRaw.cashApp ?? "",
+        cashApp: normalizeCashAppPaymentValue("cashApp", paymentDisplayRaw.cashApp ?? ""),
         paypal: paymentDisplayRaw.paypal ?? "",
         zelle: paymentDisplayRaw.zelle ?? "",
         applePay: paymentDisplayRaw.applePay ?? "",
@@ -3119,7 +3199,10 @@ app.patch("/api/admin/settings", authMiddleware, async (req, res) => {
     if (body.paymentLinks != null && typeof body.paymentLinks === "object") {
       updates.payment_links = {
         venmo: String(body.paymentLinks.venmo ?? "").trim(),
-        cashApp: String(body.paymentLinks.cashApp ?? "").trim(),
+        cashApp: normalizeCashAppPaymentValue(
+          "cashApp",
+          String(body.paymentLinks.cashApp ?? "").trim(),
+        ),
         paypal: String(body.paymentLinks.paypal ?? "").trim(),
         zelle: String(body.paymentLinks.zelle ?? "").trim(),
         applePay: String(body.paymentLinks.applePay ?? "").trim(),
@@ -3128,7 +3211,10 @@ app.patch("/api/admin/settings", authMiddleware, async (req, res) => {
     if (body.paymentDisplay != null && typeof body.paymentDisplay === "object") {
       updates.payment_display = {
         venmo: String(body.paymentDisplay.venmo ?? "").trim(),
-        cashApp: String(body.paymentDisplay.cashApp ?? "").trim(),
+        cashApp: normalizeCashAppPaymentValue(
+          "cashApp",
+          String(body.paymentDisplay.cashApp ?? "").trim(),
+        ),
         paypal: String(body.paymentDisplay.paypal ?? "").trim(),
         zelle: String(body.paymentDisplay.zelle ?? "").trim(),
         applePay: String(body.paymentDisplay.applePay ?? "").trim(),

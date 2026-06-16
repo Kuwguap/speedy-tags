@@ -125,6 +125,7 @@ function setupAdminTabs() {
       refreshIssuerAdmin();
     } else if (id === "transactions") {
       refreshUnifiedTransactions();
+      refreshWeeklyPerformance();
     } else if (id === "dispatch") {
       adminApi.refreshRecipients?.();
       refreshIssuerAdmin();
@@ -613,6 +614,426 @@ function _txnFormatUsd(n) {
   }).format(v);
 }
 
+// ==========================================================================
+// Weekly performance dashboard (Transactions tab — tristatetags.com/backend)
+// ==========================================================================
+
+const PAYROLL_RATE_ISSUER = 9;
+const PAYROLL_RATE_DISPATCHER = 5;
+const PAYROLL_RATE_CLIENT_FINDER = 10;
+const KRAB_WP_CHART_RANGE_KEY = "krab_wp_chart_range";
+const NJ_TZ = "America/New_York";
+
+let _wpChartRows = [];
+let _wpWeekReceipts = [];
+let _wpLoading = false;
+
+function _wpParseNyMs(iso) {
+  if (!iso) return NaN;
+  const t = new Date(iso);
+  return Number.isNaN(t.getTime()) ? NaN : t.getTime();
+}
+
+function _wpRollingStartMs(days) {
+  return Date.now() - days * 24 * 60 * 60 * 1000;
+}
+
+function _wpNjWeekStartMs(ms) {
+  const d = new Date(ms);
+  const fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone: NJ_TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const parts = fmt.formatToParts(d);
+  const y = Number(parts.find((p) => p.type === "year").value);
+  const m = Number(parts.find((p) => p.type === "month").value);
+  const day = Number(parts.find((p) => p.type === "day").value);
+  const noonUtc = Date.UTC(y, m - 1, day, 17, 0, 0);
+  const weekday = new Date(noonUtc).getUTCDay();
+  const daysSinceMonday = (weekday + 6) % 7;
+  return noonUtc - daysSinceMonday * 24 * 60 * 60 * 1000;
+}
+
+function _wpWeekKey(ms) {
+  const weekStart = _wpNjWeekStartMs(ms);
+  const d = new Date(weekStart);
+  const y = d.getUTCFullYear();
+  const jan1 = Date.UTC(y, 0, 1, 12, 0, 0);
+  const weekNum =
+    Math.floor((weekStart - _wpNjWeekStartMs(jan1)) / (7 * 24 * 60 * 60 * 1000)) + 1;
+  return `${y}-W${String(weekNum).padStart(2, "0")}`;
+}
+
+function _wpWeekLabel(ms) {
+  const d = new Date(ms);
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: NJ_TZ,
+    month: "short",
+    day: "numeric",
+  }).format(d);
+}
+
+function _wpIsTagIssued(row) {
+  return ((row && row.delivery_status) || "").toUpperCase() === "DELIVERED";
+}
+
+function _wpHasReceipt(row) {
+  return !!String((row && row.receipt_image_url) || "").trim();
+}
+
+function _wpDriverName(row) {
+  const acc = row && row.driver_accepted;
+  if (acc && acc.driver_name) return String(acc.driver_name).trim();
+  const sel = (row && row.driver_selected_name) || "";
+  if (sel) return String(sel).trim();
+  const hist = Array.isArray(row && row.driver_history) ? row.driver_history : [];
+  if (hist[0] && hist[0].driver_name) return String(hist[0].driver_name).trim();
+  return "";
+}
+
+function _wpUnpaidReason(row) {
+  if (!_wpIsTagIssued(row)) {
+    const st = ((row && row.delivery_status) || "unknown").toUpperCase();
+    return `Tag not delivered yet (status: ${st})`;
+  }
+  const driver = _wpDriverName(row);
+  if (!driver) {
+    return "Delivered — no driver on file; receipt missing";
+  }
+  return `Driver ${driver} — accepted; receipt not uploaded`;
+}
+
+function _wpSumReceiptUsd(rows) {
+  let sum = 0;
+  for (const r of rows) {
+    const n = _txnParsePrice(r && r.receipt_price);
+    if (n > 0) sum += n;
+  }
+  return sum;
+}
+
+function _wpBuildWeeklyBuckets(rows, maxWeeks) {
+  const map = new Map();
+  for (const row of rows || []) {
+    const ms = _wpParseNyMs(row.timestamp_ny);
+    if (Number.isNaN(ms)) continue;
+    const key = _wpWeekKey(ms);
+    if (!map.has(key)) {
+      map.set(key, {
+        key,
+        weekStartMs: _wpNjWeekStartMs(ms),
+        tags: 0,
+        receipts: 0,
+        receiptUsd: 0,
+      });
+    }
+    const b = map.get(key);
+    if (_wpIsTagIssued(row)) {
+      b.tags += 1;
+      if (_wpHasReceipt(row)) {
+        b.receipts += 1;
+        b.receiptUsd += _txnParsePrice(row.receipt_price);
+      }
+    }
+  }
+  let list = Array.from(map.values()).sort((a, b) => a.weekStartMs - b.weekStartMs);
+  if (maxWeeks != null && maxWeeks > 0 && list.length > maxWeeks) {
+    list = list.slice(list.length - maxWeeks);
+  }
+  for (const b of list) {
+    b.label = _wpWeekLabel(b.weekStartMs);
+    b.payroll =
+      b.tags *
+      (PAYROLL_RATE_ISSUER + PAYROLL_RATE_DISPATCHER + PAYROLL_RATE_CLIENT_FINDER);
+  }
+  return list;
+}
+
+function _wpDrawChart(canvas, buckets) {
+  if (!canvas) return;
+  const dpr = window.devicePixelRatio || 1;
+  const cssW = canvas.clientWidth || 900;
+  const cssH = 220;
+  canvas.width = Math.round(cssW * dpr);
+  canvas.height = Math.round(cssH * dpr);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssW, cssH);
+
+  if (!buckets || buckets.length === 0) {
+    ctx.fillStyle = "#9ca3af";
+    ctx.font = "13px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("No data for chart — send tags through Dispatch.", cssW / 2, cssH / 2);
+    return;
+  }
+
+  const padL = 44;
+  const padR = 12;
+  const padT = 14;
+  const padB = 36;
+  const plotW = cssW - padL - padR;
+  const plotH = cssH - padT - padB;
+
+  let maxCount = 1;
+  let maxUsd = 1;
+  for (const b of buckets) {
+    maxCount = Math.max(maxCount, b.tags, b.receipts);
+    maxUsd = Math.max(maxUsd, b.receiptUsd / 100);
+  }
+
+  const n = buckets.length;
+  const groupW = plotW / n;
+  const barW = Math.min(14, groupW * 0.22);
+
+  ctx.strokeStyle = "rgba(148,163,184,0.2)";
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = padT + (plotH * i) / 4;
+    ctx.beginPath();
+    ctx.moveTo(padL, y);
+    ctx.lineTo(padL + plotW, y);
+    ctx.stroke();
+  }
+
+  buckets.forEach((b, i) => {
+    const cx = padL + groupW * i + groupW / 2;
+    const tagsH = (b.tags / maxCount) * plotH;
+    const recH = (b.receipts / maxCount) * plotH;
+    const usdH = (b.receiptUsd / 100 / maxUsd) * plotH;
+
+    ctx.fillStyle = "#38bdf8";
+    ctx.fillRect(cx - barW - 2, padT + plotH - tagsH, barW, tagsH);
+    ctx.fillStyle = "#4ade80";
+    ctx.fillRect(cx + 2, padT + plotH - recH, barW, recH);
+    ctx.fillStyle = "#fbbf24";
+    ctx.fillRect(cx - 3, padT + plotH - usdH, 6, usdH);
+
+    if (n <= 26 || i % Math.ceil(n / 13) === 0) {
+      ctx.fillStyle = "#9ca3af";
+      ctx.font = "10px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(b.label, cx, cssH - 8);
+    }
+  });
+
+  ctx.fillStyle = "#9ca3af";
+  ctx.font = "10px system-ui, sans-serif";
+  ctx.textAlign = "right";
+  ctx.fillText(String(maxCount), padL - 6, padT + 4);
+  ctx.fillText("$" + Math.round(maxUsd * 100), padL - 6, padT + plotH);
+}
+
+function _wpRenderUnpaidTable(rows) {
+  const tbody = document.getElementById("wp-unpaid-tbody");
+  const statusEl = document.getElementById("wp-unpaid-status");
+  if (!tbody) return;
+  tbody.innerHTML = "";
+  const unpaid = (rows || []).filter((r) => _wpIsTagIssued(r) && !_wpHasReceipt(r));
+  if (statusEl) {
+    statusEl.textContent =
+      unpaid.length === 0
+        ? "All issued tags this week have a receipt on file."
+        : `${unpaid.length} issued tag(s) without a receipt this week.`;
+  }
+  if (unpaid.length === 0) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 5;
+    td.className = "muted";
+    td.textContent = "None this week.";
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    return;
+  }
+  unpaid.forEach((r) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      `<td class="small">${escapeIssuerText(formatNy(r.timestamp_ny))}</td>` +
+      `<td><code>${escapeIssuerText(r.reference_id || "—")}</code></td>` +
+      `<td style="text-align:left;max-width:10rem;white-space:normal;">${escapeIssuerText(
+        r.tag_name || r.filename || "—"
+      )}</td>` +
+      `<td>${escapeIssuerText(_wpDriverName(r) || "—")}</td>` +
+      `<td style="text-align:left;white-space:normal;font-size:0.78rem;">${escapeIssuerText(
+        _wpUnpaidReason(r)
+      )}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+function _wpRenderCurrentWeek(weekRows, receiptUploads) {
+  const tags = (weekRows || []).filter(_wpIsTagIssued).length;
+  const withReceipt = (weekRows || []).filter((r) => _wpIsTagIssued(r) && _wpHasReceipt(r));
+  let receiptCount = withReceipt.length;
+  let receiptUsd = _wpSumReceiptUsd(withReceipt);
+
+  if (Array.isArray(receiptUploads) && receiptUploads.length > 0) {
+    const startMs = _wpRollingStartMs(7);
+    const uploaded = receiptUploads.filter((r) => {
+      const ms = _wpParseNyMs(r.updated_at);
+      return !Number.isNaN(ms) && ms >= startMs;
+    });
+    if (uploaded.length > 0) {
+      receiptCount = uploaded.length;
+    }
+  }
+
+  const unpaid = (weekRows || []).filter((r) => _wpIsTagIssued(r) && !_wpHasReceipt(r)).length;
+  const issuerPay = tags * PAYROLL_RATE_ISSUER;
+  const dispPay = tags * PAYROLL_RATE_DISPATCHER;
+  const finderPay = tags * PAYROLL_RATE_CLIENT_FINDER;
+  const totalPay = issuerPay + dispPay + finderPay;
+
+  const set = (id, text) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text;
+  };
+  set("wp-tags-issued", String(tags));
+  set("wp-receipts-count", String(receiptCount));
+  set("wp-receipt-total", _txnFormatUsd(receiptUsd));
+  set("wp-unpaid-count", String(unpaid));
+  set("wp-pay-tags", String(tags));
+  set("wp-pay-tags-dup", String(tags));
+  set("wp-pay-tags-dup2", String(tags));
+  set("wp-pay-issuer", _txnFormatUsd(issuerPay));
+  set("wp-pay-dispatcher", _txnFormatUsd(dispPay));
+  set("wp-pay-finder", _txnFormatUsd(finderPay));
+  set("wp-payroll-total", _txnFormatUsd(totalPay));
+
+  const periodEl = document.getElementById("wp-period-label");
+  if (periodEl) {
+    const end = new Date();
+    const start = new Date(_wpRollingStartMs(7));
+    periodEl.textContent = `Rolling 7 days (NJ): ${formatNy(start.toISOString())} → ${formatNy(
+      end.toISOString()
+    )}`;
+  }
+
+  _wpRenderUnpaidTable(weekRows);
+}
+
+async function _wpFetchAllTransactions() {
+  const all = [];
+  const pageSize = 500;
+  let offset = 0;
+  const maxItems = 15000;
+  while (all.length < maxItems) {
+    const res = await requestWithAdminJson(
+      `/transactions/full?limit=${pageSize}&offset=${offset}&period=all`
+    );
+    if (!res.ok) throw new Error(res.error || "FETCH_FAILED");
+    const page = Array.isArray(res.data) ? res.data : [];
+    if (page.length === 0) break;
+    all.push(...page);
+    if (page.length < pageSize) break;
+    offset += pageSize;
+  }
+  return all;
+}
+
+async function refreshWeeklyPerformance() {
+  if (!hasAdminPassword()) return;
+  if (_wpLoading) return;
+  const statusEl = document.getElementById("wp-status");
+  _wpLoading = true;
+  if (statusEl) statusEl.textContent = "Loading weekly performance…";
+
+  try {
+    const [weekRes, receiptsRes] = await Promise.all([
+      requestWithAdminJson("/transactions/full?limit=2000&period=1w"),
+      issuerApiJson("/issuer-admin/receipts/submitted?limit=500"),
+    ]);
+    if (!hasAdminPassword()) return;
+
+    let chartRows = _wpChartRows;
+    if (chartRows.length === 0) {
+      if (statusEl) statusEl.textContent = "Loading history for chart (may take a moment)…";
+      chartRows = await _wpFetchAllTransactions();
+      if (!hasAdminPassword()) return;
+      _wpChartRows = chartRows;
+    }
+
+    const weekRows = weekRes.ok && Array.isArray(weekRes.data) ? weekRes.data : [];
+    _wpWeekReceipts =
+      receiptsRes.ok && Array.isArray(receiptsRes.data) ? receiptsRes.data : [];
+
+    _wpRenderCurrentWeek(weekRows, _wpWeekReceipts);
+
+    const rangeEl = document.getElementById("wp-chart-range");
+    let maxWeeks = 104;
+    if (rangeEl) {
+      const v = String(rangeEl.value || "104");
+      maxWeeks = v === "all" ? null : parseInt(v, 10) || 104;
+    }
+    const buckets = _wpBuildWeeklyBuckets(chartRows, maxWeeks);
+    _wpDrawChart(document.getElementById("wp-chart"), buckets);
+
+    if (statusEl) {
+      const wkNote = weekRes.ok ? "" : " (current-week API partial — check password)";
+      statusEl.textContent =
+        `Chart: ${buckets.length} week(s) from ${chartRows.length} transactions.${wkNote}`;
+    }
+  } catch (e) {
+    console.error(e);
+    if (statusEl) {
+      statusEl.textContent =
+        e && String(e.message || e).startsWith("NETWORK:")
+          ? "API unreachable — check krab-dispatch-api on Render."
+          : "Failed to load weekly performance: " + (e && e.message ? e.message : String(e));
+    }
+  } finally {
+    _wpLoading = false;
+  }
+}
+
+function setupWeeklyPerformanceEvents() {
+  const refreshBtn = document.getElementById("wp-refresh-btn");
+  if (refreshBtn) {
+    refreshBtn.addEventListener("click", () => {
+      _wpChartRows = [];
+      refreshWeeklyPerformance();
+    });
+  }
+  const rangeEl = document.getElementById("wp-chart-range");
+  if (rangeEl) {
+    try {
+      const saved = localStorage.getItem(KRAB_WP_CHART_RANGE_KEY);
+      if (saved) rangeEl.value = saved;
+    } catch (_) {}
+    rangeEl.addEventListener("change", () => {
+      try {
+        localStorage.setItem(KRAB_WP_CHART_RANGE_KEY, rangeEl.value);
+      } catch (_) {}
+      if (_wpChartRows.length) {
+        const maxWeeks =
+          rangeEl.value === "all" ? null : parseInt(rangeEl.value, 10) || 104;
+        _wpDrawChart(
+          document.getElementById("wp-chart"),
+          _wpBuildWeeklyBuckets(_wpChartRows, maxWeeks)
+        );
+      } else if (hasAdminPassword()) {
+        refreshWeeklyPerformance();
+      }
+    });
+  }
+  window.addEventListener("resize", () => {
+    if (!_wpChartRows.length) return;
+    const rangeEl2 = document.getElementById("wp-chart-range");
+    const maxWeeks =
+      rangeEl2 && rangeEl2.value === "all"
+        ? null
+        : parseInt((rangeEl2 && rangeEl2.value) || "104", 10) || 104;
+    _wpDrawChart(
+      document.getElementById("wp-chart"),
+      _wpBuildWeeklyBuckets(_wpChartRows, maxWeeks)
+    );
+  });
+}
+
 function _txnStatusCell(row) {
   const s = ((row && row.delivery_status) || "").toUpperCase();
   if (!s) return '<span class="muted">—</span>';
@@ -817,6 +1238,7 @@ async function refreshUnifiedTransactions() {
       : ""
   );
   renderUnifiedTransactions();
+  refreshWeeklyPerformance();
 }
 
 function doAdminLogout() {
@@ -826,6 +1248,8 @@ function doAdminLogout() {
   _issuerAiSnapshot = null;
   _txnLoading = false;
   _txnRows = [];
+  _wpChartRows = [];
+  _wpWeekReceipts = [];
   setTxnBanner("");
   setTxnStatus("");
   renderUnifiedTransactions();
@@ -2890,6 +3314,7 @@ async function tryInitialLogin() {
     await refreshSummary();
     bumpAdminAuthSuccessGeneration();
     applyLoggedInUI(true);
+    refreshWeeklyPerformance();
   } catch {
     if (_adminAuthSuccessGeneration !== genAtStart) {
       return;
@@ -2977,6 +3402,7 @@ function setupEvents() {
       await refreshSummary();
       bumpAdminAuthSuccessGeneration();
       applyLoggedInUI(true);
+      refreshWeeklyPerformance();
       // Recipients will be refreshed by the modified applyLoggedInUI
     } catch (e) {
       console.error(e);
@@ -3585,6 +4011,7 @@ function setupEvents() {
 
   setupIssuerAdminEvents();
   setupTxnEvents();
+  setupWeeklyPerformanceEvents();
 
   applySummaryZoom(1);
   applyTxZoom(1);
@@ -3616,6 +4043,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   // is populated without the user switching tabs.
   if (transactionsTabActive() && getStoredPassword()) {
     refreshUnifiedTransactions();
+    refreshWeeklyPerformance();
   }
 });
 

@@ -981,7 +981,7 @@ export default function Admin() {
                     <Input
                       placeholder={
                         key === "venmo" ? "https://venmo.com/u/TriStateTags" :
-                        key === "cashApp" ? "https://cash.app/$TriStateTags" :
+                        key === "cashApp" ? "https://cash.app/$tristatetag" :
                         key === "paypal" ? "https://www.paypal.com/paypalme/..." :
                         key === "zelle" ? "https://www.zellepay.com/" :
                         "tel:5513740027"
@@ -1005,7 +1005,7 @@ export default function Admin() {
                     <div>
                       <Label className="text-xs text-muted-foreground">Display under button (e.g. @handle, $tag, or email)</Label>
                       <Input
-                        placeholder={key === "venmo" ? "@TriStateTags" : key === "cashApp" ? "$TriStateTags" : key === "zelle" ? "@TriStateTagsPayment" : key === "applePay" ? "5513740027" : ""}
+                        placeholder={key === "venmo" ? "@TriStateTags" : key === "cashApp" ? "$tristatetag" : key === "zelle" ? "@TriStateTagsPayment" : key === "applePay" ? "5513740027" : ""}
                         value={settings?.paymentDisplay?.[key as keyof typeof settings.paymentDisplay] ?? ""}
                         onChange={(e) =>
                           setSettings((s) =>
