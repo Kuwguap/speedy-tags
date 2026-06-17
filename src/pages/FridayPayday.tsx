@@ -160,13 +160,17 @@ export default function FridayPayday() {
     setLoading(true);
     setError(null);
     try {
-      const data = await fetchAllTransactions("3m");
+      const data = await fetchAllTransactions("2m");
       setRows(data as TransactionRow[]);
     } catch (e) {
       setError(
-        (e as Error).message?.startsWith("NETWORK:")
-          ? "Network error — try again in a moment. If this persists, reload the page."
-          : (e as Error).message || "Failed to load transactions"
+        (e as Error).message === "BAD_JSON" || (e as Error).message === "EMPTY_RESPONSE"
+          ? "Server returned an invalid response — try Refresh. The API may still be waking up."
+          : (e as Error).message === "HTML_RESPONSE"
+            ? "Got HTML instead of data — redeploy may still be in progress. Try Refresh."
+            : (e as Error).message?.startsWith("NETWORK:")
+              ? "Network error — try again in a moment. If this persists, reload the page."
+              : (e as Error).message || "Failed to load transactions"
       );
     } finally {
       setLoading(false);

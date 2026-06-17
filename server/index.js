@@ -1598,6 +1598,38 @@ const KRAB_INTERVIEWER_URL = (process.env.KRAB_INTERVIEWER_URL || "https://krab-
   "",
 );
 
+const KRAB_DISPATCH_API_URL = (process.env.KRAB_DISPATCH_API_URL || "https://krab-dispatch-api.onrender.com").replace(
+  /\/+$/,
+  "",
+);
+
+async function proxyDispatchApi(req, res) {
+  const suffix = req.url || "";
+  const target = `${KRAB_DISPATCH_API_URL}${suffix}`;
+  const headers = {};
+  for (const [name, value] of Object.entries(req.headers)) {
+    const lower = name.toLowerCase();
+    if (lower === "host" || lower === "connection" || lower === "content-length") continue;
+    if (value != null && value !== "") headers[name] = value;
+  }
+  headers["accept-encoding"] = "identity";
+  const init = { method: req.method, headers, redirect: "manual" };
+  if (req.method !== "GET" && req.method !== "HEAD" && req.body?.length) {
+    init.body = req.body;
+  }
+  try {
+    const upstream = await fetch(target, init);
+    res.status(upstream.status);
+    const ct = upstream.headers.get("content-type");
+    if (ct) res.setHeader("content-type", ct);
+    const buf = Buffer.from(await upstream.arrayBuffer());
+    if (buf.length) res.send(buf);
+    else res.end();
+  } catch (e) {
+    res.status(502).json({ error: "Dispatch API proxy failed", detail: e.message });
+  }
+}
+
 async function proxyInterviewApi(req, res) {
   const target = `${KRAB_INTERVIEWER_URL}${req.originalUrl}`;
   const headers = {};
@@ -1630,6 +1662,7 @@ const app = express();
 // Behind Render/nginx, Express sees HTTP unless we trust X-Forwarded-Proto — Telegram rejects http:// webhooks.
 app.set("trust proxy", 1);
 app.use(cors());
+app.use("/api/dispatch", express.raw({ type: () => true, limit: "15mb" }), proxyDispatchApi);
 app.use("/api/interview", express.raw({ type: () => true, limit: "15mb" }), proxyInterviewApi);
 app.use(express.json({ limit: "5mb" }));
 

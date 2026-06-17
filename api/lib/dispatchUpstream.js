@@ -7,11 +7,18 @@ export const proxyConfig = {
   api: {
     bodyParser: false,
   },
+  maxDuration: 60,
 };
 
 function hopByHop(name) {
   const n = name.toLowerCase();
-  return n === "host" || n === "connection" || n === "content-length" || n === "transfer-encoding";
+  return (
+    n === "host" ||
+    n === "connection" ||
+    n === "content-length" ||
+    n === "transfer-encoding" ||
+    n === "content-encoding"
+  );
 }
 
 async function readBody(req) {
@@ -48,6 +55,8 @@ export async function proxyToDispatchUpstream(req, res, subpath) {
     if (hopByHop(name) || value == null || value === "") continue;
     headers[name] = value;
   }
+  // Ask upstream for uncompressed JSON — avoids Safari breaking on mismatched content-encoding.
+  headers["accept-encoding"] = "identity";
 
   const init = { method: req.method, headers, redirect: "manual" };
   if (req.method !== "GET" && req.method !== "HEAD") {
@@ -63,6 +72,7 @@ export async function proxyToDispatchUpstream(req, res, subpath) {
       res.setHeader(key, value);
     });
     const buf = Buffer.from(await upstream.arrayBuffer());
+    res.setHeader("content-type", upstream.headers.get("content-type") || "application/json");
     if (buf.length) res.send(buf);
     else res.end();
   } catch (e) {

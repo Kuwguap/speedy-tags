@@ -1,6 +1,9 @@
 /** Krab dispatch API client (same auth as /backend). */
 
 const DEFAULT_API_BASE = "https://krab-dispatch-api.onrender.com";
+const RENDER_DISPATCH_PROXY = (
+  import.meta.env.VITE_SPEEDY_TAGS_API || "https://speedy-tags-api.onrender.com"
+).replace(/\/+$/, "");
 const PASSWORD_KEY = "krab_admin_password";
 const API_BASE_KEY = "krab_api_base";
 
@@ -51,6 +54,41 @@ export function resolveDispatchApiBase(): string {
   return import.meta.env.VITE_DISPATCH_API_URL?.replace(/\/+$/, "") || DEFAULT_API_BASE;
 }
 
+function dispatchFallbackBases(primary: string): string[] {
+  const bases = [primary];
+  if (primary.includes("/api/dispatch") && !primary.includes("onrender.com")) {
+    bases.push(`${RENDER_DISPATCH_PROXY.replace(/\/+$/, "")}/api/dispatch`);
+  }
+  return bases;
+}
+
+async function dispatchFetchOnce<T>(
+  base: string,
+  path: string,
+  opts: RequestInit,
+  pw: string
+): Promise<{ ok: true; data: T } | { ok: false; status: number; error: string }> {
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    "X-Admin-Password": pw,
+    ...(opts.headers as Record<string, string>),
+  };
+
+  let res: Response;
+  try {
+    res = await fetch(`${base}${path}`, { ...opts, headers });
+  } catch (e) {
+    return { ok: false, status: 0, error: `NETWORK: ${(e as Error).message}` };
+  }
+
+  if (res.status === 401) return { ok: false, status: 401, error: "UNAUTHORIZED" };
+  if (!res.ok) return { ok: false, status: res.status, error: `HTTP_${res.status}` };
+
+  const parsed = await parseJsonResponse<T>(res);
+  if (!parsed.ok) return { ok: false, status: res.status, error: parsed.error };
+  return { ok: true, data: parsed.data };
+}
+
 export function getDispatchPassword(): string {
   try {
     return String(localStorage.getItem(PASSWORD_KEY) || "").trim();
@@ -67,6 +105,21 @@ export function clearDispatchPassword(): void {
   localStorage.removeItem(PASSWORD_KEY);
 }
 
+async function parseJsonResponse<T>(res: Response): Promise<{ ok: true; data: T } | { ok: false; error: string }> {
+  const text = await res.text();
+  if (!text.trim()) {
+    return { ok: false, error: "EMPTY_RESPONSE" };
+  }
+  if (text.trimStart().startsWith("<")) {
+    return { ok: false, error: "HTML_RESPONSE" };
+  }
+  try {
+    return { ok: true, data: JSON.parse(text) as T };
+  } catch {
+    return { ok: false, error: "BAD_JSON" };
+  }
+}
+
 export async function dispatchFetch<T = unknown>(
   path: string,
   opts: RequestInit = {}
@@ -74,45 +127,46 @@ export async function dispatchFetch<T = unknown>(
   const pw = getDispatchPassword();
   if (!pw) return { ok: false, status: 0, error: "NO_PASSWORD" };
 
-  const base = resolveDispatchApiBase();
-  const headers: Record<string, string> = {
-    "X-Admin-Password": pw,
-    ...(opts.headers as Record<string, string>),
+  const bases = dispatchFallbackBases(resolveDispatchApiBase());
+  let last: { ok: false; status: number; error: string } = {
+    ok: false,
+    status: 0,
+    error: "NETWORK: failed",
   };
-
-  let res: Response;
-  try {
-    res = await fetch(`${base}${path}`, { ...opts, headers });
-  } catch (e) {
-    return { ok: false, status: 0, error: `NETWORK: ${(e as Error).message}` };
+  for (const base of bases) {
+    const result = await dispatchFetchOnce<T>(base, path, opts, pw);
+    if (result.ok) return result;
+    last = result;
+    const retryable =
+      result.error === "BAD_JSON" ||
+      result.error === "EMPTY_RESPONSE" ||
+      result.error === "HTML_RESPONSE" ||
+      result.error.startsWith("NETWORK:");
+    if (!retryable) return result;
   }
-
-  if (res.status === 401) return { ok: false, status: 401, error: "UNAUTHORIZED" };
-  if (!res.ok) return { ok: false, status: res.status, error: `HTTP_${res.status}` };
-
-  try {
-    const data = (await res.json()) as T;
-    return { ok: true, data };
-  } catch {
-    return { ok: false, status: res.status, error: "BAD_JSON" };
-  }
+  return last;
 }
 
 export async function validateDispatchPassword(pw: string): Promise<boolean> {
-  const base = resolveDispatchApiBase();
-  try {
-    const res = await fetch(`${base}/transactions/full?limit=1`, {
-      headers: { "X-Admin-Password": pw },
-    });
-    return res.ok;
-  } catch {
-    return false;
+  const bases = dispatchFallbackBases(resolveDispatchApiBase());
+  for (const base of bases) {
+    try {
+      const res = await fetch(`${base}/transactions/full?limit=1&period=1w`, {
+        headers: { Accept: "application/json", "X-Admin-Password": pw },
+      });
+      if (!res.ok) continue;
+      const parsed = await parseJsonResponse<unknown[]>(res);
+      if (parsed.ok) return true;
+    } catch {
+      // try next base
+    }
   }
+  return false;
 }
 
-export async function fetchAllTransactions(period = "1m"): Promise<unknown[]> {
+export async function fetchAllTransactions(period = "2m"): Promise<unknown[]> {
   const all: unknown[] = [];
-  const pageSize = 500;
+  const pageSize = 100;
   let offset = 0;
   while (all.length < 15000) {
     const res = await dispatchFetch<unknown[]>(

@@ -377,6 +377,7 @@ async function requestWithAdminJson(path, opts = {}) {
     return { ok: false, status: 0, error: "NO_PASSWORD" };
   }
   const headers = Object.assign({}, opts.headers || {}, {
+    Accept: "application/json",
     "X-Admin-Password": pw,
   });
   let res;
@@ -392,8 +393,15 @@ async function requestWithAdminJson(path, opts = {}) {
   if (!res.ok) {
     return { ok: false, status: res.status, error: "HTTP_" + res.status };
   }
+  const text = await res.text();
+  if (!text.trim()) {
+    return { ok: false, status: res.status, error: "EMPTY_RESPONSE" };
+  }
+  if (text.trimStart().startsWith("<")) {
+    return { ok: false, status: res.status, error: "HTML_RESPONSE" };
+  }
   try {
-    const data = await res.json();
+    const data = JSON.parse(text);
     return { ok: true, status: res.status, data };
   } catch (e) {
     return { ok: false, status: res.status, error: "BAD_JSON" };
@@ -1013,7 +1021,7 @@ async function refreshWeeklyPerformance() {
 
   try {
     const [weekRes, receiptsRes] = await Promise.all([
-      requestWithAdminJson("/transactions/full?limit=2000&period=1w"),
+      requestWithAdminJson("/transactions/full?limit=400&period=1w"),
       issuerApiJson("/issuer-admin/receipts/submitted?limit=500"),
     ]);
     if (!hasAdminPassword()) return;
