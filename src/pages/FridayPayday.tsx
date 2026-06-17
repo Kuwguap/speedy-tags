@@ -160,11 +160,13 @@ export default function FridayPayday() {
     setLoading(true);
     setError(null);
     try {
-      const data = await fetchAllTransactions("2m");
+      const data = await fetchAllTransactions("3m");
       setRows(data as TransactionRow[]);
     } catch (e) {
       setError(
-        (e as Error).message === "BAD_JSON" || (e as Error).message === "EMPTY_RESPONSE"
+        (e as Error).message === "HTTP_400"
+          ? "Bad request (invalid API period or params) — refresh the page after deploy."
+          : (e as Error).message === "BAD_JSON" || (e as Error).message === "EMPTY_RESPONSE"
           ? "Server returned an invalid response — try Refresh. The API may still be waking up."
           : (e as Error).message === "HTML_RESPONSE"
             ? "Got HTML instead of data — redeploy may still be in progress. Try Refresh."

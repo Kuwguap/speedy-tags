@@ -89,7 +89,11 @@ async function dispatchFetchOnce<T>(
   return { ok: true, data: parsed.data };
 }
 
-export function getDispatchPassword(): string {
+/** Rolling windows accepted by krab-dispatch-api `/transactions/full`. */
+export const DISPATCH_TXN_PERIODS = ["1w", "2w", "3w", "1m", "3m", "6m", "12m", "all"] as const;
+export type DispatchTxnPeriod = (typeof DISPATCH_TXN_PERIODS)[number];
+
+export const DEFAULT_TXN_PERIOD: DispatchTxnPeriod = "3m";
   try {
     return String(localStorage.getItem(PASSWORD_KEY) || "").trim();
   } catch {
@@ -164,7 +168,7 @@ export async function validateDispatchPassword(pw: string): Promise<boolean> {
   return false;
 }
 
-export async function fetchAllTransactions(period = "2m"): Promise<unknown[]> {
+export async function fetchAllTransactions(period: DispatchTxnPeriod = DEFAULT_TXN_PERIOD): Promise<unknown[]> {
   const all: unknown[] = [];
   const pageSize = 100;
   let offset = 0;
