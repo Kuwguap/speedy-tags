@@ -12,15 +12,41 @@ function isLocalHost(hostname: string): boolean {
   return false;
 }
 
+function isProductionWebHost(hostname: string): boolean {
+  const h = String(hostname || "").toLowerCase();
+  return (
+    h === "tristatetags.com" ||
+    h === "www.tristatetags.com" ||
+    h === "tristatetag.com" ||
+    h === "www.tristatetag.com" ||
+    h.endsWith(".vercel.app")
+  );
+}
+
 export function resolveDispatchApiBase(): string {
+  let stored = "";
   try {
-    const stored = localStorage.getItem(API_BASE_KEY)?.trim();
-    if (stored?.startsWith("http")) return stored.replace(/\/+$/, "");
+    stored = (localStorage.getItem(API_BASE_KEY) || "").trim();
   } catch {
     /* ignore */
   }
-  if (typeof window !== "undefined" && isLocalHost(window.location.hostname)) {
-    return window.location.origin.replace(/\/+$/, "");
+  if (typeof window !== "undefined") {
+    const { hostname, protocol, origin } = window.location;
+    const originBase = origin.replace(/\/+$/, "");
+    const proxied = `${originBase}/api/dispatch`;
+    if (protocol === "https:" && isProductionWebHost(hostname)) {
+      if (
+        !stored ||
+        stored.includes("krab-dispatch-api.onrender.com") ||
+        stored.includes("onrender.com")
+      ) {
+        return proxied;
+      }
+    }
+    if (stored.startsWith("http")) return stored.replace(/\/+$/, "");
+    if (isLocalHost(hostname)) return originBase;
+  } else if (stored.startsWith("http")) {
+    return stored.replace(/\/+$/, "");
   }
   return import.meta.env.VITE_DISPATCH_API_URL?.replace(/\/+$/, "") || DEFAULT_API_BASE;
 }

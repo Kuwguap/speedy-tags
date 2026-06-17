@@ -51,6 +51,10 @@
       "source": "/api/interview/:path*",
       "destination": "/api/interview-proxy?path=:path*"
     },
+    {
+      "source": "/api/dispatch/:path*",
+      "destination": "/api/dispatch-proxy?path=:path*"
+    },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

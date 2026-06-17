@@ -27,6 +27,17 @@ function _isLocalHost(hostname) {
   return false;
 }
 
+function _isProductionWebHost(hostname) {
+  const h = String(hostname || "").toLowerCase();
+  return (
+    h === "tristatetags.com" ||
+    h === "www.tristatetags.com" ||
+    h === "tristatetag.com" ||
+    h === "www.tristatetag.com" ||
+    h.endsWith(".vercel.app")
+  );
+}
+
 function resolveApiBase() {
   try {
     const params = new URLSearchParams(window.location.search);
@@ -55,6 +66,17 @@ function resolveApiBase() {
   try {
     const stored = (localStorage.getItem("krab_api_base") || "").trim();
     if (stored.startsWith("https://") || stored.startsWith("http://")) {
+      const loc = window.location;
+      const onProd =
+        loc &&
+        loc.protocol === "https:" &&
+        _isProductionWebHost(loc.hostname);
+      if (
+        onProd &&
+        (stored.includes("krab-dispatch-api.onrender.com") || stored.includes("onrender.com"))
+      ) {
+        return loc.origin.replace(/\/+$/, "") + "/api/dispatch";
+      }
       return stored.replace(/\/+$/, "");
     }
   } catch {
@@ -70,6 +92,10 @@ function resolveApiBase() {
       _isLocalHost(loc.hostname)
     ) {
       return loc.origin.replace(/\/+$/, "");
+    }
+    // Same-origin proxy on production (mobile Safari blocks cross-origin Render API).
+    if (loc && loc.protocol === "https:" && _isProductionWebHost(loc.hostname)) {
+      return loc.origin.replace(/\/+$/, "") + "/api/dispatch";
     }
   } catch {
     // ignore

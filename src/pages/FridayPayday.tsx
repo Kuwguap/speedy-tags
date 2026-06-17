@@ -163,7 +163,11 @@ export default function FridayPayday() {
       const data = await fetchAllTransactions("3m");
       setRows(data as TransactionRow[]);
     } catch (e) {
-      setError((e as Error).message || "Failed to load transactions");
+      setError(
+        (e as Error).message?.startsWith("NETWORK:")
+          ? "Network error — try again in a moment. If this persists, reload the page."
+          : (e as Error).message || "Failed to load transactions"
+      );
     } finally {
       setLoading(false);
     }
