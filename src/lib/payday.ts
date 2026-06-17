@@ -5,7 +5,7 @@ export const PAYROLL_RATE_DISPATCHER = 5;
 export const MIN_TAG_PRICE_USD = 100;
 export const NJ_TZ = "America/New_York";
 
-/** Issuers on the Highkage track (Haru). All others use Sensei dispatchers. */
+/** Tag senders on the Haru / Highkage track (dispatch bot handle). */
 export const HIGHKAGE_ISSUER_HANDLES = new Set(["haruhatsu"]);
 
 export interface TransactionRow {
@@ -50,6 +50,10 @@ export interface PaydayStats {
   netAfterPayroll: number;
   periodLabel: string;
   teamPayrolls: TeamPayrollLine[];
+  issuerPayrolls: IssuerPayrollLine[];
+  dispatcherPayrolls: DispatcherPayrollLine[];
+  leadCreatorPayrolls: LeadCreatorPayrollLine[];
+  pairBuckets: PayrollPairBucket[];
 }
 
 export interface TeamPayrollLine {
@@ -60,6 +64,56 @@ export interface TeamPayrollLine {
   issuerPay: number;
   dispatcherPay: number;
   total: number;
+}
+
+export interface IssuerPayrollLine {
+  handle: string;
+  label: string;
+  dispatcherTeam: "highkage" | "sensei";
+  dispatcherLabel: string;
+  tags: number;
+  receipts: number;
+  cashIn: number;
+  pay: number;
+}
+
+export interface DispatcherPayrollLine {
+  team: "highkage" | "sensei";
+  label: string;
+  tags: number;
+  receipts: number;
+  cashIn: number;
+  pay: number;
+  issuerNote: string;
+}
+
+export interface LeadCreatorPayrollLine {
+  handle: string;
+  label: string;
+  dispatcherTeam: "highkage" | "sensei";
+  pairedIssuerLabel: string;
+  tags: number;
+  receipts: number;
+  cashIn: number;
+  pay: number;
+}
+
+export interface PayrollPairBucket {
+  key: string;
+  issuerHandle: string;
+  issuerLabel: string;
+  dispatcherTeam: "highkage" | "sensei";
+  dispatcherTeamLabel: string;
+  tags: number;
+  receipts: number;
+  cashIn: number;
+  expectedIn: number;
+  leak: number;
+  issuerPay: number;
+  dispatcherPay: number;
+  totalPay: number;
+  leadCreators: { handle: string; label: string; tags: number }[];
+  rows: TransactionRow[];
 }
 
 export function parsePrice(raw: unknown): number {
@@ -98,46 +152,302 @@ export function normalizeIssuerHandle(raw?: string | null): string {
     .replace(/^@/, "");
 }
 
-/** Haru (@haruhatsu) → Highkage dispatch; all other issuers → Sensei dispatch. */
-export function isHighkageTrack(row: TransactionRow): boolean {
-  const h = normalizeIssuerHandle(row.issuer_submitter_handle);
-  if (HIGHKAGE_ISSUER_HANDLES.has(h)) return true;
+/**
+ * Who sent the tag (Issuer payroll) — matches /backend "Issuer" column:
+ * dispatch bot sender (`dispatcher_handle` / `dispatcher_name`).
+ */
+export function resolveTagIssuerHandle(row: TransactionRow): string {
+  const h = normalizeIssuerHandle(row.dispatcher_handle);
+  if (h) return h;
+  const name = String(row.dispatcher_name || "").trim().toLowerCase();
+  if (name.includes("haru")) return "haruhatsu";
+  if (name) {
+    const slug = name.replace(/[^a-z0-9]/g, "");
+    if (slug) return slug;
+  }
   const g = String(row.issuer_group || "").toLowerCase();
-  return g === "highkage_group" || g.includes("highkage");
+  if (g.includes("highkage")) return "haruhatsu";
+  return "unknown";
 }
 
-export function computeTeamPayrolls(rows: TransactionRow[]): TeamPayrollLine[] {
-  const delivered = rows.filter(isTagIssued);
-  let highkageTags = 0;
-  let senseiTags = 0;
-  for (const row of delivered) {
-    if (isHighkageTrack(row)) highkageTags += 1;
-    else senseiTags += 1;
+/**
+ * Who created the lead (Dispatcher column in /backend) — issuer bot submitter.
+ */
+export function resolveLeadCreatorHandle(row: TransactionRow): string {
+  return normalizeIssuerHandle(row.issuer_submitter_handle) || "unknown";
+}
+
+export function isHighkageIssuerHandle(raw?: string | null): boolean {
+  return HIGHKAGE_ISSUER_HANDLES.has(normalizeIssuerHandle(raw));
+}
+
+export function dispatcherTeamForRow(row: TransactionRow): "highkage" | "sensei" {
+  return isHighkageIssuerHandle(resolveTagIssuerHandle(row)) ? "highkage" : "sensei";
+}
+
+export function isHighkageTrack(row: TransactionRow): boolean {
+  return dispatcherTeamForRow(row) === "highkage";
+}
+
+export function issuerDisplayLabel(handle: string, displayName?: string | null): string {
+  const h = normalizeIssuerHandle(handle);
+  const name = String(displayName || "").trim();
+  if (h === "haruhatsu" || name.toLowerCase().includes("haru")) {
+    return name ? `${name} (@haruhatsu)` : "Haru (@haruhatsu)";
   }
-  const lines: TeamPayrollLine[] = [];
-  if (highkageTags > 0) {
+  if (!h || h === "unknown") return name || "Unknown issuer";
+  if (name && normalizeIssuerHandle(name) !== h) return `${name} (@${h})`;
+  return `@${h}`;
+}
+
+export function leadCreatorDisplayLabel(handle: string): string {
+  const h = normalizeIssuerHandle(handle);
+  if (!h || h === "unknown") return "Unknown lead creator";
+  return `@${h}`;
+}
+
+export function dispatcherLabelForTeam(team: "highkage" | "sensei"): string {
+  return team === "highkage" ? "Highkage" : "Sensei";
+}
+
+function leadPriceForTag(row: TransactionRow): number {
+  const p = parsePrice(row.price);
+  return p > 0 ? p : MIN_TAG_PRICE_USD;
+}
+
+export function buildPayrollPairBuckets(rows: TransactionRow[]): PayrollPairBucket[] {
+  const map = new Map<string, PayrollPairBucket>();
+
+  for (const row of rows.filter(isTagIssued)) {
+    const issuerHandle = resolveTagIssuerHandle(row);
+    const team = dispatcherTeamForRow(row);
+    const key = `${issuerHandle}::${team}`;
+    let bucket = map.get(key);
+    if (!bucket) {
+      bucket = {
+        key,
+        issuerHandle,
+        issuerLabel: issuerDisplayLabel(issuerHandle, row.dispatcher_name),
+        dispatcherTeam: team,
+        dispatcherTeamLabel: dispatcherLabelForTeam(team),
+        tags: 0,
+        receipts: 0,
+        cashIn: 0,
+        expectedIn: 0,
+        leak: 0,
+        issuerPay: 0,
+        dispatcherPay: 0,
+        totalPay: 0,
+        leadCreators: [],
+        rows: [],
+      };
+      map.set(key, bucket);
+    }
+    bucket.tags += 1;
+    bucket.expectedIn += leadPriceForTag(row);
+    bucket.rows.push(row);
+
+    const lcHandle = resolveLeadCreatorHandle(row);
+    const lc = bucket.leadCreators.find((x) => x.handle === lcHandle);
+    if (lc) lc.tags += 1;
+    else {
+      bucket.leadCreators.push({
+        handle: lcHandle,
+        label: leadCreatorDisplayLabel(lcHandle),
+        tags: 1,
+      });
+    }
+
+    if (hasReceipt(row)) {
+      bucket.receipts += 1;
+      const rp = parsePrice(row.receipt_price);
+      if (rp > 0) bucket.cashIn += rp;
+    }
+  }
+
+  for (const bucket of map.values()) {
+    bucket.leak = Math.max(0, bucket.expectedIn - bucket.cashIn);
+    bucket.issuerPay = bucket.tags * PAYROLL_RATE_ISSUER;
+    bucket.dispatcherPay = bucket.tags * PAYROLL_RATE_DISPATCHER;
+    bucket.totalPay = bucket.issuerPay + bucket.dispatcherPay;
+    bucket.leadCreators.sort((a, b) => b.tags - a.tags || a.label.localeCompare(b.label));
+  }
+
+  return [...map.values()].sort((a, b) => b.tags - a.tags || a.issuerLabel.localeCompare(b.issuerLabel));
+}
+
+export function computeIndividualIssuerPayrolls(rows: TransactionRow[]): IssuerPayrollLine[] {
+  const map = new Map<
+    string,
+    { tags: number; receipts: number; cashIn: number; team: "highkage" | "sensei"; label: string }
+  >();
+
+  for (const row of rows.filter(isTagIssued)) {
+    const handle = resolveTagIssuerHandle(row);
+    const team = dispatcherTeamForRow(row);
+    const label = issuerDisplayLabel(handle, row.dispatcher_name);
+    const cur = map.get(handle);
+    if (cur) {
+      cur.tags += 1;
+      if (hasReceipt(row)) {
+        cur.receipts += 1;
+        cur.cashIn += parsePrice(row.receipt_price);
+      }
+      if (team === "highkage") cur.team = "highkage";
+    } else {
+      map.set(handle, {
+        tags: 1,
+        receipts: hasReceipt(row) ? 1 : 0,
+        cashIn: hasReceipt(row) ? parsePrice(row.receipt_price) : 0,
+        team,
+        label,
+      });
+    }
+  }
+
+  return [...map.entries()]
+    .map(([handle, v]) => ({
+      handle,
+      label: v.label,
+      dispatcherTeam: v.team,
+      dispatcherLabel: dispatcherLabelForTeam(v.team),
+      tags: v.tags,
+      receipts: v.receipts,
+      cashIn: v.cashIn,
+      pay: v.tags * PAYROLL_RATE_ISSUER,
+    }))
+    .sort((a, b) => b.tags - a.tags || a.label.localeCompare(b.label));
+}
+
+export function computeIndividualDispatcherPayrolls(rows: TransactionRow[]): DispatcherPayrollLine[] {
+  const teams: Record<"highkage" | "sensei", { tags: number; receipts: number; cashIn: number }> = {
+    highkage: { tags: 0, receipts: 0, cashIn: 0 },
+    sensei: { tags: 0, receipts: 0, cashIn: 0 },
+  };
+
+  for (const row of rows.filter(isTagIssued)) {
+    const team = dispatcherTeamForRow(row);
+    teams[team].tags += 1;
+    if (hasReceipt(row)) {
+      teams[team].receipts += 1;
+      teams[team].cashIn += parsePrice(row.receipt_price);
+    }
+  }
+
+  const lines: DispatcherPayrollLine[] = [];
+  if (teams.highkage.tags > 0) {
     lines.push({
       team: "highkage",
-      issuerLabel: "Haru (@haruhatsu)",
-      dispatcherLabel: "Highkage",
-      tags: highkageTags,
-      issuerPay: highkageTags * PAYROLL_RATE_ISSUER,
-      dispatcherPay: highkageTags * PAYROLL_RATE_DISPATCHER,
-      total: highkageTags * (PAYROLL_RATE_ISSUER + PAYROLL_RATE_DISPATCHER),
+      label: "Highkage",
+      tags: teams.highkage.tags,
+      receipts: teams.highkage.receipts,
+      cashIn: teams.highkage.cashIn,
+      pay: teams.highkage.tags * PAYROLL_RATE_DISPATCHER,
+      issuerNote: "Haru (@haruhatsu) tags",
     });
   }
-  if (senseiTags > 0) {
+  if (teams.sensei.tags > 0) {
     lines.push({
       team: "sensei",
-      issuerLabel: "Sensei issuers",
-      dispatcherLabel: "Sensei",
-      tags: senseiTags,
-      issuerPay: senseiTags * PAYROLL_RATE_ISSUER,
-      dispatcherPay: senseiTags * PAYROLL_RATE_DISPATCHER,
-      total: senseiTags * (PAYROLL_RATE_ISSUER + PAYROLL_RATE_DISPATCHER),
+      label: "Sensei",
+      tags: teams.sensei.tags,
+      receipts: teams.sensei.receipts,
+      cashIn: teams.sensei.cashIn,
+      pay: teams.sensei.tags * PAYROLL_RATE_DISPATCHER,
+      issuerNote: "All other issuer tags",
     });
   }
   return lines;
+}
+
+export function computeLeadCreatorPayrolls(rows: TransactionRow[]): LeadCreatorPayrollLine[] {
+  const map = new Map<
+    string,
+    {
+      handle: string;
+      tags: number;
+      receipts: number;
+      cashIn: number;
+      team: "highkage" | "sensei";
+      issuers: Set<string>;
+    }
+  >();
+
+  for (const row of rows.filter(isTagIssued)) {
+    const handle = resolveLeadCreatorHandle(row);
+    const team = dispatcherTeamForRow(row);
+    const key = `${handle}::${team}`;
+    const issuerLabel = issuerDisplayLabel(resolveTagIssuerHandle(row), row.dispatcher_name);
+    const cur = map.get(key);
+    if (cur) {
+      cur.tags += 1;
+      cur.issuers.add(issuerLabel);
+      if (hasReceipt(row)) {
+        cur.receipts += 1;
+        cur.cashIn += parsePrice(row.receipt_price);
+      }
+    } else {
+      map.set(key, {
+        handle,
+        tags: 1,
+        receipts: hasReceipt(row) ? 1 : 0,
+        cashIn: hasReceipt(row) ? parsePrice(row.receipt_price) : 0,
+        team,
+        issuers: new Set([issuerLabel]),
+      });
+    }
+  }
+
+  return [...map.values()]
+    .map((v) => ({
+      handle: v.handle,
+      label: leadCreatorDisplayLabel(v.handle),
+      dispatcherTeam: v.team,
+      pairedIssuerLabel: [...v.issuers].sort().join(", "),
+      tags: v.tags,
+      receipts: v.receipts,
+      cashIn: v.cashIn,
+      pay: v.tags * PAYROLL_RATE_DISPATCHER,
+    }))
+    .sort((a, b) => b.tags - a.tags || a.label.localeCompare(b.label));
+}
+
+export function computeTeamPayrolls(rows: TransactionRow[]): TeamPayrollLine[] {
+  const buckets = buildPayrollPairBuckets(rows);
+  const teamMap = new Map<"highkage" | "sensei", TeamPayrollLine>();
+
+  for (const b of buckets) {
+    const cur = teamMap.get(b.dispatcherTeam);
+    if (cur) {
+      cur.tags += b.tags;
+      cur.issuerPay += b.issuerPay;
+      cur.dispatcherPay += b.dispatcherPay;
+      cur.total += b.totalPay;
+      if (b.dispatcherTeam === "sensei" && b.issuerLabel !== "Unknown issuer") {
+        cur.issuerLabel =
+          cur.issuerLabel === "Sensei issuers"
+            ? b.issuerLabel
+            : `${cur.issuerLabel}, ${b.issuerLabel}`;
+      }
+    } else {
+      teamMap.set(b.dispatcherTeam, {
+        team: b.dispatcherTeam,
+        issuerLabel: b.dispatcherTeam === "highkage" ? "Haru (@haruhatsu)" : b.issuerLabel,
+        dispatcherLabel: b.dispatcherTeamLabel,
+        tags: b.tags,
+        issuerPay: b.issuerPay,
+        dispatcherPay: b.dispatcherPay,
+        total: b.totalPay,
+      });
+    }
+  }
+
+  if (teamMap.has("sensei")) {
+    const s = teamMap.get("sensei")!;
+    if (!s.issuerLabel.includes(",")) s.issuerLabel = "Sensei issuers";
+  }
+
+  return [...teamMap.values()].sort((a, b) => (a.team === "highkage" ? -1 : b.team === "highkage" ? 1 : 0));
 }
 
 function parseNyMs(iso?: string): number {
@@ -192,11 +502,6 @@ export function filterRowsForNjWeek(rows: TransactionRow[], startMs: number, end
   return rows.filter((r) => rowInNjWeek(r, startMs, endMs));
 }
 
-function leadPriceForTag(row: TransactionRow): number {
-  const p = parsePrice(row.price);
-  return p > 0 ? p : MIN_TAG_PRICE_USD;
-}
-
 export function computePaydayStats(rows: TransactionRow[], periodLabel: string): PaydayStats {
   const delivered = rows.filter(isTagIssued);
   const tagsIssued = delivered.length;
@@ -214,7 +519,8 @@ export function computePaydayStats(rows: TransactionRow[], periodLabel: string):
   const payrollDispatcher = tagsIssued * PAYROLL_RATE_DISPATCHER;
   const payrollTotal = payrollIssuer + payrollDispatcher;
   const netAfterPayroll = cashInFromReceipts - payrollTotal;
-  const teamPayrolls = computeTeamPayrolls(rows);
+
+  const pairBuckets = buildPayrollPairBuckets(rows);
 
   return {
     tagsIssued,
@@ -230,7 +536,11 @@ export function computePaydayStats(rows: TransactionRow[], periodLabel: string):
     payrollTotal,
     netAfterPayroll,
     periodLabel,
-    teamPayrolls,
+    teamPayrolls: computeTeamPayrolls(rows),
+    issuerPayrolls: computeIndividualIssuerPayrolls(rows),
+    dispatcherPayrolls: computeIndividualDispatcherPayrolls(rows),
+    leadCreatorPayrolls: computeLeadCreatorPayrolls(rows),
+    pairBuckets,
   };
 }
 
