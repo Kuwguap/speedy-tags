@@ -77,6 +77,13 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS user_agent TEXT;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS client_ip TEXT;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS dispute_risk BOOLEAN DEFAULT FALSE;
 
+-- Krableads external lead ingest (reference from POST /api/v1/leads/ingest)
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS krableads_reference_id TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS krableads_lead_id TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS krableads_ingested_at TIMESTAMPTZ;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS krableads_ingest_error TEXT;
+CREATE INDEX IF NOT EXISTS idx_orders_krableads_reference ON orders (krableads_reference_id);
+
 CREATE INDEX IF NOT EXISTS idx_orders_checkout_status ON orders (checkout_status);
 CREATE INDEX IF NOT EXISTS idx_orders_lead_token ON orders (lead_token);
 CREATE INDEX IF NOT EXISTS idx_orders_paid_at ON orders (paid_at);

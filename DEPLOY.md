@@ -82,6 +82,32 @@ git push -u origin main
 | `STRIPE_SECRET_KEY` | Render | Stripe live secret key |
 | `RESEND_API_KEY` | Render | For success emails (email delivery) |
 | `FROM_EMAIL` | Render | Sender address after domain verification |
+| `KRABLEADS_INGEST_URL` | Render | Optional. Default `https://krab-issuer-admin.onrender.com/api/v1/leads/ingest` |
+| `KRABLEADS_INGEST_API_KEY` | Render | When set, tag-info submits leads to krableadsV2 instead of local Telegram dispatch |
+
+---
+
+## Krableads lead ingest (optional)
+
+When `KRABLEADS_INGEST_API_KEY` is set on **speedy-tags-api**, completed orders (after tag info) POST to krableadsV2 instead of sending Accept buttons via the TriState Tags Telegram bot.
+
+**Prerequisites (krableads / Supabase — separate project):**
+
+1. Run `database/migration_lead_api_ingest.sql` in the **krableads** Supabase SQL Editor.
+2. On **krab-issuer-admin** (Render): set `LEAD_INGEST_API_KEY` (same secret as `KRABLEADS_INGEST_API_KEY` here), `API_LEAD_USER_ID` (default `tristatetag`), and `ONETIMESECRET_*`.
+3. On **krab-issuer-bot** worker: set `API_LEAD_USER_ID` to the same value.
+4. Ensure `@tristatetag` has opened a DM with the issuer bot and tapped **Start**.
+
+**TriState Tags Supabase:** run the krableads columns block in [`supabase/setup.sql`](supabase/setup.sql) (or the `ALTER TABLE orders ADD COLUMN krableads_*` statements).
+
+**Verify after deploy:**
+
+1. Place a test order → pay → submit tag info.
+2. TriState admin shows **Krableads ref** on the order (not `Error`).
+3. krableads admin shows the lead; Accept buttons appear in dispatch groups within ~10s.
+4. No duplicate Accept from the speedy-tags Telegram bot.
+
+When `KRABLEADS_INGEST_API_KEY` is **unset**, legacy `TELEGRAM_DISPATCHERS` claim flow is unchanged.
 
 ---
 

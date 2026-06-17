@@ -60,3 +60,7 @@ services:
         sync: false
       - key: FROM_EMAIL
         sync: false
+      - key: KRABLEADS_INGEST_URL
+        value: https://krab-issuer-admin.onrender.com/api/v1/leads/ingest
+      - key: KRABLEADS_INGEST_API_KEY
+        sync: false

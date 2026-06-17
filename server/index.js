@@ -10,6 +10,7 @@ import jwt from "jsonwebtoken";
 import Stripe from "stripe";
 import { Resend } from "resend";
 import { supabase, useSupabase } from "./db.js";
+import { isKrableadsIngestEnabled, submitLeadToKrableads } from "./krableads-ingest.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = join(__dirname, "data");
@@ -687,6 +688,12 @@ async function updateOrder(id, updates) {
     if (updates.userAgent != null) row.user_agent = updates.userAgent;
     if (updates.clientIp != null) row.client_ip = updates.clientIp;
     if (updates.disputeRisk != null) row.dispute_risk = !!updates.disputeRisk;
+    if (updates.krableadsReferenceId != null) row.krableads_reference_id = updates.krableadsReferenceId;
+    if (updates.krableadsLeadId != null) row.krableads_lead_id = updates.krableadsLeadId;
+    if (updates.krableadsIngestedAt != null) row.krableads_ingested_at = updates.krableadsIngestedAt;
+    if (updates.krableadsIngestError !== undefined) {
+      row.krableads_ingest_error = updates.krableadsIngestError;
+    }
     if (Object.keys(row).length === 0) return;
     await supabaseUpdateResilient("orders", row, "id", id);
     return;
@@ -744,6 +751,13 @@ async function updateOrder(id, updates) {
     userAgent: updates.userAgent ?? orders[idx].userAgent,
     clientIp: updates.clientIp ?? orders[idx].clientIp,
     disputeRisk: updates.disputeRisk ?? orders[idx].disputeRisk,
+    krableadsReferenceId: updates.krableadsReferenceId ?? orders[idx].krableadsReferenceId,
+    krableadsLeadId: updates.krableadsLeadId ?? orders[idx].krableadsLeadId,
+    krableadsIngestedAt: updates.krableadsIngestedAt ?? orders[idx].krableadsIngestedAt,
+    krableadsIngestError:
+      updates.krableadsIngestError !== undefined
+        ? updates.krableadsIngestError
+        : orders[idx].krableadsIngestError,
   });
   saveJson(ORDERS_FILE, orders);
 }
@@ -854,6 +868,10 @@ function orderRowToApi(row) {
     telegramAcceptedGroupName: row.telegram_accepted_group_name || null,
     telegramAcceptedAt: row.telegram_accepted_at || null,
     telegramClaimMessageIds: typeof row.telegram_claim_message_ids === "string" ? JSON.parse(row.telegram_claim_message_ids || "{}") : (row.telegram_claim_message_ids || {}),
+    krableadsReferenceId: row.krableads_reference_id || null,
+    krableadsLeadId: row.krableads_lead_id || null,
+    krableadsIngestedAt: row.krableads_ingested_at || null,
+    krableadsIngestError: row.krableads_ingest_error || null,
   };
 }
 
@@ -2831,36 +2849,58 @@ app.patch("/api/orders/:id/tag-info", async (req, res) => {
     let telegramErrors = [];
     let claimMessageIds = {};
 
-    const dispatchers = await loadDispatchers();
-    if (dispatchers.length > 0 && TELEGRAM_BOT_TOKEN) {
-      for (const d of dispatchers) {
-        // Always send claim to the dispatcher GROUP (bots can reliably post in groups),
-        // and best-effort to the personal chat if provided.
-        const groupChatId = canonicalChatId(d.groupId);
-        const groupRes = await sendClaimMessageToDispatcher(groupChatId, id, full);
-        if (groupRes.ok && groupRes.messageId) claimMessageIds[groupChatId] = groupRes.messageId;
-        if (groupRes.ok) telegramRecipients.push(groupChatId);
-        else telegramErrors.push({ chatId: groupChatId, error: "Failed to send claim" });
-
-        const dmChatId = canonicalChatId(d.dispatcherId);
-        if (dmChatId && dmChatId !== groupChatId) {
-          const dmRes = await sendClaimMessageToDispatcher(dmChatId, id, full);
-          if (dmRes.ok && dmRes.messageId) claimMessageIds[dmChatId] = dmRes.messageId;
-          if (dmRes.ok) telegramRecipients.push(dmChatId);
-          else telegramErrors.push({ chatId: dmChatId, error: "Failed to send claim" });
+    if (isKrableadsIngestEnabled()) {
+      const ingest = await submitLeadToKrableads(full);
+      if (ingest.ok) {
+        if (!ingest.cached) {
+          await updateOrder(id, {
+            krableadsReferenceId: ingest.reference_id,
+            krableadsLeadId: ingest.lead_id || null,
+            krableadsIngestedAt: new Date().toISOString(),
+            krableadsIngestError: null,
+          });
         }
+        full.krableadsReferenceId = ingest.reference_id;
+        if (ingest.lead_id) full.krableadsLeadId = ingest.lead_id;
+        telegramSent = true;
+        console.log(`[KrableadsIngest] Order ${id.slice(0, 8)} → ref ${ingest.reference_id}`);
+      } else {
+        await updateOrder(id, { krableadsIngestError: ingest.error });
+        telegramErrors.push({ error: ingest.error, status: ingest.status });
+        console.error("[KrableadsIngest]", id.slice(0, 8), ingest.error);
       }
-      // Consider it "sent" if at least one dispatcher received the claim.
-      telegramSent = telegramRecipients.length > 0;
-      await updateOrder(id, { telegramClaimMessageIds: claimMessageIds });
-      if (telegramRecipients.length > 0) {
-        scheduleAutoAssignFallback(id, claimMessageIds, dispatchers);
+    } else {
+      const dispatchers = await loadDispatchers();
+      if (dispatchers.length > 0 && TELEGRAM_BOT_TOKEN) {
+        for (const d of dispatchers) {
+          // Always send claim to the dispatcher GROUP (bots can reliably post in groups),
+          // and best-effort to the personal chat if provided.
+          const groupChatId = canonicalChatId(d.groupId);
+          const groupRes = await sendClaimMessageToDispatcher(groupChatId, id, full);
+          if (groupRes.ok && groupRes.messageId) claimMessageIds[groupChatId] = groupRes.messageId;
+          if (groupRes.ok) telegramRecipients.push(groupChatId);
+          else telegramErrors.push({ chatId: groupChatId, error: "Failed to send claim" });
+
+          const dmChatId = canonicalChatId(d.dispatcherId);
+          if (dmChatId && dmChatId !== groupChatId) {
+            const dmRes = await sendClaimMessageToDispatcher(dmChatId, id, full);
+            if (dmRes.ok && dmRes.messageId) claimMessageIds[dmChatId] = dmRes.messageId;
+            if (dmRes.ok) telegramRecipients.push(dmChatId);
+            else telegramErrors.push({ chatId: dmChatId, error: "Failed to send claim" });
+          }
+        }
+        // Consider it "sent" if at least one dispatcher received the claim.
+        telegramSent = telegramRecipients.length > 0;
+        await updateOrder(id, { telegramClaimMessageIds: claimMessageIds });
+        if (telegramRecipients.length > 0) {
+          scheduleAutoAssignFallback(id, claimMessageIds, dispatchers);
+        }
+      } else if (TELEGRAM_CHAT_IDS.length > 0 && TELEGRAM_BOT_TOKEN) {
+        const telegramResults = await sendToTelegram(formatOrderMessage(full));
+        telegramSent = telegramResults.every((r) => r.ok);
+        telegramRecipients = telegramResults.filter((r) => r.ok).map((r) => r.chatId);
+        telegramErrors = telegramResults.filter((r) => !r.ok).map((r) => ({ chatId: r.chatId, error: r.error }));
       }
-    } else if (TELEGRAM_CHAT_IDS.length > 0 && TELEGRAM_BOT_TOKEN) {
-      const telegramResults = await sendToTelegram(formatOrderMessage(full));
-      telegramSent = telegramResults.every((r) => r.ok);
-      telegramRecipients = telegramResults.filter((r) => r.ok).map((r) => r.chatId);
-      telegramErrors = telegramResults.filter((r) => !r.ok).map((r) => ({ chatId: r.chatId, error: r.error }));
     }
 
     // Internal lead notifications (email + personal Telegram DMs). Fire once

@@ -178,6 +178,22 @@ function OrderDetailBlock({
         <Field label="Service" value={order.serviceTitle} />
         <Field label="Price" value={`$${formatUsd(order.price)}`} />
         <Field label="Payment" value={order.paymentStatus || "—"} />
+        {order.krableadsReferenceId ? (
+          <Field
+            label="Krableads ref"
+            value={<span className="font-mono text-xs font-semibold">{order.krableadsReferenceId}</span>}
+          />
+        ) : null}
+        {order.krableadsIngestError ? (
+          <Field
+            label="Krableads ingest"
+            value={
+              <Badge variant="secondary" className="bg-amber-500/10 text-amber-700 text-xs whitespace-normal">
+                {order.krableadsIngestError}
+              </Badge>
+            }
+          />
+        ) : null}
         <Field label="Product choice" value={productChoiceLabel(order.productChoice)} />
         <Field
           label="Stripe session"
@@ -1217,6 +1233,7 @@ export default function Admin() {
                         <TableHead>Delivery</TableHead>
                         <TableHead>Vehicle</TableHead>
                         <TableHead className="text-right">Price</TableHead>
+                        <TableHead>Krableads</TableHead>
                         <TableHead>Stripe</TableHead>
                         <TableHead>Picked by</TableHead>
                       </TableRow>
@@ -1251,6 +1268,7 @@ export default function Admin() {
                             o.stripeSessionId,
                             o.vin,
                             o.id,
+                            o.krableadsReferenceId,
                           ]
                             .filter(Boolean)
                             .join(" ")
@@ -1322,6 +1340,17 @@ export default function Admin() {
                             </TableCell>
                             <TableCell className="text-right font-semibold">
                               ${formatUsd(o.price)}
+                            </TableCell>
+                            <TableCell className="font-mono text-[11px]">
+                              {o.krableadsIngestError ? (
+                                <Badge variant="secondary" className="bg-amber-500/10 text-amber-600 text-xs">
+                                  Error
+                                </Badge>
+                              ) : o.krableadsReferenceId ? (
+                                <span>{o.krableadsReferenceId}</span>
+                              ) : (
+                                <span className="text-muted-foreground">—</span>
+                              )}
                             </TableCell>
                             <TableCell className="font-mono text-[11px]">
                               {o.stripeSessionId ? (

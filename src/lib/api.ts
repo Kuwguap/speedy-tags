@@ -231,6 +231,10 @@ export interface OrderRecord {
   lastActivityAt?: string | null;
   leadToken?: string | null;
   disputeRisk?: boolean;
+  krableadsReferenceId?: string | null;
+  krableadsLeadId?: string | null;
+  krableadsIngestedAt?: string | null;
+  krableadsIngestError?: string | null;
 }
 
 export interface AdminStats {
