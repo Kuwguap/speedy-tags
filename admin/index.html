@@ -1016,12 +1016,9 @@
         margin-bottom: 1.25rem;
         padding: 1rem 1.1rem;
         border-radius: 14px;
-        border: 1px solid rgba(56, 189, 248, 0.22);
-        background: linear-gradient(
-          145deg,
-          rgba(15, 23, 42, 0.92) 0%,
-          rgba(2, 6, 23, 0.98) 100%
-        );
+        border: 1px solid var(--border-subtle);
+        background: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
+        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
       }
 
       .weekly-kpi-grid {
@@ -1034,8 +1031,8 @@
       .weekly-kpi-grid .metric {
         padding: 0.65rem 0.75rem;
         border-radius: 10px;
-        background: rgba(15, 23, 42, 0.65);
-        border: 1px solid rgba(31, 41, 55, 0.9);
+        background: #ffffff;
+        border: 1px solid var(--border-subtle);
       }
 
       .weekly-kpi-grid .metric-label {
@@ -1056,7 +1053,7 @@
         margin: 0.5rem 0 1rem;
         border-radius: 10px;
         border: 1px solid var(--border-subtle);
-        background: rgba(2, 6, 23, 0.55);
+        background: #ffffff;
         padding: 0.5rem;
       }
 
@@ -1105,8 +1102,8 @@
         margin: 0.75rem 0;
         padding: 0.75rem;
         border-radius: 10px;
-        border: 1px dashed rgba(148, 163, 184, 0.35);
-        background: rgba(15, 23, 42, 0.45);
+        border: 1px dashed var(--border-subtle);
+        background: #f8fafc;
       }
 
       .weekly-payroll-grid .payroll-line {
@@ -1313,7 +1310,7 @@
                   <div class="payroll-line">Issuer + Dispatcher: <strong id="wp-payroll-core">$0</strong></div>
                   <div class="payroll-line muted">Client finder <strong>$10</strong> × <span id="wp-pay-tags-dup2">0</span> = <span id="wp-pay-finder">$0</span></div>
                   <div class="weekly-payroll-total">Total payroll incl. finder: <span id="wp-payroll-total">$0</span></div>
-                  <div class="small" style="margin-top:0.5rem"><a href="/FridayPayday" style="color:#34d399">Open Friday Payday dashboard →</a></div>
+                  <div class="small" style="margin-top:0.5rem"><a href="/fridaypayday" style="color:#059669">Open Friday Payday dashboard →</a></div>
                 </div>
                 <div class="panel-title" style="margin: 0.75rem 0 0.35rem; font-size: 0.9rem">6. Tags issued unpaid — no receipt</div>
                 <div id="wp-unpaid-status" class="small" style="margin-bottom: 0.4rem"></div>

@@ -51,19 +51,19 @@ function StatBlock({
 }) {
   const toneClass =
     tone === "success"
-      ? "text-emerald-400"
+      ? "text-emerald-600"
       : tone === "warn"
-        ? "text-amber-400"
+        ? "text-amber-600"
         : tone === "danger"
-          ? "text-red-400"
+          ? "text-red-600"
           : tone === "gold"
-            ? "text-yellow-400"
-            : "text-foreground";
+            ? "text-amber-700"
+            : "text-slate-900";
   return (
-    <div className="rounded-xl border border-border/60 bg-card/80 p-4 shadow-sm">
-      <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</div>
+    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</div>
       <div className={`mt-1 font-display text-2xl font-bold tabular-nums ${toneClass}`}>{value}</div>
-      {sub ? <div className="mt-1 text-xs text-muted-foreground">{sub}</div> : null}
+      {sub ? <div className="mt-1 text-xs text-slate-500">{sub}</div> : null}
     </div>
   );
 }
@@ -139,8 +139,8 @@ export default function FridayPayday() {
 
   if (!authed) {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 text-foreground flex items-center justify-center p-6">
-        <Card className="w-full max-w-md border-border/50 bg-card/90 shadow-xl">
+      <div className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-100 text-slate-900 flex items-center justify-center p-6">
+        <Card className="w-full max-w-md border-slate-200 bg-white shadow-xl">
           <CardHeader>
             <CardTitle className="font-display text-2xl">Friday Payday</CardTitle>
             <CardDescription>
@@ -175,18 +175,18 @@ export default function FridayPayday() {
   const leakPct = stats.expectedIn > 0 ? Math.round((stats.leak / stats.expectedIn) * 100) : 0;
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 text-foreground">
+    <div className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-100 text-slate-900">
       <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
         <header className="mb-8 flex flex-wrap items-start justify-between gap-4">
           <div>
             <div className="flex items-center gap-2">
-              <Wallet className="h-7 w-7 text-emerald-400" />
-              <h1 className="font-display text-3xl font-bold tracking-tight">Friday Payday</h1>
+              <Wallet className="h-7 w-7 text-emerald-600" />
+              <h1 className="font-display text-3xl font-bold tracking-tight text-slate-900">Friday Payday</h1>
             </div>
-            <p className="mt-2 max-w-2xl text-sm text-muted-foreground">{periodLabel}</p>
-            <p className="mt-1 text-xs text-muted-foreground">
+            <p className="mt-2 max-w-2xl text-sm text-slate-600">{periodLabel}</p>
+            <p className="mt-1 text-xs text-slate-500">
               Auto-calculated from tags issued (DELIVERED) + receipt uploads. Payroll ${PAYROLL_RATE_ISSUER}/tag issuers, $
-              {PAYROLL_RATE_DISPATCHER}/tag dispatchers.
+              {PAYROLL_RATE_DISPATCHER}/tag dispatchers. Haru (@haruhatsu) → Highkage dispatch; all other issuers → Sensei.
             </p>
           </div>
           <div className="flex gap-2">
@@ -231,28 +231,28 @@ export default function FridayPayday() {
 
         {/* Leak alert */}
         {stats.tagsIssued > 0 && stats.leak > 0 ? (
-          <Card className="mb-6 border-amber-500/40 bg-amber-500/5">
+          <Card className="mb-6 border-amber-300 bg-amber-50">
             <CardContent className="flex flex-wrap items-center gap-4 py-5">
-              <AlertTriangle className="h-10 w-10 shrink-0 text-amber-400" />
+              <AlertTriangle className="h-10 w-10 shrink-0 text-amber-600" />
               <div className="flex-1 min-w-[200px]">
-                <div className="font-semibold text-amber-200">Revenue leak detected</div>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Receipts show <strong className="text-foreground">{formatUsd(stats.cashInFromReceipts)}</strong> in, but{" "}
-                  <strong className="text-foreground">{stats.tagsIssued}</strong> tags issued implies at least{" "}
-                  <strong className="text-foreground">{formatUsd(stats.expectedIn)}</strong> should have come in.
+                <div className="font-semibold text-amber-900">Revenue leak detected</div>
+                <p className="mt-1 text-sm text-slate-600">
+                  Receipts show <strong className="text-slate-900">{formatUsd(stats.cashInFromReceipts)}</strong> in, but{" "}
+                  <strong className="text-slate-900">{stats.tagsIssued}</strong> tags issued implies at least{" "}
+                  <strong className="text-slate-900">{formatUsd(stats.expectedIn)}</strong> should have come in.
                 </p>
               </div>
               <div className="text-right">
-                <div className="text-3xl font-bold tabular-nums text-amber-400">{formatUsd(stats.leak)}</div>
-                <Badge variant="secondary" className="mt-1 bg-amber-500/15 text-amber-300">
+                <div className="text-3xl font-bold tabular-nums text-amber-700">{formatUsd(stats.leak)}</div>
+                <Badge variant="secondary" className="mt-1 bg-amber-100 text-amber-800">
                   {leakPct}% short
                 </Badge>
               </div>
             </CardContent>
           </Card>
         ) : stats.tagsIssued > 0 ? (
-          <Card className="mb-6 border-emerald-500/30 bg-emerald-500/5">
-            <CardContent className="flex items-center gap-3 py-4 text-sm text-emerald-200">
+          <Card className="mb-6 border-emerald-200 bg-emerald-50">
+            <CardContent className="flex items-center gap-3 py-4 text-sm text-emerald-800">
               <TrendingUp className="h-5 w-5" />
               Receipt total meets or exceeds expected minimum for this week.
             </CardContent>
@@ -261,66 +261,85 @@ export default function FridayPayday() {
 
         {/* Money in vs out */}
         <section className="mb-8 grid gap-6 lg:grid-cols-2">
-          <Card className="border-border/60 bg-card/80">
+          <Card className="border-slate-200 bg-white">
             <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-lg">
-                <TrendingUp className="h-5 w-5 text-emerald-400" />
+              <CardTitle className="flex items-center gap-2 text-lg text-slate-900">
+                <TrendingUp className="h-5 w-5 text-emerald-600" />
                 Money IN
               </CardTitle>
               <CardDescription>From receipt uploads this week (all bots combined)</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-3 text-sm">
-              <div className="flex justify-between border-b border-border/40 pb-2">
+            <CardContent className="space-y-3 text-sm text-slate-700">
+              <div className="flex justify-between border-b border-slate-200 pb-2">
                 <span>Receipt $ total (uploaded)</span>
-                <span className="font-semibold tabular-nums text-yellow-400">{formatUsd(stats.cashInFromReceipts)}</span>
+                <span className="font-semibold tabular-nums text-amber-700">{formatUsd(stats.cashInFromReceipts)}</span>
               </div>
-              <div className="flex justify-between border-b border-border/40 pb-2 text-muted-foreground">
+              <div className="flex justify-between border-b border-slate-200 pb-2 text-slate-500">
                 <span>Expected from lead prices</span>
                 <span className="tabular-nums">{formatUsd(stats.expectedFromLeadPrices)}</span>
               </div>
-              <div className="flex justify-between border-b border-border/40 pb-2 text-muted-foreground">
+              <div className="flex justify-between border-b border-slate-200 pb-2 text-slate-500">
                 <span>Floor ({stats.tagsIssued} × ${MIN_TAG_PRICE_USD})</span>
                 <span className="tabular-nums">{formatUsd(stats.minimumExpectedIn)}</span>
               </div>
-              <div className="flex justify-between font-medium">
+              <div className="flex justify-between font-medium text-slate-900">
                 <span>Expected IN (higher of above)</span>
                 <span className="tabular-nums">{formatUsd(stats.expectedIn)}</span>
               </div>
             </CardContent>
           </Card>
 
-          <Card className="border-border/60 bg-card/80">
+          <Card className="border-slate-200 bg-white">
             <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-lg">
-                <TrendingDown className="h-5 w-5 text-red-400" />
+              <CardTitle className="flex items-center gap-2 text-lg text-slate-900">
+                <TrendingDown className="h-5 w-5 text-red-600" />
                 Payroll OUT
               </CardTitle>
-              <CardDescription>Based on tags issued this week — no invoice needed</CardDescription>
+              <CardDescription>Per team — Haru/Highkage vs Sensei (no invoice needed)</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-3 text-sm">
-              <div className="flex justify-between border-b border-border/40 pb-2">
-                <span>
-                  Issuers (${PAYROLL_RATE_ISSUER} × {stats.tagsIssued})
-                </span>
-                <span className="tabular-nums">{formatUsd(stats.payrollIssuer)}</span>
-              </div>
-              <div className="flex justify-between border-b border-border/40 pb-2">
-                <span>
-                  Dispatchers (${PAYROLL_RATE_DISPATCHER} × {stats.tagsIssued})
-                </span>
-                <span className="tabular-nums">{formatUsd(stats.payrollDispatcher)}</span>
-              </div>
-              <div className="flex justify-between border-b border-border/40 pb-2 font-semibold">
+            <CardContent className="space-y-4 text-sm text-slate-700">
+              {stats.teamPayrolls.length === 0 ? (
+                <p className="text-slate-500">No tags issued this week.</p>
+              ) : (
+                stats.teamPayrolls.map((team) => (
+                  <div
+                    key={team.team}
+                    className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-2"
+                  >
+                    <div className="font-semibold text-slate-900">
+                      {team.team === "highkage" ? "Haru / Highkage" : "Sensei"} — {team.tags} tag
+                      {team.tags === 1 ? "" : "s"}
+                    </div>
+                    <div className="flex justify-between">
+                      <span>
+                        Issuer {team.issuerLabel} (${PAYROLL_RATE_ISSUER} × {team.tags})
+                      </span>
+                      <span className="tabular-nums">{formatUsd(team.issuerPay)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>
+                        Dispatcher {team.dispatcherLabel} (${PAYROLL_RATE_DISPATCHER} × {team.tags})
+                      </span>
+                      <span className="tabular-nums">{formatUsd(team.dispatcherPay)}</span>
+                    </div>
+                    <div className="flex justify-between border-t border-slate-200 pt-2 font-medium text-slate-900">
+                      <span>Team subtotal</span>
+                      <span className="tabular-nums">{formatUsd(team.total)}</span>
+                    </div>
+                  </div>
+                ))
+              )}
+              <div className="flex justify-between border-t border-slate-200 pt-3 font-semibold text-slate-900">
                 <span>Total payroll OUT</span>
-                <span className="tabular-nums text-red-400">{formatUsd(stats.payrollTotal)}</span>
+                <span className="tabular-nums text-red-600">{formatUsd(stats.payrollTotal)}</span>
               </div>
-              <div className="flex justify-between rounded-lg bg-muted/40 px-3 py-2 font-medium">
+              <div className="flex justify-between rounded-lg bg-slate-100 px-3 py-2 font-medium text-slate-900">
                 <span className="flex items-center gap-2">
                   <DollarSign className="h-4 w-4" />
                   Net after payroll (receipts − payroll)
                 </span>
                 <span
-                  className={`tabular-nums ${stats.netAfterPayroll >= 0 ? "text-emerald-400" : "text-red-400"}`}
+                  className={`tabular-nums ${stats.netAfterPayroll >= 0 ? "text-emerald-600" : "text-red-600"}`}
                 >
                   {formatUsd(stats.netAfterPayroll)}
                 </span>
@@ -331,29 +350,32 @@ export default function FridayPayday() {
 
         {/* Example math callout */}
         {stats.tagsIssued > 0 ? (
-          <Card className="mb-8 border-border/50 bg-muted/20">
-            <CardContent className="py-4 font-mono text-xs sm:text-sm text-muted-foreground leading-relaxed">
-              <div className="text-foreground font-semibold mb-2">This week&apos;s math</div>
-              {stats.tagsIssued} tags issued → {stats.tagsIssued} × ${PAYROLL_RATE_ISSUER} ={" "}
-              {formatUsd(stats.payrollIssuer)} issuers · {stats.tagsIssued} × ${PAYROLL_RATE_DISPATCHER} ={" "}
-              {formatUsd(stats.payrollDispatcher)} dispatchers → Payroll OUT {formatUsd(stats.payrollTotal)}
-              <br />
-              {stats.tagsIssued} × ${MIN_TAG_PRICE_USD} = {formatUsd(stats.minimumExpectedIn)} minimum should come IN
-              · Receipts show {formatUsd(stats.cashInFromReceipts)} IN
+          <Card className="mb-8 border-slate-200 bg-slate-50">
+            <CardContent className="py-4 font-mono text-xs sm:text-sm text-slate-600 leading-relaxed">
+              <div className="text-slate-900 font-semibold mb-2">This week&apos;s math</div>
+              {stats.teamPayrolls.map((team) => (
+                <div key={team.team} className="mb-1">
+                  {team.issuerLabel} / {team.dispatcherLabel}: {team.tags} tags → issuer{" "}
+                  {formatUsd(team.issuerPay)} + dispatcher {formatUsd(team.dispatcherPay)} ={" "}
+                  {formatUsd(team.total)}
+                </div>
+              ))}
+              Payroll OUT {formatUsd(stats.payrollTotal)} · {stats.tagsIssued} × ${MIN_TAG_PRICE_USD} ={" "}
+              {formatUsd(stats.minimumExpectedIn)} minimum IN · Receipts {formatUsd(stats.cashInFromReceipts)}
               {stats.leak > 0 ? ` · Leak ${formatUsd(stats.leak)}` : ""}
             </CardContent>
           </Card>
         ) : null}
 
         {/* Chart */}
-        <Card className="border-border/60 bg-card/80">
+        <Card className="border-slate-200 bg-white">
           <CardHeader>
             <CardTitle>Weekly trend (last 8 NJ weeks)</CardTitle>
             <CardDescription>Tags issued, cash from receipts, expected IN, and payroll OUT</CardDescription>
           </CardHeader>
           <CardContent className="h-80">
             {chartData.length === 0 ? (
-              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+              <div className="flex h-full items-center justify-center text-sm text-slate-500">
                 {loading ? "Loading…" : "No transaction history yet."}
               </div>
             ) : (
@@ -384,14 +406,14 @@ export default function FridayPayday() {
 
         {/* Missing receipts table */}
         {stats.receiptsMissing > 0 ? (
-          <Card className="mt-8 border-border/60 bg-card/80">
+          <Card className="mt-8 border-slate-200 bg-white">
             <CardHeader>
               <CardTitle className="text-lg">Issued — no receipt ({stats.receiptsMissing})</CardTitle>
             </CardHeader>
             <CardContent className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-border/50 text-left text-muted-foreground">
+                  <tr className="border-b border-slate-200 text-left text-slate-500">
                     <th className="py-2 pr-4">Ref</th>
                     <th className="py-2 pr-4">When (NJ)</th>
                     <th className="py-2 pr-4">Lead $</th>
@@ -403,11 +425,11 @@ export default function FridayPayday() {
                     .filter((r) => isTagIssued(r) && !hasReceipt(r))
                     .slice(0, 50)
                     .map((r) => (
-                      <tr key={String(r.id ?? r.reference_id)} className="border-b border-border/30">
+                      <tr key={String(r.id ?? r.reference_id)} className="border-b border-slate-100">
                         <td className="py-2 pr-4 font-mono text-xs">{r.reference_id || "—"}</td>
                         <td className="py-2 pr-4 text-xs">{r.timestamp_ny || "—"}</td>
                         <td className="py-2 pr-4">{r.price || `~$${MIN_TAG_PRICE_USD}`}</td>
-                        <td className="py-2 text-xs text-muted-foreground">{r.tag_name || "—"}</td>
+                        <td className="py-2 text-xs text-slate-500">{r.tag_name || "—"}</td>
                       </tr>
                     ))}
                 </tbody>
@@ -416,7 +438,7 @@ export default function FridayPayday() {
           </Card>
         ) : null}
 
-        <p className="mt-8 text-center text-xs text-muted-foreground">
+        <p className="mt-8 text-center text-xs text-slate-500">
           Data: krab-dispatch-api + issuer receipts · Same login as{" "}
           <a href="/backend" className="underline">
             /backend

@@ -239,10 +239,29 @@ function escapeHtmlAttr(s) {
     .replace(/>/g, "&gt;");
 }
 
-function receiptLinkHtml(url) {
+function receiptViewHref(url, ref) {
+  const r = String(ref || "").trim();
+  if (r) {
+    return (
+      API_BASE +
+      "/issuer-admin/receipts/view?ref=" +
+      encodeURIComponent(r)
+    );
+  }
   const u = String(url || "").trim();
-  if (!u) return "—";
-  return `<a href="${escapeHtmlAttr(u)}" target="_blank" rel="noopener noreferrer">View</a>`;
+  if (!u) return "";
+  if (u.includes("api.telegram.org/file/bot")) {
+    return "";
+  }
+  return u;
+}
+
+function receiptLinkHtml(url, ref) {
+  const u = String(url || "").trim();
+  if (!u && !String(ref || "").trim()) return "—";
+  const href = receiptViewHref(u, ref);
+  if (!href) return '<span class="muted">—</span>';
+  return `<a href="${escapeHtmlAttr(href)}" target="_blank" rel="noopener noreferrer">View</a>`;
 }
 
 function issuerGroupFromHandle(rawHandle) {
@@ -576,8 +595,9 @@ function _txnDispatcherCell(row) {
 
 function _txnReceiptCell(row) {
   const url = (row && row.receipt_image_url) || "";
-  if (!url) return '<span class="muted">—</span>';
-  return receiptLinkHtml(url);
+  const ref = (row && row.reference_id) || "";
+  if (!url && !ref) return '<span class="muted">—</span>';
+  return receiptLinkHtml(url, ref);
 }
 
 function _txnPriceCell(row) {
@@ -1746,7 +1766,7 @@ function renderIssuerSubmitted(rows) {
     const u = r.updated_at || "";
     upd.textContent = u.length >= 19 ? u.slice(0, 19) : u || "—";
     const link = document.createElement("td");
-    link.innerHTML = receiptLinkHtml(r.receipt_image_url);
+    link.innerHTML = receiptLinkHtml(r.receipt_image_url, r.reference_id);
     tr.appendChild(ref);
     tr.appendChild(dr);
     tr.appendChild(gr);
@@ -2427,7 +2447,7 @@ async function refreshLatest() {
             .replace(/>/g, "&gt;")}</div>`
         : "";
     const recLine = data.receipt_image_url
-      ? `<div class="small">Receipt: ${receiptLinkHtml(data.receipt_image_url)}</div>`
+      ? `<div class="small">Receipt: ${receiptLinkHtml(data.receipt_image_url, data.reference_id)}</div>`
       : "";
     el.innerHTML = `
       <div><strong>${data.filename}</strong></div>
@@ -2732,7 +2752,7 @@ function renderSummaryTable(summary) {
 
     const tdReceipt = document.createElement("td");
     tdReceipt.className = "small";
-    tdReceipt.innerHTML = receiptLinkHtml(it.receipt_image_url);
+    tdReceipt.innerHTML = receiptLinkHtml(it.receipt_image_url, it.reference_id);
     tr.appendChild(tdReceipt);
 
     tbody.appendChild(tr);

@@ -5,6 +5,9 @@ export const PAYROLL_RATE_DISPATCHER = 5;
 export const MIN_TAG_PRICE_USD = 100;
 export const NJ_TZ = "America/New_York";
 
+/** Issuers on the Highkage track (Haru). All others use Sensei dispatchers. */
+export const HIGHKAGE_ISSUER_HANDLES = new Set(["haruhatsu"]);
+
 export interface TransactionRow {
   id?: string | number;
   reference_id?: string | null;
@@ -14,7 +17,10 @@ export interface TransactionRow {
   receipt_price?: string | number | null;
   receipt_image_url?: string | null;
   tag_name?: string | null;
+  issuer_submitter_handle?: string | null;
+  issuer_group?: string | null;
   dispatcher_name?: string | null;
+  dispatcher_handle?: string | null;
   driver_selected_name?: string | null;
 }
 
@@ -43,6 +49,17 @@ export interface PaydayStats {
   payrollTotal: number;
   netAfterPayroll: number;
   periodLabel: string;
+  teamPayrolls: TeamPayrollLine[];
+}
+
+export interface TeamPayrollLine {
+  team: "highkage" | "sensei";
+  issuerLabel: string;
+  dispatcherLabel: string;
+  tags: number;
+  issuerPay: number;
+  dispatcherPay: number;
+  total: number;
 }
 
 export function parsePrice(raw: unknown): number {
@@ -72,6 +89,55 @@ export function isTagIssued(row: TransactionRow): boolean {
 
 export function hasReceipt(row: TransactionRow): boolean {
   return !!String(row.receipt_image_url || "").trim();
+}
+
+export function normalizeIssuerHandle(raw?: string | null): string {
+  return String(raw || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^@/, "");
+}
+
+/** Haru (@haruhatsu) → Highkage dispatch; all other issuers → Sensei dispatch. */
+export function isHighkageTrack(row: TransactionRow): boolean {
+  const h = normalizeIssuerHandle(row.issuer_submitter_handle);
+  if (HIGHKAGE_ISSUER_HANDLES.has(h)) return true;
+  const g = String(row.issuer_group || "").toLowerCase();
+  return g === "highkage_group" || g.includes("highkage");
+}
+
+export function computeTeamPayrolls(rows: TransactionRow[]): TeamPayrollLine[] {
+  const delivered = rows.filter(isTagIssued);
+  let highkageTags = 0;
+  let senseiTags = 0;
+  for (const row of delivered) {
+    if (isHighkageTrack(row)) highkageTags += 1;
+    else senseiTags += 1;
+  }
+  const lines: TeamPayrollLine[] = [];
+  if (highkageTags > 0) {
+    lines.push({
+      team: "highkage",
+      issuerLabel: "Haru (@haruhatsu)",
+      dispatcherLabel: "Highkage",
+      tags: highkageTags,
+      issuerPay: highkageTags * PAYROLL_RATE_ISSUER,
+      dispatcherPay: highkageTags * PAYROLL_RATE_DISPATCHER,
+      total: highkageTags * (PAYROLL_RATE_ISSUER + PAYROLL_RATE_DISPATCHER),
+    });
+  }
+  if (senseiTags > 0) {
+    lines.push({
+      team: "sensei",
+      issuerLabel: "Sensei issuers",
+      dispatcherLabel: "Sensei",
+      tags: senseiTags,
+      issuerPay: senseiTags * PAYROLL_RATE_ISSUER,
+      dispatcherPay: senseiTags * PAYROLL_RATE_DISPATCHER,
+      total: senseiTags * (PAYROLL_RATE_ISSUER + PAYROLL_RATE_DISPATCHER),
+    });
+  }
+  return lines;
 }
 
 function parseNyMs(iso?: string): number {
@@ -148,6 +214,7 @@ export function computePaydayStats(rows: TransactionRow[], periodLabel: string):
   const payrollDispatcher = tagsIssued * PAYROLL_RATE_DISPATCHER;
   const payrollTotal = payrollIssuer + payrollDispatcher;
   const netAfterPayroll = cashInFromReceipts - payrollTotal;
+  const teamPayrolls = computeTeamPayrolls(rows);
 
   return {
     tagsIssued,
@@ -163,6 +230,7 @@ export function computePaydayStats(rows: TransactionRow[], periodLabel: string):
     payrollTotal,
     netAfterPayroll,
     periodLabel,
+    teamPayrolls,
   };
 }
 
