@@ -4,6 +4,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { CheckoutProvider } from "@/context/CheckoutContext";
+import { BackgroundMusic } from "@/components/BackgroundMusic";
+import FridayPayday from "./pages/FridayPayday";
 import Index from "./pages/Index";
 import CheckoutGuarantee from "./pages/CheckoutGuarantee";
 import CheckoutProduct from "./pages/CheckoutProduct";
@@ -30,6 +32,7 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <CheckoutProvider>
+          <BackgroundMusic />
           <Routes>
             <Route path="/" element={<Index />} />
             <Route path="/checkout" element={<CheckoutGuarantee />} />
@@ -38,6 +41,7 @@ const App = () => (
             <Route path="/checkout/documents" element={<CheckoutDocuments />} />
             <Route path="/checkout/done" element={<CheckoutDone />} />
             <Route path="/admin" element={<Admin />} />
+            <Route path="/FridayPayday" element={<FridayPayday />} />
             <Route path="/payment" element={<Payments />} />
             <Route path="/payments" element={<Payments />} />
             <Route path="/secure/phone/:orderId" element={<SecurePhone />} />

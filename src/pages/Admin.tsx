@@ -408,6 +408,7 @@ export default function Admin() {
     driverExtendedFee: number;
     driverLocalStates: string[] | string;
     testMode: boolean;
+    backgroundMusicEnabled: boolean;
     telegramDispatchers: TelegramDispatcher[];
     fallbackClaimTimeoutMs: number;
     paymentLinks: { venmo: string; cashApp: string; paypal: string; zelle: string; applePay: string };
@@ -549,6 +550,7 @@ export default function Admin() {
         driverExtendedFee: settings.driverExtendedFee ?? 50,
         driverLocalStates: settings.driverLocalStates,
         testMode: settings.testMode,
+        backgroundMusicEnabled: settings.backgroundMusicEnabled,
         telegramDispatchers: settings.telegramDispatchers ?? [],
         fallbackClaimTimeoutMs: settings.fallbackClaimTimeoutMs ?? 300000,
         paymentLinks: settings.paymentLinks ?? { venmo: "", cashApp: "", paypal: "", zelle: "", applePay: "" },
@@ -940,6 +942,20 @@ export default function Admin() {
                           placeholder="NJ"
                         />
                       </div>
+                    </div>
+                    <div className="flex items-center justify-between p-4 rounded-lg bg-muted/50 border border-border/50">
+                      <div>
+                        <Label className="text-base">Background music</Label>
+                        <p className="text-sm text-muted-foreground">
+                          Play Tokyo Drift on loop across the public site (not in admin)
+                        </p>
+                      </div>
+                      <Switch
+                        checked={settings.backgroundMusicEnabled ?? true}
+                        onCheckedChange={(checked) =>
+                          setSettings((s) => (s ? { ...s, backgroundMusicEnabled: checked } : null))
+                        }
+                      />
                     </div>
                     <div className="flex items-center justify-between p-4 rounded-lg bg-muted/50 border border-border/50">
                       <div>

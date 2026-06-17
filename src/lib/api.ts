@@ -39,7 +39,10 @@ export const api = {
       driverExtendedFee: number;
       driverLocalStates: string[] | string;
       testMode: boolean;
+      backgroundMusicEnabled: boolean;
     }>("/checkout/config"),
+  getSiteConfig: () =>
+    request<{ backgroundMusicEnabled: boolean }>("/site/config"),
   createCheckoutSession: (data: Record<string, unknown>) =>
     request<{ url: string }>("/checkout/create-session", {
       method: "POST",
@@ -110,6 +113,7 @@ export const api = {
       driverExtendedFee: number;
       driverLocalStates: string[] | string;
       testMode: boolean;
+      backgroundMusicEnabled: boolean;
       telegramDispatchers: TelegramDispatcher[];
       fallbackClaimTimeoutMs: number;
       paymentLinks: { venmo: string; cashApp: string; paypal: string; zelle: string; applePay: string };
@@ -125,6 +129,7 @@ export const api = {
     driverExtendedFee?: number;
     driverLocalStates?: string[] | string;
     testMode?: boolean;
+    backgroundMusicEnabled?: boolean;
     telegramDispatchers?: TelegramDispatcher[];
     fallbackClaimTimeoutMs?: number;
     paymentLinks?: { venmo: string; cashApp: string; paypal: string; zelle: string; applePay: string };

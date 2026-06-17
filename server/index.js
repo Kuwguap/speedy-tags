@@ -33,6 +33,7 @@ const defaultSettings = {
   fallback_claim_timeout_ms: 300000,
   payment_links: {},
   payment_display: {},
+  background_music_enabled: true,
 };
 
 const DEFAULT_PAYMENT_LINKS = {
@@ -568,6 +569,9 @@ async function loadSettings() {
     const out = { ...defaultSettings, telegram_dispatchers: [] };
     (data || []).forEach((r) => {
       if (r.key === "test_mode") out.test_mode = r.value === true || String(r.value) === "true";
+      else if (r.key === "background_music_enabled") {
+        out.background_music_enabled = r.value === true || String(r.value) === "true";
+      }
       else if (
         [
           "plate_only_price",
@@ -1062,6 +1066,13 @@ function checkoutConfigFromSettings(s) {
     driverExtendedFee: num(s.driver_extended_fee, 50),
     driverLocalStates: parseDriverLocalStatesSetting(s.driver_local_states),
     testMode: !!s.test_mode,
+    backgroundMusicEnabled: s.background_music_enabled !== false,
+  };
+}
+
+function siteConfigFromSettings(s) {
+  return {
+    backgroundMusicEnabled: s.background_music_enabled !== false,
   };
 }
 
@@ -2237,6 +2248,16 @@ app.get("/api/checkout/config", async (req, res) => {
   }
 });
 
+// Public: site-wide toggles (background music, etc.)
+app.get("/api/site/config", async (req, res) => {
+  try {
+    const s = await loadSettings();
+    res.json(siteConfigFromSettings(s));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Stripe Checkout: create session and redirect to payment (or test URL if test mode)
 // Capture / update an in-progress checkout lead BEFORE Stripe. This makes
 // every customer who reaches the delivery step recoverable in admin even if
@@ -3195,6 +3216,7 @@ app.get("/api/admin/settings", authMiddleware, async (req, res) => {
     res.json({
       ...pricing,
       testMode: s.test_mode,
+      backgroundMusicEnabled: s.background_music_enabled !== false,
       telegramDispatchers,
       fallbackClaimTimeoutMs: fallbackMs,
       paymentLinks: {
@@ -3236,6 +3258,9 @@ app.patch("/api/admin/settings", authMiddleware, async (req, res) => {
       if (!isNaN(v) && v > 0) updates.fallback_claim_timeout_ms = v;
     }
     if (body.testMode != null) updates.test_mode = !!body.testMode;
+    if (body.backgroundMusicEnabled != null) {
+      updates.background_music_enabled = !!body.backgroundMusicEnabled;
+    }
     if (body.paymentLinks != null && typeof body.paymentLinks === "object") {
       updates.payment_links = {
         venmo: String(body.paymentLinks.venmo ?? "").trim(),
@@ -3280,6 +3305,7 @@ app.patch("/api/admin/settings", authMiddleware, async (req, res) => {
     res.json({
       ...pricing,
       testMode: s.test_mode,
+      backgroundMusicEnabled: s.background_music_enabled !== false,
       telegramDispatchers,
       fallbackClaimTimeoutMs: fallbackMs,
       paymentLinks: {

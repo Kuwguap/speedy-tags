@@ -1277,8 +1277,21 @@
                     <div id="wp-receipts-count" class="metric-value success">—</div>
                   </div>
                   <div class="metric">
-                    <div class="metric-label">3. Receipt $ total this week</div>
+                    <div class="metric-label">3. Cash IN (receipt $ total)</div>
                     <div id="wp-receipt-total" class="metric-value" style="color:#fbbf24">—</div>
+                  </div>
+                  <div class="metric">
+                    <div class="metric-label">4. Expected IN (min tags×$100)</div>
+                    <div id="wp-expected-in" class="metric-value">—</div>
+                    <div class="small muted" style="margin-top:0.25rem">Floor: <span id="wp-minimum-in">—</span> · Leads: <span id="wp-lead-price-total">—</span></div>
+                  </div>
+                  <div class="metric">
+                    <div class="metric-label">Revenue leak (expected − receipts)</div>
+                    <div id="wp-revenue-leak" class="metric-value" style="color:#f87171">—</div>
+                  </div>
+                  <div class="metric">
+                    <div class="metric-label">Net after payroll ($9+$5 only)</div>
+                    <div id="wp-net-after-payroll" class="metric-value success">—</div>
                   </div>
                   <div class="metric">
                     <div class="metric-label">Unpaid (no receipt)</div>
@@ -1293,14 +1306,16 @@
                 <div class="weekly-chart-wrap">
                   <canvas id="wp-chart" width="900" height="220" role="img" aria-label="Weekly tags, receipts, and revenue chart"></canvas>
                 </div>
-                <div class="panel-title" style="margin: 0.5rem 0 0.35rem; font-size: 0.9rem">4. Payroll this week</div>
+                <div class="panel-title" style="margin: 0.5rem 0 0.35rem; font-size: 0.9rem">5. Payroll this week</div>
                 <div class="weekly-payroll-grid">
                   <div class="payroll-line">Issuer <strong>$9</strong> × <span id="wp-pay-tags">0</span> = <span id="wp-pay-issuer">$0</span></div>
                   <div class="payroll-line">Dispatcher <strong>$5</strong> × <span id="wp-pay-tags-dup">0</span> = <span id="wp-pay-dispatcher">$0</span></div>
-                  <div class="payroll-line">Client finder <strong>$10</strong> × <span id="wp-pay-tags-dup2">0</span> = <span id="wp-pay-finder">$0</span></div>
-                  <div class="weekly-payroll-total">Total payroll (1 week): <span id="wp-payroll-total">$0</span></div>
+                  <div class="payroll-line">Issuer + Dispatcher: <strong id="wp-payroll-core">$0</strong></div>
+                  <div class="payroll-line muted">Client finder <strong>$10</strong> × <span id="wp-pay-tags-dup2">0</span> = <span id="wp-pay-finder">$0</span></div>
+                  <div class="weekly-payroll-total">Total payroll incl. finder: <span id="wp-payroll-total">$0</span></div>
+                  <div class="small" style="margin-top:0.5rem"><a href="/FridayPayday" style="color:#34d399">Open Friday Payday dashboard →</a></div>
                 </div>
-                <div class="panel-title" style="margin: 0.75rem 0 0.35rem; font-size: 0.9rem">5. Tags issued unpaid — no receipt</div>
+                <div class="panel-title" style="margin: 0.75rem 0 0.35rem; font-size: 0.9rem">6. Tags issued unpaid — no receipt</div>
                 <div id="wp-unpaid-status" class="small" style="margin-bottom: 0.4rem"></div>
                 <div class="table-wrap" style="max-height: 200px">
                   <table>
@@ -2095,7 +2110,7 @@
       </div>
     </div>
 
-    <script src="/backend/app.js?v=1dcd3e98d2"></script>
+    <script src="/backend/app.js?v=9473dfe378"></script>
   </body>
   </html>
 

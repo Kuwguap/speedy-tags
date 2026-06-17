@@ -865,9 +865,19 @@ function _wpRenderUnpaidTable(rows) {
   });
 }
 
+function _wpSumLeadPriceUsd(rows) {
+  let sum = 0;
+  for (const r of rows) {
+    const n = _txnParsePrice(r && r.price);
+    sum += n > 0 ? n : 100;
+  }
+  return sum;
+}
+
 function _wpRenderCurrentWeek(weekRows, receiptUploads) {
-  const tags = (weekRows || []).filter(_wpIsTagIssued).length;
-  const withReceipt = (weekRows || []).filter((r) => _wpIsTagIssued(r) && _wpHasReceipt(r));
+  const delivered = (weekRows || []).filter(_wpIsTagIssued);
+  const tags = delivered.length;
+  const withReceipt = delivered.filter(_wpHasReceipt);
   let receiptCount = withReceipt.length;
   let receiptUsd = _wpSumReceiptUsd(withReceipt);
 
@@ -882,11 +892,18 @@ function _wpRenderCurrentWeek(weekRows, receiptUploads) {
     }
   }
 
-  const unpaid = (weekRows || []).filter((r) => _wpIsTagIssued(r) && !_wpHasReceipt(r)).length;
+  const unpaid = delivered.filter((r) => !_wpHasReceipt(r)).length;
   const issuerPay = tags * PAYROLL_RATE_ISSUER;
   const dispPay = tags * PAYROLL_RATE_DISPATCHER;
   const finderPay = tags * PAYROLL_RATE_CLIENT_FINDER;
-  const totalPay = issuerPay + dispPay + finderPay;
+  const payrollCore = issuerPay + dispPay;
+  const totalPay = payrollCore + finderPay;
+
+  const expectedFromLeads = _wpSumLeadPriceUsd(delivered);
+  const minimumExpected = tags * 100;
+  const expectedIn = Math.max(expectedFromLeads, minimumExpected);
+  const revenueLeak = Math.max(0, expectedIn - receiptUsd);
+  const netAfterPayroll = receiptUsd - payrollCore;
 
   const set = (id, text) => {
     const el = document.getElementById(id);
@@ -896,6 +913,11 @@ function _wpRenderCurrentWeek(weekRows, receiptUploads) {
   set("wp-receipts-count", String(receiptCount));
   set("wp-receipt-total", _txnFormatUsd(receiptUsd));
   set("wp-unpaid-count", String(unpaid));
+  set("wp-expected-in", _txnFormatUsd(expectedIn));
+  set("wp-minimum-in", _txnFormatUsd(minimumExpected));
+  set("wp-lead-price-total", _txnFormatUsd(expectedFromLeads));
+  set("wp-revenue-leak", _txnFormatUsd(revenueLeak));
+  set("wp-net-after-payroll", _txnFormatUsd(netAfterPayroll));
   set("wp-pay-tags", String(tags));
   set("wp-pay-tags-dup", String(tags));
   set("wp-pay-tags-dup2", String(tags));
@@ -903,14 +925,15 @@ function _wpRenderCurrentWeek(weekRows, receiptUploads) {
   set("wp-pay-dispatcher", _txnFormatUsd(dispPay));
   set("wp-pay-finder", _txnFormatUsd(finderPay));
   set("wp-payroll-total", _txnFormatUsd(totalPay));
+  set("wp-payroll-core", _txnFormatUsd(payrollCore));
 
   const periodEl = document.getElementById("wp-period-label");
   if (periodEl) {
     const end = new Date();
     const start = new Date(_wpRollingStartMs(7));
-    periodEl.textContent = `Rolling 7 days (NJ): ${formatNy(start.toISOString())} → ${formatNy(
+    periodEl.innerHTML = `Rolling 7 days (NJ): ${formatNy(start.toISOString())} → ${formatNy(
       end.toISOString()
-    )}`;
+    )} · <a href="/FridayPayday" style="color:#34d399">Friday Payday →</a>`;
   }
 
   _wpRenderUnpaidTable(weekRows);
