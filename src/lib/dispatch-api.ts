@@ -94,6 +94,8 @@ export const DISPATCH_TXN_PERIODS = ["1w", "2w", "3w", "1m", "3m", "6m", "12m", 
 export type DispatchTxnPeriod = (typeof DISPATCH_TXN_PERIODS)[number];
 
 export const DEFAULT_TXN_PERIOD: DispatchTxnPeriod = "3m";
+
+export function getDispatchPassword(): string {
   try {
     return String(localStorage.getItem(PASSWORD_KEY) || "").trim();
   } catch {
