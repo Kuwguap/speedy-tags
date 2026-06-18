@@ -58,6 +58,8 @@ export const api = {
     deliveryAddress?: string;
     deliveryPhone?: string;
     productChoice?: string;
+    serviceId?: string;
+    serviceTitle?: string;
   }) =>
     request<{ leadToken: string; orderId: string; order: OrderRecord }>(
       "/checkout/lead",

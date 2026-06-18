@@ -61,15 +61,24 @@ export interface CheckoutPricingConfig {
   overnightFedexFee: number;
   driverExtendedFee: number;
   driverLocalStates: string[];
+  /** When set (e.g. from admin Services catalog), overrides product-choice pricing. */
+  servicePrice?: number | null;
 }
 
 export function getProductPrice(
   productChoice: string,
   config: Pick<
     CheckoutPricingConfig,
-    "plateOnlyPrice" | "insuranceOnlyPrice" | "plateAndInsurancePrice"
+    "plateOnlyPrice" | "insuranceOnlyPrice" | "plateAndInsurancePrice" | "servicePrice"
   >,
 ): number {
+  if (
+    config.servicePrice != null &&
+    Number.isFinite(config.servicePrice) &&
+    config.servicePrice >= 0
+  ) {
+    return config.servicePrice;
+  }
   const choice = normalizeProductChoice(productChoice);
   if (choice === "insurance_only") return config.insuranceOnlyPrice;
   if (choice === "tag_and_insurance") return config.plateAndInsurancePrice;

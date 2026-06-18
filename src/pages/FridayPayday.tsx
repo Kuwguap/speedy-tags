@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link, useParams } from "react-router-dom";
 import {
   Bar,
   BarChart,
@@ -18,16 +19,20 @@ import { Badge } from "@/components/ui/badge";
 import {
   buildWeeklyBuckets,
   computePaydayStats,
+  computeDispatcherPaydayStats,
   currentNjWeekBounds,
+  dispatcherSlugFromHandle,
   filterRowsForNjWeek,
   formatNjDate,
   formatUsd,
   hasReceipt,
   isTagIssued,
+  listDispatcherSummaries,
   MIN_TAG_PRICE_USD,
   parsePrice,
   PAYROLL_RATE_DISPATCHER,
   PAYROLL_RATE_ISSUER,
+  resolveLeadCreatorHandle,
   type TransactionRow,
 } from "@/lib/payday";
 import {
@@ -96,8 +101,13 @@ function StatBlock({
 }
 
 export default function FridayPayday() {
+  const { dispatcherSlug } = useParams<{ dispatcherSlug?: string }>();
+  const isDispatcherPage = !!dispatcherSlug;
+
   useSeo({
-    title: "Friday Payday — TriState Tags",
+    title: isDispatcherPage
+      ? `Friday Payday — @${dispatcherSlugFromHandle(dispatcherSlug || "")} | TriState Tags`
+      : "Friday Payday — TriState Tags",
     description: "Weekly payroll and revenue reconciliation from tags issued and receipts uploaded.",
     noindex: true,
   });
@@ -117,7 +127,26 @@ export default function FridayPayday() {
     [rows, weekBounds.endMs, weekBounds.startMs]
   );
 
-  const stats = useMemo(() => computePaydayStats(weekRows, periodLabel), [weekRows, periodLabel]);
+  const stats = useMemo(() => {
+    if (isDispatcherPage && dispatcherSlug) {
+      return computeDispatcherPaydayStats(weekRows, dispatcherSlug, periodLabel);
+    }
+    return computePaydayStats(weekRows, periodLabel);
+  }, [weekRows, periodLabel, isDispatcherPage, dispatcherSlug]);
+
+  const dispatcherSummaries = useMemo(
+    () => listDispatcherSummaries(weekRows),
+    [weekRows],
+  );
+  const dispatcherPairBuckets = useMemo(() => {
+    if (!isDispatcherPage || !("dispatcherHandle" in stats)) return stats.pairBuckets;
+    const h = stats.dispatcherHandle;
+    return stats.pairBuckets.filter((b) =>
+      b.leadCreators.some((lc) => lc.handle === h) ||
+      b.rows.some((r) => resolveLeadCreatorHandle(r) === h),
+    );
+  }, [stats, isDispatcherPage]);
+
   const chartData = useMemo(() => buildWeeklyBuckets(rows, 8), [rows]);
 
   const issuerChartData = useMemo(
@@ -253,13 +282,23 @@ export default function FridayPayday() {
           <div>
             <div className="flex items-center gap-2">
               <Wallet className="h-7 w-7 text-emerald-600" />
-              <h1 className="font-display text-3xl font-bold tracking-tight text-slate-900">Friday Payday</h1>
+              <h1 className="font-display text-3xl font-bold tracking-tight text-slate-900">
+                {isDispatcherPage && "dispatcherLabel" in stats
+                  ? `${stats.dispatcherLabel} — Friday Payday`
+                  : "Friday Payday"}
+              </h1>
             </div>
             <p className="mt-2 max-w-2xl text-sm text-slate-600">{periodLabel}</p>
             <p className="mt-1 text-xs text-slate-500">
-              Issuer = who sent the tag (dispatch bot). Dispatcher = who created the lead (issuer bot).
-              Haru (@haruhatsu) → Highkage; all other issuers → Sensei.
+              {isDispatcherPage
+                ? "Lead creator (issuer bot) — their transactions, receipts, and dispatcher payroll share."
+                : "Issuer = who sent the tag (dispatch bot). Dispatcher = who created the lead (issuer bot). Haru (@haruhatsu) → Highkage; all other issuers → Sensei."}
             </p>
+            {isDispatcherPage ? (
+              <Link to="/fridaypayday" className="mt-2 inline-block text-sm text-primary underline">
+                ← All dispatchers
+              </Link>
+            ) : null}
           </div>
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={load} disabled={loading}>
@@ -276,6 +315,51 @@ export default function FridayPayday() {
           <div className="mb-6 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
             {error}
           </div>
+        ) : null}
+
+        {/* Dispatcher directory (main page only) */}
+        {!isDispatcherPage && dispatcherSummaries.length > 0 ? (
+          <Card className="mb-8 border-slate-200 bg-white">
+            <CardHeader>
+              <CardTitle className="text-lg">Dispatchers (lead creators)</CardTitle>
+              <CardDescription>
+                Grouped by issuer-bot account — open a dispatcher for their transactions and payroll
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-left text-slate-500">
+                    <th className="py-2 pr-3">Dispatcher</th>
+                    <th className="py-2 pr-3 text-right">Tags</th>
+                    <th className="py-2 pr-3 text-right">Receipts</th>
+                    <th className="py-2 pr-3 text-right">Cash IN</th>
+                    <th className="py-2 text-right">Dispatcher pay</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {dispatcherSummaries.map((d) => (
+                    <tr key={d.handle} className="border-b border-slate-100">
+                      <td className="py-2 pr-3">
+                        <Link
+                          to={`/fridaypayday/${d.slug}`}
+                          className="font-medium text-primary underline"
+                        >
+                          {d.label}
+                        </Link>
+                      </td>
+                      <td className="py-2 pr-3 text-right tabular-nums">{d.tagsIssued}</td>
+                      <td className="py-2 pr-3 text-right tabular-nums">{d.receipts}</td>
+                      <td className="py-2 pr-3 text-right tabular-nums">{formatUsd(d.cashIn)}</td>
+                      <td className="py-2 text-right tabular-nums font-medium">
+                        {d.tagsIssued} × ${PAYROLL_RATE_DISPATCHER} = {formatUsd(d.dispatcherPay)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </CardContent>
+          </Card>
         ) : null}
 
         {/* Tags + receipts row */}
@@ -590,10 +674,12 @@ export default function FridayPayday() {
         ) : null}
 
         {/* Issuer ↔ dispatcher pair breakdown with receipts */}
-        {stats.pairBuckets.length > 0 ? (
+        {dispatcherPairBuckets.length > 0 ? (
           <section className="mb-8 space-y-6">
-            <h2 className="font-display text-xl font-bold text-slate-900">Issuer ↔ Dispatcher pairs</h2>
-            {stats.pairBuckets.map((bucket) => (
+            <h2 className="font-display text-xl font-bold text-slate-900">
+              {isDispatcherPage ? "Issuer pairs" : "Issuer ↔ Dispatcher pairs"}
+            </h2>
+            {dispatcherPairBuckets.map((bucket) => (
               <Card key={bucket.key} className="border-slate-200 bg-white">
                 <CardHeader>
                   <CardTitle className="text-lg">
@@ -619,6 +705,13 @@ export default function FridayPayday() {
                       <div className="text-slate-500">{bucket.dispatcherTeamLabel} dispatcher pay</div>
                       <div className="font-semibold tabular-nums">
                         {bucket.tags} × ${PAYROLL_RATE_DISPATCHER} = {formatUsd(bucket.dispatcherPay)}
+                      </div>
+                    </div>
+                    <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-3 sm:col-span-2">
+                      <div className="text-slate-500">Total payroll (issuer + dispatcher)</div>
+                      <div className="font-bold tabular-nums text-emerald-800">
+                        {formatUsd(bucket.issuerPay)} + {formatUsd(bucket.dispatcherPay)} ={" "}
+                        {formatUsd(bucket.totalPay)}
                       </div>
                     </div>
                     <div className="rounded-lg bg-slate-50 p-3">
@@ -671,7 +764,57 @@ export default function FridayPayday() {
           </section>
         ) : null}
 
-        {leadCreatorChartData.length > 1 ? (
+        {isDispatcherPage && "transactionRows" in stats && stats.transactionRows.length > 0 ? (
+          <Card className="mb-8 border-slate-200 bg-white">
+            <CardHeader>
+              <CardTitle className="text-lg">All transactions this week</CardTitle>
+              <CardDescription>
+                {stats.transactionRows.length} row{stats.transactionRows.length === 1 ? "" : "s"} for{" "}
+                {stats.dispatcherLabel}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-left text-slate-500">
+                    <th className="py-2 pr-3">Ref</th>
+                    <th className="py-2 pr-3">When</th>
+                    <th className="py-2 pr-3">Issuer (sent tag)</th>
+                    <th className="py-2 pr-3">Vehicle</th>
+                    <th className="py-2 pr-3">Lead $</th>
+                    <th className="py-2 pr-3">Status</th>
+                    <th className="py-2">Receipt</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stats.transactionRows.map((row) => (
+                    <tr key={String(row.id ?? row.reference_id)} className="border-b border-slate-100">
+                      <td className="py-2 pr-3 font-mono text-xs">{row.reference_id || "—"}</td>
+                      <td className="py-2 pr-3 text-xs whitespace-nowrap">
+                        {row.timestamp_ny?.slice(0, 16) || "—"}
+                      </td>
+                      <td className="py-2 pr-3 text-xs">
+                        {row.dispatcher_handle
+                          ? `@${String(row.dispatcher_handle).replace(/^@/, "")}`
+                          : row.dispatcher_name || "—"}
+                      </td>
+                      <td className="py-2 pr-3 text-xs text-slate-600 max-w-[140px] truncate">
+                        {row.tag_name || "—"}
+                      </td>
+                      <td className="py-2 pr-3 tabular-nums">{row.price || `~$${MIN_TAG_PRICE_USD}`}</td>
+                      <td className="py-2 pr-3 text-xs">{row.delivery_status || "—"}</td>
+                      <td className="py-2">
+                        <ReceiptCell row={row} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {leadCreatorChartData.length > 1 && !isDispatcherPage ? (
           <Card className="mb-8 border-slate-200 bg-white">
             <CardHeader>
               <CardTitle className="text-lg">Lead creators breakdown</CardTitle>

@@ -60,13 +60,33 @@ export default function CheckoutProduct() {
       .finally(() => setLoading(false));
   }, []);
 
+  const pricingConfig = useMemo(
+    (): CheckoutPricingConfig => ({
+      ...config,
+      servicePrice: state.selectedService?.price ?? null,
+    }),
+    [config, state.selectedService],
+  );
+
   const getTotal = () =>
     computeCheckoutTotal(
       state.productChoice,
       state.deliveryMethod,
       state.deliveryAddress,
-      config,
+      pricingConfig,
     );
+
+  const productBasePrice = useMemo(
+    () =>
+      state.selectedService
+        ? state.selectedService.price
+        : state.productChoice === "insurance_only"
+          ? config.insuranceOnlyPrice
+          : state.productChoice === "tag_and_insurance"
+            ? config.plateAndInsurancePrice
+            : config.plateOnlyPrice,
+    [state.selectedService, state.productChoice, config],
+  );
 
   const driverExtended = useMemo(
     () =>
@@ -95,6 +115,8 @@ export default function CheckoutProduct() {
             ? state.deliveryPhone
             : undefined,
         productChoice: state.productChoice,
+        serviceId: state.selectedService?.id || "checkout",
+        serviceTitle: state.selectedService?.title || undefined,
         plateOnlyPrice: config.plateOnlyPrice,
         insuranceOnlyPrice: config.insuranceOnlyPrice,
         plateAndInsurancePrice: config.plateAndInsurancePrice,
@@ -138,69 +160,73 @@ export default function CheckoutProduct() {
 
         <Card className="shadow-card border-border/50 rounded-2xl overflow-hidden">
           <CardHeader className="border-b border-border/50 bg-accent/40">
-            <CardTitle className="font-display">Choose Your Product</CardTitle>
+            <CardTitle className="font-display">
+              {state.selectedService ? "Your Service" : "Choose Your Product"}
+            </CardTitle>
             <p className="text-sm text-muted-foreground">
-              Plate only, insurance only, or plate + insurance bundle
+              {state.selectedService
+                ? "Confirm your selection and proceed to payment"
+                : "Plate only, insurance only, or plate + insurance bundle"}
             </p>
           </CardHeader>
           <CardContent className="p-6 space-y-4">
-            <RadioGroup
-              value={state.productChoice}
-              onValueChange={(v) => update({ productChoice: v as ProductChoice })}
-              className="space-y-4"
-            >
-              <Label
-                htmlFor="tag_only"
-                className="flex items-center justify-between p-4 rounded-xl border border-border hover:bg-accent/30 transition-colors cursor-pointer block"
-              >
-                <div className="flex items-center space-x-3">
-                  <RadioGroupItem value="tag_only" id="tag_only" />
-                  <span className="font-medium">Plate Only</span>
-                </div>
+            {state.selectedService ? (
+              <div className="flex items-center justify-between p-4 rounded-xl border border-primary/30 bg-primary/5">
+                <span className="font-medium">{state.selectedService.title}</span>
                 <span className="font-bold text-primary">
-                  ${config.plateOnlyPrice.toFixed(0)}
+                  ${state.selectedService.price.toFixed(2)}
                 </span>
-              </Label>
-              <Label
-                htmlFor="insurance_only"
-                className="flex items-center justify-between p-4 rounded-xl border border-border hover:bg-accent/30 transition-colors cursor-pointer block"
+              </div>
+            ) : (
+              <RadioGroup
+                value={state.productChoice}
+                onValueChange={(v) => update({ productChoice: v as ProductChoice })}
+                className="space-y-4"
               >
-                <div className="flex items-center space-x-3">
-                  <RadioGroupItem value="insurance_only" id="insurance_only" />
-                  <span className="font-medium">Insurance Only</span>
-                </div>
-                <span className="font-bold text-primary">
-                  ${config.insuranceOnlyPrice.toFixed(0)}
-                </span>
-              </Label>
-              <Label
-                htmlFor="tag_and_insurance"
-                className="flex items-center justify-between p-4 rounded-xl border border-border hover:bg-accent/30 transition-colors cursor-pointer block"
-              >
-                <div className="flex items-center space-x-3">
-                  <RadioGroupItem value="tag_and_insurance" id="tag_and_insurance" />
-                  <span className="font-medium">Plate + Insurance</span>
-                </div>
-                <span className="font-bold text-primary">
-                  ${config.plateAndInsurancePrice.toFixed(0)}
-                </span>
-              </Label>
-            </RadioGroup>
+                <Label
+                  htmlFor="tag_only"
+                  className="flex items-center justify-between p-4 rounded-xl border border-border hover:bg-accent/30 transition-colors cursor-pointer block"
+                >
+                  <div className="flex items-center space-x-3">
+                    <RadioGroupItem value="tag_only" id="tag_only" />
+                    <span className="font-medium">Plate Only</span>
+                  </div>
+                  <span className="font-bold text-primary">
+                    ${config.plateOnlyPrice.toFixed(0)}
+                  </span>
+                </Label>
+                <Label
+                  htmlFor="insurance_only"
+                  className="flex items-center justify-between p-4 rounded-xl border border-border hover:bg-accent/30 transition-colors cursor-pointer block"
+                >
+                  <div className="flex items-center space-x-3">
+                    <RadioGroupItem value="insurance_only" id="insurance_only" />
+                    <span className="font-medium">Insurance Only</span>
+                  </div>
+                  <span className="font-bold text-primary">
+                    ${config.insuranceOnlyPrice.toFixed(0)}
+                  </span>
+                </Label>
+                <Label
+                  htmlFor="tag_and_insurance"
+                  className="flex items-center justify-between p-4 rounded-xl border border-border hover:bg-accent/30 transition-colors cursor-pointer block"
+                >
+                  <div className="flex items-center space-x-3">
+                    <RadioGroupItem value="tag_and_insurance" id="tag_and_insurance" />
+                    <span className="font-medium">Plate + Insurance</span>
+                  </div>
+                  <span className="font-bold text-primary">
+                    ${config.plateAndInsurancePrice.toFixed(0)}
+                  </span>
+                </Label>
+              </RadioGroup>
+            )}
 
             {showFeeBreakdown && (
               <div className="pt-4 space-y-1.5 text-sm">
                 <div className="flex justify-between text-muted-foreground">
-                  <span>Product</span>
-                  <span>
-                    $
-                    {(
-                      state.productChoice === "insurance_only"
-                        ? config.insuranceOnlyPrice
-                        : state.productChoice === "tag_and_insurance"
-                          ? config.plateAndInsurancePrice
-                          : config.plateOnlyPrice
-                    ).toFixed(2)}
-                  </span>
+                  <span>{state.selectedService ? "Service" : "Product"}</span>
+                  <span>${productBasePrice.toFixed(2)}</span>
                 </div>
                 {state.deliveryMethod === "overnight_fedex" && (
                   <div className="flex justify-between text-muted-foreground">

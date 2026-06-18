@@ -126,6 +126,8 @@ export default function CheckoutGuarantee() {
             deliveryAddress: nextAddress || undefined,
             deliveryPhone: nextPhone || undefined,
             productChoice: state.productChoice,
+            serviceId: state.selectedService?.id,
+            serviceTitle: state.selectedService?.title,
           }),
         { attempts: 3, baseDelayMs: 600, maxDelayMs: 3000 },
       );

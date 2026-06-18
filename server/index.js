@@ -1011,6 +1011,72 @@ function escapeTelegramHtml(val) {
     .replace(/>/g, "&gt;");
 }
 
+function productPriceFromChoice(choice, cfg) {
+  const c = String(choice || "tag_only").trim();
+  if (c === "insurance_only") return cfg.insuranceOnlyPrice;
+  if (c === "tag_and_insurance" || c === "insurance_monthly" || c === "insurance_yearly") {
+    return cfg.plateAndInsurancePrice;
+  }
+  return cfg.plateOnlyPrice;
+}
+
+function extractStateFromAddress(address) {
+  const raw = String(address || "").trim();
+  if (!raw) return null;
+  const commaMatch = raw.match(/,\s*([A-Za-z]{2})\b(?:\s+\d{5})?/);
+  if (commaMatch) return commaMatch[1].toUpperCase();
+  const zipMatch = raw.match(/\b([A-Za-z]{2})\s+\d{5}(?:-\d{4})?\b/);
+  if (zipMatch) return zipMatch[1].toUpperCase();
+  const tailMatch = raw.match(/\b([A-Za-z]{2})\s*$/);
+  if (tailMatch) return tailMatch[1].toUpperCase();
+  return null;
+}
+
+function isExtendedDriverDelivery(address, localStates) {
+  const code = extractStateFromAddress(address);
+  if (!code) return false;
+  const locals = parseDriverLocalStatesSetting(localStates);
+  return !locals.includes(code);
+}
+
+async function computeExpectedCheckoutAmount(body, settings) {
+  const cfg = checkoutConfigFromSettings(settings);
+  const dm = String(body.deliveryMethod || "email");
+  const productChoice = body.productChoice || "tag_only";
+  let base = null;
+  let resolvedServiceTitle = String(body.serviceTitle || "").trim() || null;
+
+  const serviceId = String(body.serviceId || "").trim();
+  if (serviceId && serviceId !== "checkout") {
+    const services = await loadServices();
+    const svc = (services || []).find((s) => String(s.id) === serviceId);
+    if (svc) {
+      const p = parseFloat(svc.price);
+      if (Number.isFinite(p) && p >= 0) {
+        base = p;
+        resolvedServiceTitle = svc.title || resolvedServiceTitle;
+      }
+    }
+  }
+
+  if (base == null) {
+    base = productPriceFromChoice(productChoice, cfg);
+  }
+
+  let total = base;
+  if (dm === "overnight_fedex") total += cfg.overnightFedexFee;
+  if (dm === "driver" && isExtendedDriverDelivery(body.deliveryAddress, cfg.driverLocalStates)) {
+    total += cfg.driverExtendedFee;
+  }
+
+  const lineItemName = resolvedServiceTitle || productChoiceTitle(productChoice);
+  return {
+    amount: Math.round(total * 100) / 100,
+    serviceTitle: resolvedServiceTitle,
+    lineItemName,
+  };
+}
+
 function productChoiceTitle(choice) {
   const c = String(choice || "").trim();
   if (c === "insurance_only") return "Insurance Only";
@@ -1617,12 +1683,36 @@ async function proxyDispatchApi(req, res) {
   if (req.method !== "GET" && req.method !== "HEAD" && req.body?.length) {
     init.body = req.body;
   }
+  function sniffReceiptType(buf, headerCt) {
+    if (!buf || buf.length < 2) return "image/jpeg";
+    if (buf.length >= 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) {
+      return "image/png";
+    }
+    if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8) return "image/jpeg";
+    const ct = String(headerCt || "").split(";")[0].trim().toLowerCase();
+    if (ct.startsWith("image/") && !ct.includes("octet-stream")) return ct;
+    return "image/jpeg";
+  }
+  const isReceiptView = suffix.toLowerCase().includes("receipts/view");
   try {
     const upstream = await fetch(target, init);
     res.status(upstream.status);
-    const ct = upstream.headers.get("content-type");
-    if (ct) res.setHeader("content-type", ct);
+    upstream.headers.forEach((value, key) => {
+      const lower = key.toLowerCase();
+      if (lower === "transfer-encoding" || lower === "connection" || lower === "content-encoding") return;
+      res.setHeader(key, value);
+    });
     const buf = Buffer.from(await upstream.arrayBuffer());
+    if (isReceiptView) {
+      const ct = sniffReceiptType(buf, res.getHeader("content-type") || upstream.headers.get("content-type"));
+      res.setHeader("content-type", ct);
+      if (!res.getHeader("content-disposition")) {
+        res.setHeader("content-disposition", 'inline; filename="receipt.jpg"');
+      }
+    } else {
+      const ct = upstream.headers.get("content-type");
+      if (ct) res.setHeader("content-type", ct);
+    }
     if (buf.length) res.send(buf);
     else res.end();
   } catch (e) {
@@ -2318,6 +2408,8 @@ app.post("/api/checkout/lead", async (req, res) => {
       deliveryAddress: safeStr(body.deliveryAddress, 500),
       deliveryPhone: safeStr(body.deliveryPhone, 50),
       productChoice: safeStr(body.productChoice, 30),
+      serviceId: safeStr(body.serviceId, 50),
+      serviceTitle: safeStr(body.serviceTitle, 100),
       lastActivityAt: nowIso,
     };
 
@@ -2350,8 +2442,8 @@ app.post("/api/checkout/lead", async (req, res) => {
     const newId = randomUUID();
     const newOrder = {
       id: newId,
-      serviceId: "checkout",
-      serviceTitle: productChoiceTitle(body.productChoice),
+      serviceId: safeStr(body.serviceId, 50) || "checkout",
+      serviceTitle: safeStr(body.serviceTitle, 100) || productChoiceTitle(body.productChoice),
       firstName: "Pending",
       lastName: "",
       phone: body.deliveryPhone || "",
@@ -2403,8 +2495,15 @@ app.post("/api/checkout/create-session", async (req, res) => {
   ) {
     return res.status(400).json({ error: "Phone is required for this delivery method." });
   }
-  const amount = parseFloat(body.amount);
-  if (isNaN(amount) || amount <= 0) return res.status(400).json({ error: "Invalid amount" });
+  const settings = await loadSettings();
+  const pricing = await computeExpectedCheckoutAmount(body, settings);
+  const amount = pricing.amount;
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return res.status(400).json({ error: "Invalid amount" });
+  }
+  const checkoutLineItemName = pricing.lineItemName;
+  const resolvedServiceTitle = pricing.serviceTitle || body.serviceTitle || null;
+  const leadToken = String(body.leadToken || "").trim() || null;
   let baseUrl = "";
   if (body.successOrigin && typeof body.successOrigin === "string") {
     const origin = body.successOrigin.trim().replace(/\/$/, "");
@@ -2419,8 +2518,6 @@ app.post("/api/checkout/create-session", async (req, res) => {
   }
   baseUrl = (baseUrl || APP_URL).replace(/\/$/, "");
 
-  const settings = await loadSettings();
-  const leadToken = String(body.leadToken || "").trim() || null;
   const nowIso = new Date().toISOString();
 
   // Helper: find an existing lead row by token so we update it through the
@@ -2449,7 +2546,7 @@ app.post("/api/checkout/create-session", async (req, res) => {
         stripeSessionId: fakeSessionId,
         paymentStatus: "paid",
         price: amount,
-        serviceTitle: body.serviceTitle || productChoiceTitle(body.productChoice),
+        serviceTitle: resolvedServiceTitle || checkoutLineItemName,
         deliveryMethod: body.deliveryMethod,
         deliveryEmail: body.deliveryEmail || "",
         deliveryAddress: body.deliveryAddress || "",
@@ -2465,7 +2562,7 @@ app.post("/api/checkout/create-session", async (req, res) => {
     const order = {
       id: randomUUID(),
       serviceId: body.serviceId || "checkout",
-      serviceTitle: body.serviceTitle || productChoiceTitle(body.productChoice),
+      serviceTitle: resolvedServiceTitle || checkoutLineItemName,
       firstName: "Pending",
       lastName: "",
       phone: body.deliveryPhone || "",
@@ -2508,7 +2605,7 @@ app.post("/api/checkout/create-session", async (req, res) => {
           currency: "usd",
           unit_amount: Math.round(amount * 100),
           product_data: {
-            name: productChoiceTitle(body.productChoice),
+            name: checkoutLineItemName,
             description: `${deliveryMethodLabel(body.deliveryMethod)} — TriState Tags`,
           },
         },
@@ -2525,7 +2622,7 @@ app.post("/api/checkout/create-session", async (req, res) => {
         deliveryPhone: String(body.deliveryPhone || "").slice(0, 50),
         productChoice: String(body.productChoice || "tag_only").slice(0, 30),
         serviceId: String(body.serviceId || "checkout").slice(0, 50),
-        serviceTitle: String(body.serviceTitle || "").slice(0, 100),
+        serviceTitle: String(resolvedServiceTitle || checkoutLineItemName).slice(0, 100),
         amount: String(amount),
         leadToken: leadToken || "",
       },
@@ -2542,7 +2639,7 @@ app.post("/api/checkout/create-session", async (req, res) => {
         paymentPendingAt: nowIso,
         lastActivityAt: nowIso,
         price: amount,
-        serviceTitle: body.serviceTitle || productChoiceTitle(body.productChoice),
+        serviceTitle: resolvedServiceTitle || checkoutLineItemName,
         stripeSessionId: session.id,
         deliveryMethod: body.deliveryMethod || null,
         deliveryEmail: body.deliveryEmail || null,

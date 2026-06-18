@@ -469,6 +469,8 @@ function escapeIssuerText(s) {
 // ==========================================================================
 
 let _txnRows = [];
+let _cachedIssuerDrivers = [];
+let _cachedDispatchRecipients = [];
 let _txnLoading = false;
 const KRAB_TXN_PERIOD_KEY = "krab_txn_period";
 let txnUnifiedZoomScale = 1;
@@ -625,6 +627,62 @@ function _txnDispatcherCell(row) {
   }
 
   return '<span class="muted">—</span>';
+}
+
+function _txnResolveDispatcherHandle(row) {
+  const h = String((row && row.issuer_submitter_handle) || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^@/, "");
+  if (h && h !== "unknown") return h;
+  const fallback = String((row && row.dispatcher_handle) || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^@/, "");
+  return fallback || "unknown";
+}
+
+function _txnDispatcherSlug(handle) {
+  return String(handle || "unknown")
+    .trim()
+    .toLowerCase()
+    .replace(/^@/, "") || "unknown";
+}
+
+function renderTxnDispatcherGroups(rows) {
+  const host = document.getElementById("txn-dispatcher-groups");
+  if (!host) return;
+  const map = new Map();
+  for (const r of rows || []) {
+    const handle = _txnResolveDispatcherHandle(r);
+    if (handle === "unknown") continue;
+    const cur = map.get(handle) || { total: 0, delivered: 0 };
+    cur.total += 1;
+    if (_wpIsTagIssued(r)) cur.delivered += 1;
+    map.set(handle, cur);
+  }
+  const list = [...map.entries()]
+    .map(([handle, v]) => ({ handle, slug: _txnDispatcherSlug(handle), ...v }))
+    .sort((a, b) => b.delivered - a.delivered || b.total - a.total || a.handle.localeCompare(b.handle));
+  if (list.length === 0) {
+    host.innerHTML = "";
+    host.style.display = "none";
+    return;
+  }
+  host.style.display = "block";
+  host.innerHTML =
+    `<div class="panel-title" style="margin-bottom:0.4rem;font-size:0.9rem">Dispatchers (grouped)</div>` +
+    `<div class="txn-dispatcher-chips">` +
+    list
+      .map(
+        (d) =>
+          `<a class="txn-dispatcher-chip" href="/fridaypayday/${encodeURIComponent(d.slug)}">` +
+          `<strong>@${escapeIssuerText(d.handle)}</strong>` +
+          `<span class="muted">${d.delivered} tag${d.delivered === 1 ? "" : "s"} · ${d.total} row${d.total === 1 ? "" : "s"}</span>` +
+          `</a>`
+      )
+      .join("") +
+    `</div>`;
 }
 
 function _txnReceiptCell(row) {
@@ -1167,46 +1225,96 @@ function renderUnifiedTransactions() {
       : "No transactions yet. Send a document through Krab Dispatch.";
     tr.appendChild(td);
     tbody.appendChild(tr);
+    renderTxnDispatcherGroups([]);
     return;
   }
   let priceSum = 0;
   let priceCount = 0;
   let receiptPriceSum = 0;
   let receiptPriceCount = 0;
-  rows.forEach((r, idx) => {
-    const tr = document.createElement("tr");
-    const parsed = _txnParsePrice(r && r.price);
-    if (parsed > 0) {
-      priceSum += parsed;
-      priceCount += 1;
+
+  // Group rows by dispatcher (lead creator) with section headers.
+  const grouped = new Map();
+  const groupOrder = [];
+  for (const r of rows) {
+    const handle = _txnResolveDispatcherHandle(r);
+    if (!grouped.has(handle)) {
+      grouped.set(handle, []);
+      groupOrder.push(handle);
     }
-    const parsedReceipt = _txnParsePrice(r && r.receipt_price);
-    if (parsedReceipt > 0) {
-      receiptPriceSum += parsedReceipt;
-      receiptPriceCount += 1;
-    }
-    tr.innerHTML =
-      `<td>${idx + 1}</td>` +
-      `<td class="small">${escapeIssuerText(formatNy(r.timestamp_ny))}</td>` +
-      `<td style="text-align:left;max-width:12rem;white-space:normal;">${
-        r.tag_name
-          ? escapeIssuerText(r.tag_name)
-          : `<span class="muted">${escapeIssuerText(r.filename || "—")}</span>`
-      }</td>` +
-      `<td style="text-align:left;max-width:14rem;white-space:normal;">${_txnIssuerCell(r)}</td>` +
-      `<td style="text-align:left;max-width:14rem;white-space:normal;">${_txnDriverCell(r)}</td>` +
-      `<td style="text-align:left;white-space:normal;">${_txnDispatcherCell(r)}</td>` +
-      `<td>${
-        r.reference_id
-          ? `<code>${escapeIssuerText(r.reference_id)}</code>`
-          : '<span class="muted">—</span>'
-      }</td>` +
-      `<td>${_txnPriceCell(r)}</td>` +
-      `<td>${_txnReceiptPriceCell(r)}</td>` +
-      `<td>${_txnReceiptCell(r)}</td>` +
-      `<td>${_txnStatusCell(r)}</td>`;
-    tbody.appendChild(tr);
+    grouped.get(handle).push(r);
+  }
+  groupOrder.sort((a, b) => {
+    if (a === "unknown") return 1;
+    if (b === "unknown") return -1;
+    const da = grouped.get(a).filter(_wpIsTagIssued).length;
+    const db = grouped.get(b).filter(_wpIsTagIssued).length;
+    return db - da || grouped.get(b).length - grouped.get(a).length || a.localeCompare(b);
   });
+
+  let rowNum = 0;
+  tbody.innerHTML = "";
+  priceSum = 0;
+  priceCount = 0;
+  receiptPriceSum = 0;
+  receiptPriceCount = 0;
+
+  for (const handle of groupOrder) {
+    const groupRows = grouped.get(handle) || [];
+    const slug = _txnDispatcherSlug(handle);
+    const delivered = groupRows.filter(_wpIsTagIssued).length;
+    const headerTr = document.createElement("tr");
+    headerTr.className = "txn-dispatcher-group-header";
+    const label =
+      handle === "unknown"
+        ? "Unknown dispatcher"
+        : `@${escapeIssuerText(handle)}`;
+    const paydayLink =
+      handle !== "unknown"
+        ? ` <a href="/fridaypayday/${encodeURIComponent(slug)}" class="txn-dispatcher-payday-link">Payroll →</a>`
+        : "";
+    headerTr.innerHTML =
+      `<td colspan="11" style="text-align:left;background:var(--accent-soft,#f0fdf4);font-weight:600;padding:0.55rem 0.65rem;">` +
+      `${label} — ${delivered} delivered · ${groupRows.length} row${groupRows.length === 1 ? "" : "s"}${paydayLink}` +
+      `</td>`;
+    tbody.appendChild(headerTr);
+
+    for (const r of groupRows) {
+      rowNum += 1;
+      const tr = document.createElement("tr");
+      const parsed = _txnParsePrice(r && r.price);
+      if (parsed > 0) {
+        priceSum += parsed;
+        priceCount += 1;
+      }
+      const parsedReceipt = _txnParsePrice(r && r.receipt_price);
+      if (parsedReceipt > 0) {
+        receiptPriceSum += parsedReceipt;
+        receiptPriceCount += 1;
+      }
+      tr.innerHTML =
+        `<td>${rowNum}</td>` +
+        `<td class="small">${escapeIssuerText(formatNy(r.timestamp_ny))}</td>` +
+        `<td style="text-align:left;max-width:12rem;white-space:normal;">${
+          r.tag_name
+            ? escapeIssuerText(r.tag_name)
+            : `<span class="muted">${escapeIssuerText(r.filename || "—")}</span>`
+        }</td>` +
+        `<td style="text-align:left;max-width:14rem;white-space:normal;">${_txnIssuerCell(r)}</td>` +
+        `<td style="text-align:left;max-width:14rem;white-space:normal;">${_txnDriverCell(r)}</td>` +
+        `<td style="text-align:left;white-space:normal;">${_txnDispatcherCell(r)}</td>` +
+        `<td>${
+          r.reference_id
+            ? `<code>${escapeIssuerText(r.reference_id)}</code>`
+            : '<span class="muted">—</span>'
+        }</td>` +
+        `<td>${_txnPriceCell(r)}</td>` +
+        `<td>${_txnReceiptPriceCell(r)}</td>` +
+        `<td>${_txnReceiptCell(r)}</td>` +
+        `<td>${_txnStatusCell(r)}</td>`;
+      tbody.appendChild(tr);
+    }
+  }
 
   // Spreadsheet-style totals row: sum lead Price and Receipt Price for visible rows.
   const totalTr = document.createElement("tr");
@@ -1242,6 +1350,7 @@ function renderUnifiedTransactions() {
         : `Showing ${rows.length} of ${_txnRows.length} transactions`;
     statusEl.textContent = `${shownLabel}${rangeLabel ? ` · ${rangeLabel}` : ""} · Lead price total: ${_txnFormatUsd(priceSum)} · Receipt price total: ${_txnFormatUsd(receiptPriceSum)}`;
   }
+  renderTxnDispatcherGroups(rows);
 }
 
 function updateTxnAuthGate() {
@@ -1316,6 +1425,7 @@ async function refreshUnifiedTransactions() {
   );
   renderUnifiedTransactions();
   refreshWeeklyPerformance();
+  renderUnifiedDriversTable();
 }
 
 function doAdminLogout() {
@@ -1612,6 +1722,7 @@ function renderIssuerGroups(groups) {
 function renderIssuerDrivers(drivers) {
   const tb = document.getElementById("issuer-drivers-tbody");
   if (!tb) return;
+  _cachedIssuerDrivers = Array.isArray(drivers) ? drivers : [];
   tb.innerHTML = "";
   const list = Array.isArray(drivers) ? drivers : [];
   if (list.length === 0) {
@@ -1622,6 +1733,7 @@ function renderIssuerDrivers(drivers) {
     td.textContent = "No drivers.";
     tr.appendChild(td);
     tb.appendChild(tr);
+    renderUnifiedDriversTable();
     return;
   }
   list.forEach((d) => {
@@ -1649,6 +1761,116 @@ function renderIssuerDrivers(drivers) {
     tr.appendChild(act);
     tb.appendChild(tr);
   });
+  renderUnifiedDriversTable();
+}
+
+function _normalizeDriverNameKey(name) {
+  return String(name || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+function mergeUnifiedDrivers(recipients, issuerDrivers, txnRows) {
+  const map = new Map();
+
+  function upsert(key, patch) {
+    const k = key || "unknown";
+    const cur = map.get(k) || {
+      name: "",
+      email: "",
+      telegramId: "",
+      telegramUsername: "",
+      phone: "",
+      sources: [],
+    };
+    if (patch.name) cur.name = patch.name;
+    if (patch.email) cur.email = patch.email;
+    if (patch.telegramId) cur.telegramId = patch.telegramId;
+    if (patch.telegramUsername) cur.telegramUsername = patch.telegramUsername;
+    if (patch.phone) cur.phone = patch.phone;
+    for (const s of patch.sources || []) {
+      if (!cur.sources.includes(s)) cur.sources.push(s);
+    }
+    map.set(k, cur);
+  }
+
+  for (const r of recipients || []) {
+    const name = String(r.name || "").trim();
+    const key = _normalizeDriverNameKey(name) || `dispatch-email:${r.email || r.id}`;
+    upsert(key, { name, email: r.email || "", sources: ["dispatch"] });
+  }
+
+  for (const d of issuerDrivers || []) {
+    const name = String(d.driver_name || "").trim();
+    const tgId = String(d.driver_telegram_id || "").trim();
+    const key = _normalizeDriverNameKey(name) || `issuer-tg:${tgId || d.id}`;
+    upsert(key, {
+      name,
+      telegramId: tgId,
+      phone: d.phone_number || "",
+      sources: ["issuer"],
+    });
+  }
+
+  for (const row of txnRows || []) {
+    const acc = row && row.driver_accepted;
+    const name = String(
+      (acc && acc.driver_name) || row.driver_selected_name || ""
+    ).trim();
+    if (!name) continue;
+    const key = _normalizeDriverNameKey(name);
+    const tgUser =
+      (acc && (acc.telegram_username || acc.driver_telegram_username)) || "";
+    upsert(key, {
+      name,
+      email: row.driver_recipient_email || "",
+      telegramId: (acc && acc.driver_telegram_id) || "",
+      telegramUsername: tgUser,
+      sources: ["transactions"],
+    });
+  }
+
+  return [...map.values()]
+    .filter((d) => d.name || d.email || d.telegramId)
+    .sort((a, b) => (a.name || a.email).localeCompare(b.name || b.email));
+}
+
+function renderUnifiedDriversTable() {
+  const tb = document.getElementById("unified-drivers-tbody");
+  if (!tb) return;
+  if (!getStoredPassword()) {
+    tb.innerHTML =
+      '<tr><td colspan="6" class="muted">Unlock to load merged driver directory.</td></tr>';
+    return;
+  }
+  const merged = mergeUnifiedDrivers(
+    _cachedDispatchRecipients,
+    _cachedIssuerDrivers,
+    _txnRows || []
+  );
+  tb.innerHTML = "";
+  if (merged.length === 0) {
+    tb.innerHTML =
+      '<tr><td colspan="6" class="muted">No drivers in Dispatch recipients or Issuer bot yet.</td></tr>';
+    return;
+  }
+  for (const d of merged) {
+    const tr = document.createElement("tr");
+    const uname = d.telegramUsername
+      ? d.telegramUsername.startsWith("@")
+        ? d.telegramUsername
+        : `@${d.telegramUsername}`
+      : "—";
+    tr.innerHTML =
+      `<td style="text-align:left">${escapeIssuerText(d.name || "—")}</td>` +
+      `<td>${escapeIssuerText(d.email || "—")}</td>` +
+      `<td><code>${escapeIssuerText(d.telegramId || "—")}</code></td>` +
+      `<td>${escapeIssuerText(uname)}</td>` +
+      `<td>${escapeIssuerText(d.phone || "—")}</td>` +
+      `<td class="small muted">${escapeIssuerText(d.sources.join(", "))}</td>`;
+    tb.appendChild(tr);
+  }
 }
 
 function renderIssuerAssistants(groups, assistantsByGroup) {
@@ -3935,6 +4157,8 @@ function setupEvents() {
         return;
       }
       renderRecipients(recipients);
+      _cachedDispatchRecipients = Array.isArray(recipients) ? recipients : [];
+      renderUnifiedDriversTable();
     } catch (e) {
       console.error("Failed to fetch recipients:", e);
       recipientsBody.innerHTML = `

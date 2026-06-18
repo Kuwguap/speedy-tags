@@ -206,6 +206,79 @@ export function leadCreatorDisplayLabel(handle: string): string {
   return `@${h}`;
 }
 
+/** URL slug for a dispatcher (lead creator) payday page, e.g. sensei_vi */
+export function dispatcherSlugFromHandle(handle: string): string {
+  const h = normalizeIssuerHandle(handle);
+  return h || "unknown";
+}
+
+export function rowMatchesDispatcherSlug(row: TransactionRow, slug: string): boolean {
+  return resolveLeadCreatorHandle(row) === dispatcherSlugFromHandle(slug);
+}
+
+export interface DispatcherSummary {
+  handle: string;
+  slug: string;
+  label: string;
+  totalRows: number;
+  tagsIssued: number;
+  receipts: number;
+  cashIn: number;
+  dispatcherPay: number;
+}
+
+export function listDispatcherSummaries(rows: TransactionRow[]): DispatcherSummary[] {
+  const map = new Map<
+    string,
+    { totalRows: number; tags: number; receipts: number; cashIn: number }
+  >();
+
+  for (const row of rows) {
+    const handle = resolveLeadCreatorHandle(row);
+    const cur = map.get(handle) || { totalRows: 0, tags: 0, receipts: 0, cashIn: 0 };
+    cur.totalRows += 1;
+    if (isTagIssued(row)) {
+      cur.tags += 1;
+      if (hasReceipt(row)) {
+        cur.receipts += 1;
+        cur.cashIn += parsePrice(row.receipt_price);
+      }
+    }
+    map.set(handle, cur);
+  }
+
+  return [...map.entries()]
+    .filter(([handle]) => handle !== "unknown")
+    .map(([handle, v]) => ({
+      handle,
+      slug: dispatcherSlugFromHandle(handle),
+      label: leadCreatorDisplayLabel(handle),
+      totalRows: v.totalRows,
+      tagsIssued: v.tags,
+      receipts: v.receipts,
+      cashIn: v.cashIn,
+      dispatcherPay: v.tags * PAYROLL_RATE_DISPATCHER,
+    }))
+    .sort((a, b) => b.tagsIssued - a.tagsIssued || a.label.localeCompare(b.label));
+}
+
+export function computeDispatcherPaydayStats(
+  rows: TransactionRow[],
+  slug: string,
+  periodLabel: string,
+): PaydayStats & { dispatcherHandle: string; dispatcherLabel: string; transactionRows: TransactionRow[] } {
+  const handle = dispatcherSlugFromHandle(slug);
+  const transactionRows = rows.filter((r) => resolveLeadCreatorHandle(r) === handle);
+  const delivered = transactionRows.filter(isTagIssued);
+  const base = computePaydayStats(delivered, periodLabel);
+  return {
+    ...base,
+    dispatcherHandle: handle,
+    dispatcherLabel: leadCreatorDisplayLabel(handle),
+    transactionRows,
+  };
+}
+
 export function dispatcherLabelForTeam(team: "highkage" | "sensei"): string {
   return team === "highkage" ? "Highkage" : "Sensei";
 }

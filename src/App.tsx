@@ -42,6 +42,7 @@ const App = () => (
             <Route path="/checkout/done" element={<CheckoutDone />} />
             <Route path="/admin" element={<Admin />} />
             <Route path="/FridayPayday" element={<FridayPayday />} />
+            <Route path="/fridaypayday/:dispatcherSlug" element={<FridayPayday />} />
             <Route path="/fridaypayday" element={<FridayPayday />} />
             <Route path="/payment" element={<Payments />} />
             <Route path="/payments" element={<Payments />} />
