@@ -2,6 +2,9 @@
 
 export const PAYROLL_RATE_ISSUER = 9;
 export const PAYROLL_RATE_DISPATCHER = 5;
+/** $10 per new client — paid to whoever started the lead (issuer bot submitter). */
+export const PAYROLL_RATE_LEAD_STARTER = 10;
+/** @deprecated alias */ export const PAYROLL_RATE_CLIENT_FINDER = PAYROLL_RATE_LEAD_STARTER;
 export const MIN_TAG_PRICE_USD = 100;
 export const NJ_TZ = "America/New_York";
 
@@ -46,6 +49,7 @@ export interface PaydayStats {
   leak: number;
   payrollIssuer: number;
   payrollDispatcher: number;
+  payrollLeadStarter: number;
   payrollTotal: number;
   netAfterPayroll: number;
   periodLabel: string;
@@ -53,6 +57,7 @@ export interface PaydayStats {
   issuerPayrolls: IssuerPayrollLine[];
   dispatcherPayrolls: DispatcherPayrollLine[];
   leadCreatorPayrolls: LeadCreatorPayrollLine[];
+  leadStarterPayrolls: LeadStarterPayrollLine[];
   pairBuckets: PayrollPairBucket[];
 }
 
@@ -98,6 +103,15 @@ export interface LeadCreatorPayrollLine {
   pay: number;
 }
 
+export interface LeadStarterPayrollLine {
+  handle: string;
+  label: string;
+  clients: number;
+  receipts: number;
+  cashIn: number;
+  pay: number;
+}
+
 export interface PayrollPairBucket {
   key: string;
   issuerHandle: string;
@@ -111,6 +125,7 @@ export interface PayrollPairBucket {
   leak: number;
   issuerPay: number;
   dispatcherPay: number;
+  leadStarterPay: number;
   totalPay: number;
   leadCreators: { handle: string; label: string; tags: number }[];
   rows: TransactionRow[];
@@ -225,6 +240,7 @@ export interface DispatcherSummary {
   receipts: number;
   cashIn: number;
   dispatcherPay: number;
+  leadStarterPay: number;
 }
 
 export function listDispatcherSummaries(rows: TransactionRow[]): DispatcherSummary[] {
@@ -258,6 +274,7 @@ export function listDispatcherSummaries(rows: TransactionRow[]): DispatcherSumma
       receipts: v.receipts,
       cashIn: v.cashIn,
       dispatcherPay: v.tags * PAYROLL_RATE_DISPATCHER,
+      leadStarterPay: v.tags * PAYROLL_RATE_LEAD_STARTER,
     }))
     .sort((a, b) => b.tagsIssued - a.tagsIssued || a.label.localeCompare(b.label));
 }
@@ -310,6 +327,7 @@ export function buildPayrollPairBuckets(rows: TransactionRow[]): PayrollPairBuck
         leak: 0,
         issuerPay: 0,
         dispatcherPay: 0,
+        leadStarterPay: 0,
         totalPay: 0,
         leadCreators: [],
         rows: [],
@@ -342,7 +360,8 @@ export function buildPayrollPairBuckets(rows: TransactionRow[]): PayrollPairBuck
     bucket.leak = Math.max(0, bucket.expectedIn - bucket.cashIn);
     bucket.issuerPay = bucket.tags * PAYROLL_RATE_ISSUER;
     bucket.dispatcherPay = bucket.tags * PAYROLL_RATE_DISPATCHER;
-    bucket.totalPay = bucket.issuerPay + bucket.dispatcherPay;
+    bucket.leadStarterPay = bucket.tags * PAYROLL_RATE_LEAD_STARTER;
+    bucket.totalPay = bucket.issuerPay + bucket.dispatcherPay + bucket.leadStarterPay;
     bucket.leadCreators.sort((a, b) => b.tags - a.tags || a.label.localeCompare(b.label));
   }
 
@@ -433,6 +452,33 @@ export function computeIndividualDispatcherPayrolls(rows: TransactionRow[]): Dis
   return lines;
 }
 
+export function computeLeadStarterPayrolls(rows: TransactionRow[]): LeadStarterPayrollLine[] {
+  const map = new Map<string, { clients: number; receipts: number; cashIn: number }>();
+
+  for (const row of rows.filter(isTagIssued)) {
+    const handle = resolveLeadCreatorHandle(row);
+    if (handle === "unknown") continue;
+    const cur = map.get(handle) || { clients: 0, receipts: 0, cashIn: 0 };
+    cur.clients += 1;
+    if (hasReceipt(row)) {
+      cur.receipts += 1;
+      cur.cashIn += parsePrice(row.receipt_price);
+    }
+    map.set(handle, cur);
+  }
+
+  return [...map.entries()]
+    .map(([handle, v]) => ({
+      handle,
+      label: leadCreatorDisplayLabel(handle),
+      clients: v.clients,
+      receipts: v.receipts,
+      cashIn: v.cashIn,
+      pay: v.clients * PAYROLL_RATE_LEAD_STARTER,
+    }))
+    .sort((a, b) => b.clients - a.clients || a.label.localeCompare(b.label));
+}
+
 export function computeLeadCreatorPayrolls(rows: TransactionRow[]): LeadCreatorPayrollLine[] {
   const map = new Map<
     string,
@@ -480,7 +526,7 @@ export function computeLeadCreatorPayrolls(rows: TransactionRow[]): LeadCreatorP
       tags: v.tags,
       receipts: v.receipts,
       cashIn: v.cashIn,
-      pay: v.tags * PAYROLL_RATE_DISPATCHER,
+      pay: v.tags * PAYROLL_RATE_LEAD_STARTER,
     }))
     .sort((a, b) => b.tags - a.tags || a.label.localeCompare(b.label));
 }
@@ -590,7 +636,9 @@ export function computePaydayStats(rows: TransactionRow[], periodLabel: string):
 
   const payrollIssuer = tagsIssued * PAYROLL_RATE_ISSUER;
   const payrollDispatcher = tagsIssued * PAYROLL_RATE_DISPATCHER;
-  const payrollTotal = payrollIssuer + payrollDispatcher;
+  const leadStarterPayrolls = computeLeadStarterPayrolls(rows);
+  const payrollLeadStarter = leadStarterPayrolls.reduce((s, line) => s + line.pay, 0);
+  const payrollTotal = payrollIssuer + payrollDispatcher + payrollLeadStarter;
   const netAfterPayroll = cashInFromReceipts - payrollTotal;
 
   const pairBuckets = buildPayrollPairBuckets(rows);
@@ -606,6 +654,7 @@ export function computePaydayStats(rows: TransactionRow[], periodLabel: string):
     leak,
     payrollIssuer,
     payrollDispatcher,
+    payrollLeadStarter,
     payrollTotal,
     netAfterPayroll,
     periodLabel,
@@ -613,6 +662,7 @@ export function computePaydayStats(rows: TransactionRow[], periodLabel: string):
     issuerPayrolls: computeIndividualIssuerPayrolls(rows),
     dispatcherPayrolls: computeIndividualDispatcherPayrolls(rows),
     leadCreatorPayrolls: computeLeadCreatorPayrolls(rows),
+    leadStarterPayrolls,
     pairBuckets,
   };
 }
@@ -649,7 +699,7 @@ export function buildWeeklyBuckets(rows: TransactionRow[], maxWeeks = 8): Payday
     b.tags += 1;
     const expected = leadPriceForTag(row);
     b.expectedIn += expected;
-    b.payrollOut += PAYROLL_RATE_ISSUER + PAYROLL_RATE_DISPATCHER;
+    b.payrollOut += PAYROLL_RATE_ISSUER + PAYROLL_RATE_DISPATCHER + PAYROLL_RATE_LEAD_STARTER;
     if (hasReceipt(row)) {
       b.receipts += 1;
       const rp = parsePrice(row.receipt_price);

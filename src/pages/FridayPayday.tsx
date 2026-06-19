@@ -32,6 +32,7 @@ import {
   parsePrice,
   PAYROLL_RATE_DISPATCHER,
   PAYROLL_RATE_ISSUER,
+  PAYROLL_RATE_LEAD_STARTER,
   resolveLeadCreatorHandle,
   type TransactionRow,
 } from "@/lib/payday";
@@ -172,16 +173,16 @@ export default function FridayPayday() {
     [stats.dispatcherPayrolls]
   );
 
-  const leadCreatorChartData = useMemo(
+  const leadStarterChartData = useMemo(
     () =>
-      stats.leadCreatorPayrolls.map((d) => ({
-        name: d.label.length > 16 ? d.label.slice(0, 14) + "…" : d.label,
-        fullName: `${d.label} → ${d.pairedIssuerLabel}`,
-        tags: d.tags,
-        cashIn: d.cashIn,
-        pay: d.pay,
+      stats.leadStarterPayrolls.map((ls) => ({
+        name: ls.label.length > 16 ? ls.label.slice(0, 14) + "…" : ls.label,
+        fullName: ls.label,
+        clients: ls.clients,
+        cashIn: ls.cashIn,
+        leadStarterPay: ls.pay,
       })),
-    [stats.leadCreatorPayrolls]
+    [stats.leadStarterPayrolls],
   );
 
   const load = useCallback(async () => {
@@ -331,10 +332,10 @@ export default function FridayPayday() {
                 <thead>
                   <tr className="border-b border-slate-200 text-left text-slate-500">
                     <th className="py-2 pr-3">Dispatcher</th>
-                    <th className="py-2 pr-3 text-right">Tags</th>
+                    <th className="py-2 pr-3 text-right">Clients</th>
                     <th className="py-2 pr-3 text-right">Receipts</th>
                     <th className="py-2 pr-3 text-right">Cash IN</th>
-                    <th className="py-2 text-right">Dispatcher pay</th>
+                    <th className="py-2 text-right">Lead starter pay</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -352,7 +353,7 @@ export default function FridayPayday() {
                       <td className="py-2 pr-3 text-right tabular-nums">{d.receipts}</td>
                       <td className="py-2 pr-3 text-right tabular-nums">{formatUsd(d.cashIn)}</td>
                       <td className="py-2 text-right tabular-nums font-medium">
-                        {d.tagsIssued} × ${PAYROLL_RATE_DISPATCHER} = {formatUsd(d.dispatcherPay)}
+                        {d.tagsIssued} × ${PAYROLL_RATE_LEAD_STARTER} = {formatUsd(d.leadStarterPay)}
                       </td>
                     </tr>
                   ))}
@@ -384,6 +385,17 @@ export default function FridayPayday() {
             tone="default"
           />
         </section>
+
+        {isDispatcherPage && stats.payrollLeadStarter > 0 ? (
+          <section className="mb-6">
+            <StatBlock
+              label="Lead starter pay (you)"
+              value={formatUsd(stats.payrollLeadStarter)}
+              sub={`${stats.tagsIssued} new client${stats.tagsIssued === 1 ? "" : "s"} × $${PAYROLL_RATE_LEAD_STARTER}`}
+              tone="gold"
+            />
+          </section>
+        ) : null}
 
         {/* Leak alert */}
         {stats.tagsIssued > 0 && stats.leak > 0 ? (
@@ -451,8 +463,8 @@ export default function FridayPayday() {
                 Payroll OUT
               </CardTitle>
               <CardDescription>
-                Issuer ${PAYROLL_RATE_ISSUER}/tag (tag sender) · Dispatcher ${PAYROLL_RATE_DISPATCHER}/tag (lead creator
-                team). Haru pairs with Highkage; everyone else with Sensei.
+                Issuer ${PAYROLL_RATE_ISSUER}/tag · Dispatcher team ${PAYROLL_RATE_DISPATCHER}/tag · Lead
+                starter ${PAYROLL_RATE_LEAD_STARTER}/new client (who added the lead).
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6 text-sm text-slate-700">
@@ -543,7 +555,55 @@ export default function FridayPayday() {
                   </div>
 
                   <div>
-                    <h3 className="mb-2 font-semibold text-slate-900">Lead creators (issuer bot)</h3>
+                    <h3 className="mb-2 font-semibold text-slate-900">Lead starters (new clients)</h3>
+                    <p className="mb-2 text-xs text-slate-500">
+                      ${PAYROLL_RATE_LEAD_STARTER} per delivered client — paid to whoever started the lead in the issuer
+                      bot.
+                    </p>
+                    <div className="overflow-x-auto rounded-lg border border-slate-200">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-slate-200 bg-slate-50 text-left text-slate-500">
+                            <th className="px-3 py-2">Lead starter</th>
+                            <th className="px-3 py-2 text-right">Clients</th>
+                            <th className="px-3 py-2 text-right">Receipts</th>
+                            <th className="px-3 py-2 text-right">Cash IN</th>
+                            <th className="px-3 py-2 text-right">Pay</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {stats.leadStarterPayrolls.map((ls) => (
+                            <tr key={ls.handle} className="border-b border-slate-100">
+                              <td className="px-3 py-2 font-medium text-slate-900">
+                                <Link
+                                  to={`/fridaypayday/${dispatcherSlugFromHandle(ls.handle)}`}
+                                  className="text-primary underline"
+                                >
+                                  {ls.label}
+                                </Link>
+                              </td>
+                              <td className="px-3 py-2 text-right tabular-nums">{ls.clients}</td>
+                              <td className="px-3 py-2 text-right tabular-nums">{ls.receipts}</td>
+                              <td className="px-3 py-2 text-right tabular-nums">{formatUsd(ls.cashIn)}</td>
+                              <td className="px-3 py-2 text-right tabular-nums font-medium">
+                                {ls.clients} × ${PAYROLL_RATE_LEAD_STARTER} = {formatUsd(ls.pay)}
+                              </td>
+                            </tr>
+                          ))}
+                          <tr className="bg-slate-50 font-medium text-slate-900">
+                            <td className="px-3 py-2">Lead starter subtotal</td>
+                            <td className="px-3 py-2 text-right tabular-nums">{stats.tagsIssued}</td>
+                            <td className="px-3 py-2 text-right tabular-nums">{stats.receiptsUploaded}</td>
+                            <td className="px-3 py-2 text-right tabular-nums">{formatUsd(stats.cashInFromReceipts)}</td>
+                            <td className="px-3 py-2 text-right tabular-nums">{formatUsd(stats.payrollLeadStarter)}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  <div>
+                    <h3 className="mb-2 font-semibold text-slate-900">Lead creators by team (detail)</h3>
                     <div className="overflow-x-auto rounded-lg border border-slate-200">
                       <table className="w-full text-sm">
                         <thead>
@@ -551,9 +611,9 @@ export default function FridayPayday() {
                             <th className="px-3 py-2">Created lead</th>
                             <th className="px-3 py-2">Team</th>
                             <th className="px-3 py-2">Tag issuer</th>
-                            <th className="px-3 py-2 text-right">Tags</th>
+                            <th className="px-3 py-2 text-right">Clients</th>
                             <th className="px-3 py-2 text-right">Cash IN</th>
-                            <th className="px-3 py-2 text-right">Dispatcher share</th>
+                            <th className="px-3 py-2 text-right">Lead starter $</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -564,7 +624,9 @@ export default function FridayPayday() {
                               <td className="px-3 py-2 text-slate-600">{lc.pairedIssuerLabel}</td>
                               <td className="px-3 py-2 text-right tabular-nums">{lc.tags}</td>
                               <td className="px-3 py-2 text-right tabular-nums">{formatUsd(lc.cashIn)}</td>
-                              <td className="px-3 py-2 text-right tabular-nums">{formatUsd(lc.pay)}</td>
+                              <td className="px-3 py-2 text-right tabular-nums">
+                                {lc.tags} × ${PAYROLL_RATE_LEAD_STARTER} = {formatUsd(lc.pay)}
+                              </td>
                             </tr>
                           ))}
                         </tbody>
@@ -574,9 +636,26 @@ export default function FridayPayday() {
                 </>
               )}
 
-              <div className="flex justify-between border-t border-slate-200 pt-3 font-semibold text-slate-900">
-                <span>Total payroll OUT</span>
-                <span className="tabular-nums text-red-600">{formatUsd(stats.payrollTotal)}</span>
+              <div className="space-y-2 border-t border-slate-200 pt-3 text-sm text-slate-700">
+                <div className="flex justify-between">
+                  <span>Issuer payroll</span>
+                  <span className="tabular-nums">{formatUsd(stats.payrollIssuer)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Dispatcher team payroll</span>
+                  <span className="tabular-nums">{formatUsd(stats.payrollDispatcher)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Lead starter payroll (${PAYROLL_RATE_LEAD_STARTER}/client)</span>
+                  <span className="tabular-nums">{formatUsd(stats.payrollLeadStarter)}</span>
+                </div>
+                <div className="flex justify-between font-semibold text-slate-900 pt-1">
+                  <span>Total payroll OUT</span>
+                  <span className="tabular-nums text-red-600">
+                    {formatUsd(stats.payrollIssuer)} + {formatUsd(stats.payrollDispatcher)} +{" "}
+                    {formatUsd(stats.payrollLeadStarter)} = {formatUsd(stats.payrollTotal)}
+                  </span>
+                </div>
               </div>
               <div className="flex justify-between rounded-lg bg-slate-100 px-3 py-2 font-medium text-slate-900">
                 <span className="flex items-center gap-2">
@@ -610,8 +689,15 @@ export default function FridayPayday() {
                   {formatUsd(disp.pay)}
                 </div>
               ))}
-              Payroll OUT {formatUsd(stats.payrollTotal)} · {stats.tagsIssued} × ${MIN_TAG_PRICE_USD} ={" "}
-              {formatUsd(stats.minimumExpectedIn)} minimum IN · Receipts {formatUsd(stats.cashInFromReceipts)}
+              {stats.leadStarterPayrolls.map((ls) => (
+                <div key={ls.handle} className="mb-1">
+                  {ls.label} (lead starter): {ls.clients} × ${PAYROLL_RATE_LEAD_STARTER} = {formatUsd(ls.pay)}
+                </div>
+              ))}
+              Payroll OUT {formatUsd(stats.payrollTotal)} ({formatUsd(stats.payrollIssuer)} +{" "}
+              {formatUsd(stats.payrollDispatcher)} + {formatUsd(stats.payrollLeadStarter)}) · {stats.tagsIssued} × $
+              {MIN_TAG_PRICE_USD} = {formatUsd(stats.minimumExpectedIn)} minimum IN · Receipts{" "}
+              {formatUsd(stats.cashInFromReceipts)}
               {stats.leak > 0 ? ` · Leak ${formatUsd(stats.leak)}` : ""}
             </CardContent>
           </Card>
@@ -707,11 +793,17 @@ export default function FridayPayday() {
                         {bucket.tags} × ${PAYROLL_RATE_DISPATCHER} = {formatUsd(bucket.dispatcherPay)}
                       </div>
                     </div>
+                    <div className="rounded-lg bg-slate-50 p-3">
+                      <div className="text-slate-500">Lead starter pay (new clients)</div>
+                      <div className="font-semibold tabular-nums">
+                        {bucket.tags} × ${PAYROLL_RATE_LEAD_STARTER} = {formatUsd(bucket.leadStarterPay)}
+                      </div>
+                    </div>
                     <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-3 sm:col-span-2">
-                      <div className="text-slate-500">Total payroll (issuer + dispatcher)</div>
+                      <div className="text-slate-500">Total payroll (issuer + dispatcher + lead starter)</div>
                       <div className="font-bold tabular-nums text-emerald-800">
-                        {formatUsd(bucket.issuerPay)} + {formatUsd(bucket.dispatcherPay)} ={" "}
-                        {formatUsd(bucket.totalPay)}
+                        {formatUsd(bucket.issuerPay)} + {formatUsd(bucket.dispatcherPay)} +{" "}
+                        {formatUsd(bucket.leadStarterPay)} = {formatUsd(bucket.totalPay)}
                       </div>
                     </div>
                     <div className="rounded-lg bg-slate-50 p-3">
@@ -814,25 +906,27 @@ export default function FridayPayday() {
           </Card>
         ) : null}
 
-        {leadCreatorChartData.length > 1 && !isDispatcherPage ? (
+        {leadStarterChartData.length > 0 && !isDispatcherPage ? (
           <Card className="mb-8 border-slate-200 bg-white">
             <CardHeader>
-              <CardTitle className="text-lg">Lead creators breakdown</CardTitle>
-              <CardDescription>Individual issuer-bot accounts who created leads</CardDescription>
+              <CardTitle className="text-lg">Lead starter pay (${PAYROLL_RATE_LEAD_STARTER}/client)</CardTitle>
+              <CardDescription>Who added each new client in the issuer bot</CardDescription>
             </CardHeader>
             <CardContent className="h-64">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={leadCreatorChartData} margin={{ top: 8, right: 8, left: 0, bottom: 40 }}>
+                <BarChart data={leadStarterChartData} margin={{ top: 8, right: 8, left: 0, bottom: 40 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                   <XAxis dataKey="name" tick={{ fontSize: 10 }} angle={-25} textAnchor="end" height={50} />
                   <YAxis tick={{ fontSize: 11 }} />
                   <Tooltip
-                    formatter={(value: number) => (typeof value === "number" && value > 100 ? formatUsd(value) : value)}
+                    formatter={(value: number, name: string) =>
+                      name === "clients" ? value : formatUsd(value)
+                    }
                     labelFormatter={(_, payload) => payload?.[0]?.payload?.fullName || ""}
                   />
                   <Legend />
-                  <Bar dataKey="tags" name="Tags" fill="#a78bfa" radius={[2, 2, 0, 0]} />
-                  <Bar dataKey="cashIn" name="Cash IN" fill="#fbbf24" radius={[2, 2, 0, 0]} />
+                  <Bar dataKey="clients" name="Clients" fill="#a78bfa" radius={[2, 2, 0, 0]} />
+                  <Bar dataKey="leadStarterPay" name="Lead starter pay" fill="#f87171" radius={[2, 2, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </CardContent>
