@@ -1,22 +1,23 @@
-# TriStateTags v2
+# Kingsman Tags
 
-A clean, minimal rebuild of TriStateTags as a pure **email-delivery** service.
+A premium-feel, self-contained rebuild of the NJ temporary-tag service.
 
-- **No background music**, no external bots, no krab-dispatch-api.
-- **Paystack** for payments (site displays `$`).
-- **Email-only delivery** — no shipping, no driver.
-- Single Express server with local JSON storage, optional Resend for receipts.
-- React + Vite + Tailwind front-end, designed with the `ui-ux-pro-max` palette
-  (vibrant blue + orange CTA, Rubik / Nunito Sans).
+- **Single Express server** — no external bots, no separate payment service.
+- **Inbox-only delivery** — no shipping, no driver.
+- **Accounts with magic-link auth** — created automatically at first payment.
+- **Auto-renewal** — reminder emails every 28 days; one-tap renew at the same flat price.
+- **Royal palette** — deep navy + gold, Bodoni Moda + Jost typography.
+- **Animated UI** — gradient mesh, floating cards, fade-up stagger, shimmer CTAs.
+  All animations honour `prefers-reduced-motion`.
 
 ## Project layout
 
 ```
 v2/
-├── server/         Express API (Paystack init + verify + admin)
+├── server/         Express API (checkout init/verify, accounts, renewal cron)
 ├── src/            React + Vite + Tailwind front-end
 ├── public/         Static assets
-├── data/           Created at runtime — local orders.json (gitignored)
+├── data/           Created at runtime — users / orders / tokens JSON
 ├── .env.example    Copy to .env
 └── package.json
 ```
@@ -26,31 +27,55 @@ v2/
 ```bash
 cd v2
 npm install
-cp .env.example .env     # then fill in PAYSTACK_* and ADMIN_PASSWORD
-npm run dev              # runs Vite (5173) + API (3001) together
+cp .env.example .env     # fill in the secrets
+npm run dev              # vite on 5173 + api on 3001 together
 ```
 
 Open <http://localhost:5173>.
 
-| URL                                  | Purpose                                |
-| ------------------------------------ | -------------------------------------- |
-| `/`                                  | Landing page                           |
-| `/checkout`                          | Email-only checkout (Paystack popup)   |
-| `/success?reference=...`             | Auto-verifies payment, shows receipt   |
-| `/admin`                             | Password-gated orders dashboard        |
+## Pages
+
+| URL                                  | Purpose                                                          |
+| ------------------------------------ | ---------------------------------------------------------------- |
+| `/`                                  | Landing page                                                     |
+| `/checkout`                          | Buy a tag — also auto-creates an account                         |
+| `/success?reference=…`               | Verifies payment, shows receipt + "Manage renewals" CTA          |
+| `/login`                             | Magic-link sign in (no passwords)                                |
+| `/account[?token=…]`                 | Member dashboard — orders, renewal toggle, renew now             |
+| `/renew?token=…`                     | Magic renewal landing — consumes token, redirects to `/account`  |
+| `/admin`                             | Admin dashboard — orders + members + manual renewal reminders    |
 
 ## Required env vars
 
-| Var                       | Required | Notes                                                            |
-| ------------------------- | -------- | ---------------------------------------------------------------- |
-| `ADMIN_PASSWORD`          | Yes      | Used to sign into `/admin` and as the API admin bearer.          |
-| `PAYSTACK_SECRET_KEY`     | Yes      | Server-side calls to Paystack.                                   |
-| `PAYSTACK_PUBLIC_KEY`     | Yes      | Sent to the browser for the inline popup.                        |
-| `PAYSTACK_CURRENCY`       | Yes      | Must match an enabled currency on your Paystack account.         |
-| `APP_URL`                 | Optional | Public URL of the front-end. Used as the Paystack callback URL.  |
-| `TAG_PRICE`               | Optional | Defaults to `150`. Major units. Site always displays `$`.        |
-| `RESEND_API_KEY`          | Optional | If set, a receipt email is sent on successful payment.           |
-| `RESEND_FROM_EMAIL`       | Optional | From header for receipts, e.g. `"TriStateTags <orders@you.com>"` |
+| Var                                | Required | Notes                                                            |
+| ---------------------------------- | -------- | ---------------------------------------------------------------- |
+| `ADMIN_PASSWORD`                   | Yes      | Used to sign into `/admin`.                                      |
+| `PAYSTACK_SECRET_KEY`              | Yes      | Server-side payments.                                            |
+| `PAYSTACK_PUBLIC_KEY`              | Yes      | Sent to the browser for the inline popup.                        |
+| `PAYSTACK_CURRENCY`                | Yes      | Must match an enabled currency on your account.                  |
+| `APP_URL`                          | Optional | Public URL of the front-end. Used for callback + email links.    |
+| `TAG_PRICE`                        | Optional | Defaults to `150`. Site always displays `$`.                     |
+| `RENEWAL_PERIOD_DAYS`              | Optional | Defaults to `28`.                                                |
+| `RENEWAL_CHECK_INTERVAL_MINUTES`   | Optional | How often the renewal sweep runs. Default `60`.                  |
+| `RESEND_API_KEY`                   | Optional | Required to actually send welcome / sign-in / renewal emails.    |
+| `RESEND_FROM`                      | Optional | Internal — never echoed in the customer-facing UI.               |
+
+## How accounts & renewals work
+
+1. **Checkout** → server creates the user (`renewalEnabled: true` by default), then
+   issues a session token returned to the browser. The user is logged in
+   immediately.
+2. After verify, a welcome email is sent with a permanent management link so
+   the customer can manage their account from any device.
+3. The server runs a renewal sweep every `RENEWAL_CHECK_INTERVAL_MINUTES`. For
+   each user with `renewalEnabled: true` whose last paid order is more than
+   `RENEWAL_PERIOD_DAYS` old (and who hasn't been reminded in the past 24h), a
+   one-shot magic link is generated and emailed.
+4. Clicking the link lands on `/renew?token=…`, which exchanges the magic
+   token for a session and lands the user on `/account` where the **Renew now**
+   button starts a fresh payment for the same price as the last order.
+5. The admin can also trigger a reminder on demand via **Send reminder** in
+   the Members tab — useful for testing or VIP follow-ups.
 
 ## Production
 
@@ -58,21 +83,7 @@ Open <http://localhost:5173>.
 cd v2
 npm install
 npm run build
-npm start                 # starts the API on $PORT (default 3001)
+npm start                 # serves the API on $PORT (default 3001)
 ```
 
-Serve `dist/` from any static host (Vercel, Netlify, Cloudflare Pages) and
-point `APP_URL` at it. The API only needs to live wherever the front-end can
-reach `/api/*` (proxy or rewrite).
-
-## Why no Stripe / no music / no dispatch?
-
-This rebuild was scoped to the bare minimum the business actually needs:
-
-1. Customer pays.
-2. Order shows up in the admin dashboard.
-3. Admin emails them the tag and clicks **Mark fulfilled**.
-
-Everything else from v1 (Friday Payday, Telegram bots, Krab dispatch, driver
-delivery flow, background music, multi-step tag-info collection) was removed
-on purpose — it stays in the parent repo if you ever need to bring it back.
+Host `dist/` on any static provider and point `APP_URL` at it.

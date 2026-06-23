@@ -11,7 +11,7 @@
     scroll-behavior: smooth;
   }
   body {
-    @apply font-body bg-primary-bg text-ink antialiased;
+    @apply font-body bg-cream text-ink antialiased;
     font-feature-settings: "ss01", "cv01";
   }
   h1,
@@ -21,8 +21,9 @@
     @apply font-display tracking-tight;
   }
   ::selection {
-    background: rgb(37 99 235 / 0.2);
+    background: rgb(212 175 55 / 0.35);
   }
+  /* Tasteful: kill the loops, keep instant fades. */
   @media (prefers-reduced-motion: reduce) {
     *,
     *::before,
@@ -39,28 +40,73 @@
   .container-x {
     @apply mx-auto w-full max-w-6xl px-5 sm:px-6 lg:px-8;
   }
+
+  /* Buttons --------------------------------------------------------- */
+
   .btn {
     @apply inline-flex items-center justify-center gap-2 rounded-xl px-5 py-3 font-semibold text-sm transition-colors duration-200 cursor-pointer focus:outline-none focus-visible:shadow-ring disabled:opacity-60 disabled:cursor-not-allowed;
   }
   .btn-primary {
-    @apply btn bg-primary text-white hover:bg-primary-dark;
+    @apply btn bg-navy text-cream hover:bg-navy-deep;
   }
-  .btn-cta {
-    @apply btn bg-accent text-white hover:bg-accent-dark;
+  .btn-gold {
+    @apply btn text-navy-dark relative overflow-hidden;
+    background: linear-gradient(110deg, #fcd968 0%, #d4af37 45%, #fcd968 55%, #d4af37 100%);
+    background-size: 200% 100%;
+    box-shadow: 0 8px 28px -8px rgb(212 175 55 / 0.55);
+  }
+  .btn-gold:hover {
+    background-position: 100% 0;
   }
   .btn-ghost {
-    @apply btn bg-white text-ink border border-line hover:bg-primary-bg;
+    @apply btn bg-white text-navy border border-line hover:border-navy/40 hover:bg-cream;
   }
+
+  /* Surfaces -------------------------------------------------------- */
+
   .card {
     @apply rounded-xl2 border border-line bg-white shadow-card;
   }
+  .glass {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0.65));
+    @apply backdrop-blur-md border border-white/60 rounded-xl2 shadow-card;
+  }
+
+  /* Forms ----------------------------------------------------------- */
+
   .input {
-    @apply w-full rounded-lg border border-line bg-white px-3.5 py-2.5 text-sm text-ink placeholder:text-muted focus:outline-none focus:border-primary focus:shadow-ring transition-colors;
+    @apply w-full rounded-lg border border-line bg-white px-3.5 py-2.5 text-sm text-ink placeholder:text-muted focus:outline-none focus:border-navy focus:shadow-ring transition-colors;
   }
   .label {
     @apply block text-sm font-semibold text-ink mb-1.5;
   }
+
+  /* Pills / Chips --------------------------------------------------- */
+
   .pill {
-    @apply inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary-dark;
+    @apply inline-flex items-center gap-1.5 rounded-full bg-gold-soft px-3 py-1 text-xs font-semibold text-navy-deep;
   }
+  .pill-navy {
+    @apply inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold text-navy;
+    background-color: rgb(15 23 42 / 0.08);
+  }
+
+  /* Animated mesh background --------------------------------------- */
+
+  .mesh-bg {
+    background-image:
+      radial-gradient(900px 520px at 85% -120px, rgba(212, 175, 55, 0.22), transparent 60%),
+      radial-gradient(720px 440px at -10% 110%, rgba(30, 27, 75, 0.18), transparent 60%),
+      radial-gradient(640px 380px at 50% 50%, rgba(251, 191, 36, 0.10), transparent 70%);
+    background-size: 200% 200%;
+    @apply animate-gradient-drift;
+  }
+
+  /* Stagger helper: parent adds .stagger, each child uses .step-N */
+
+  .step-1 { animation-delay: 60ms; }
+  .step-2 { animation-delay: 140ms; }
+  .step-3 { animation-delay: 220ms; }
+  .step-4 { animation-delay: 320ms; }
+  .step-5 { animation-delay: 440ms; }
 }
