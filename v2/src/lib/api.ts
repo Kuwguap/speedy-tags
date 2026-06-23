@@ -7,12 +7,35 @@ export interface PublicConfig {
   currencySymbol: string;
   /** Default tag price in major units (e.g. 150 for $150). */
   tagPrice: number;
+  /** Extra charge when the customer opts in to our 1-month coverage. */
+  insuranceOptInPrice: number;
   /** Public key for the payment processor SDK. */
   paystackPublicKey: string;
   /** Currency the processor will actually charge in. */
   paystackCurrency: string;
   /** Renewal cycle length in days (default 28). */
   renewalPeriodDays: number;
+  /** 2-letter US state codes accepted by the form. */
+  supportedStates: string[];
+  /** True when /qwertyuiop simulation is available. */
+  testModeEnabled: boolean;
+}
+
+export interface StateInfo {
+  code: string;
+  autoTag: boolean;
+  insuranceAvailable: boolean;
+  headline: string;
+  body: string;
+}
+
+export interface OrderDocuments {
+  state: string | null;
+  hasTag: boolean;
+  hasInsurance: boolean;
+  plate?: string | null;
+  policyNumber?: string | null;
+  instructions?: string | null;
 }
 
 export interface UserAccount {
@@ -44,14 +67,55 @@ export interface OrderRecord {
   createdAt: string;
   channel?: string;
   source?: "checkout" | "renewal";
+  state?: string;
+  address?: string;
+  city?: string;
+  zip?: string;
+  vin?: string;
+  year?: string;
+  make?: string;
+  model?: string;
+  color?: string;
+  body?: string;
+  insuranceCompany?: string;
+  insurancePolicy?: string;
+  insuranceOptIn?: boolean;
+  stateInfo?: StateInfo;
+  documents?: OrderDocuments | null;
 }
 
-export interface InitCheckoutBody {
+export interface TagDetailsInput {
+  state: string;
+  address: string;
+  city: string;
+  zip: string;
+  vin: string;
+  year: string;
+  make: string;
+  model: string;
+  color: string;
+  bodyType?: string;
+  plate?: string;
+  insuranceCompany?: string;
+  insurancePolicy?: string;
+  insuranceExp?: string;
+  insuranceOptIn: boolean;
+}
+
+export interface InitCheckoutBody extends TagDetailsInput {
   email: string;
   firstName: string;
   lastName: string;
   phone?: string;
   notes?: string;
+}
+
+export interface SimulatePurchaseResponse {
+  order: OrderRecord;
+  documents: OrderDocuments;
+  sessionToken: string;
+  user: UserAccount;
+  simulated: true;
 }
 
 export interface InitCheckoutResponse {
@@ -167,4 +231,43 @@ export const api = {
       { method: "POST" },
       { adminPassword: password },
     ),
+
+  // Test mode -----------------------------------------------------------
+  simulatePurchase: (body: InitCheckoutBody) =>
+    request<SimulatePurchaseResponse>("/api/test/simulate-purchase", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  // Documents -----------------------------------------------------------
+  /**
+   * Fetch an order document as a Blob and return an object URL that can be
+   * passed to `window.open(...)` or used as `<a href>`. Caller is responsible
+   * for `URL.revokeObjectURL(url)` when done. Requires an active session.
+   */
+  fetchDocumentObjectUrl: async (
+    orderId: string,
+    kind: "tag" | "insurance",
+    opts: { download?: boolean } = {},
+  ): Promise<string> => {
+    const tok = getSession();
+    if (!tok) throw new Error("Sign in to download your documents.");
+    const path = `/api/documents/${encodeURIComponent(orderId)}/${kind}${opts.download ? "?download=1" : ""}`;
+    const res = await fetch(path, {
+      headers: { Authorization: `Bearer ${tok}` },
+    });
+    if (!res.ok) {
+      let msg = res.statusText || `HTTP_${res.status}`;
+      try {
+        const data = await res.json();
+        if (data?.error) msg = data.error;
+      } catch {
+        /* no body */
+      }
+      throw new Error(msg);
+    }
+    const blob = await res.blob();
+    return URL.createObjectURL(blob);
+  },
 };
+

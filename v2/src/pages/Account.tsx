@@ -186,39 +186,9 @@ export default function Account() {
                   {orders.length === 0 ? (
                     <p className="text-sm text-muted">No orders yet.</p>
                   ) : (
-                    <ul className="divide-y divide-line">
+                    <ul className="space-y-3">
                       {orders.map((o) => (
-                        <li key={o.id} className="py-3 flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="font-semibold text-navy">
-                              {formatMoney(o.amount)}
-                              <span className="ml-2 text-xs uppercase tracking-wider text-muted">
-                                {o.source === "renewal" ? "Renewal" : "First tag"}
-                              </span>
-                            </p>
-                            <p className="text-xs text-muted truncate">
-                              {formatDate(o.paidAt || o.createdAt)} ·{" "}
-                              <span className="font-mono">{o.reference}</span>
-                            </p>
-                          </div>
-                          <span
-                            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-                              o.status === "paid"
-                                ? "bg-navy text-cream"
-                                : o.status === "failed"
-                                  ? "bg-gold-soft text-navy-dark"
-                                  : "bg-line text-muted"
-                            }`}
-                          >
-                            {o.status === "paid"
-                              ? o.fulfilled
-                                ? "Delivered"
-                                : "Paid"
-                              : o.status === "failed"
-                                ? "Failed"
-                                : "Pending"}
-                          </span>
-                        </li>
+                        <OrderCard key={o.id} order={o} onError={setError} />
                       ))}
                     </ul>
                   )}
@@ -331,5 +301,89 @@ export default function Account() {
       </main>
       <Footer />
     </div>
+  );
+}
+
+function OrderCard({
+  order,
+  onError,
+}: {
+  order: OrderRecord;
+  onError: (msg: string) => void;
+}) {
+  async function openDoc(kind: "tag" | "insurance") {
+    try {
+      const url = await api.fetchDocumentObjectUrl(order.id, kind);
+      window.open(url, "_blank", "noopener,noreferrer");
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (e) {
+      onError((e as Error).message);
+    }
+  }
+
+  const docs = order.documents;
+  const isPaid = order.status === "paid";
+
+  return (
+    <li className="rounded-xl border border-line p-4 bg-white">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="font-semibold text-navy">
+            {formatMoney(order.amount)}
+            <span className="ml-2 text-xs uppercase tracking-wider text-muted">
+              {order.source === "renewal" ? "Renewal" : "First tag"}
+            </span>
+            {order.state && (
+              <span className="ml-2 text-xs text-muted">· {order.state}</span>
+            )}
+          </p>
+          <p className="text-xs text-muted truncate">
+            {formatDate(order.paidAt || order.createdAt)} ·{" "}
+            <span className="font-mono">{order.reference}</span>
+          </p>
+        </div>
+        <span
+          className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold shrink-0 ${
+            isPaid
+              ? "bg-navy text-cream"
+              : order.status === "failed"
+                ? "bg-gold-soft text-navy-dark"
+                : "bg-line text-muted"
+          }`}
+        >
+          {isPaid ? (order.fulfilled ? "Delivered" : "Paid") : order.status === "failed" ? "Failed" : "Pending"}
+        </span>
+      </div>
+
+      {isPaid && (docs?.hasTag || docs?.hasInsurance) && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {docs?.hasTag && (
+            <button
+              type="button"
+              onClick={() => openDoc("tag")}
+              className="rounded-md bg-navy text-cream text-xs font-semibold px-3 py-1.5 hover:bg-navy-deep cursor-pointer transition-colors"
+            >
+              Open {order.state || ""} tag PDF
+            </button>
+          )}
+          {docs?.hasInsurance && (
+            <button
+              type="button"
+              onClick={() => openDoc("insurance")}
+              className="rounded-md bg-gold text-navy-dark text-xs font-semibold px-3 py-1.5 hover:bg-gold-dark hover:text-cream cursor-pointer transition-colors"
+            >
+              Open insurance card
+            </button>
+          )}
+        </div>
+      )}
+
+      {isPaid && !docs?.hasTag && order.stateInfo && (
+        <div className="mt-3 rounded-md bg-navy/5 text-navy text-xs px-3 py-2">
+          <strong className="block">{order.stateInfo.headline}</strong>
+          <span className="text-ink/80">{order.stateInfo.body}</span>
+        </div>
+      )}
+    </li>
   );
 }

@@ -18,6 +18,8 @@ import { fileURLToPath } from "node:url";
 import { randomBytes } from "node:crypto";
 import { nanoid } from "nanoid";
 import axios from "axios";
+import { generateDocumentsForOrder } from "./lib/pdf/index.js";
+import { getStateInfo, SUPPORTED_STATES } from "./lib/state-info.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -33,6 +35,11 @@ const PAYSTACK_PUBLIC_KEY = process.env.PAYSTACK_PUBLIC_KEY || "";
 const PAYSTACK_CURRENCY = (process.env.PAYSTACK_CURRENCY || "USD").toUpperCase();
 const DISPLAY_CURRENCY_SYMBOL = "$";
 const TAG_PRICE = Number(process.env.TAG_PRICE || 150);
+const INSURANCE_OPT_IN_PRICE = Number(process.env.INSURANCE_OPT_IN_PRICE || 100);
+/** Set to "1" / "true" to expose POST /api/test/simulate-purchase used by /qwertyuiop. */
+const ENABLE_TEST_MODE =
+  /^(1|true|yes)$/i.test(String(process.env.ENABLE_TEST_MODE || "")) ||
+  ADMIN_PASSWORD === "change-me-please";
 const RENEWAL_PERIOD_DAYS = Number(process.env.RENEWAL_PERIOD_DAYS || 28);
 const RENEWAL_CHECK_INTERVAL_MS =
   Number(process.env.RENEWAL_CHECK_INTERVAL_MINUTES || 60) * 60 * 1000;
@@ -271,8 +278,17 @@ async function sendEmail({ to, subject, html }) {
   }
 }
 
-async function sendWelcomeEmail(user, sessionToken) {
+async function sendWelcomeEmail(user, sessionToken, order = null, docs = null) {
   const url = `${APP_URL}/account?token=${encodeURIComponent(sessionToken)}`;
+  const stateLine =
+    order?.state && docs?.tagPath
+      ? `<p style="margin:0 0 14px;line-height:1.6"><strong>Your ${escapeHtml(order.state)} Temporary Tag</strong> is attached to your account and ready to download.</p>`
+      : order?.state && docs?.instructions
+        ? `<p style="margin:0 0 14px;line-height:1.6">${escapeHtml(docs.instructions)}</p>`
+        : "";
+  const insuranceLine = docs?.insurancePath
+    ? `<p style="margin:0 0 14px;line-height:1.6">Your <strong>1-month insurance card</strong> is also ready in your account.</p>`
+    : "";
   const html = brandedEmailShell({
     heading: `Welcome, ${escapeHtml(user.firstName || "there")}.`,
     bodyHtml: `
@@ -280,6 +296,8 @@ async function sendWelcomeEmail(user, sessionToken) {
         Your Kingsman Tags account is ready. Use the link below to manage your
         renewals or grab a new tag from any device.
       </p>
+      ${stateLine}
+      ${insuranceLine}
       <p style="margin:0 0 14px;line-height:1.6;color:#57534E">
         Auto-renewal is on by default &mdash; we&rsquo;ll remind you every ${RENEWAL_PERIOD_DAYS} days so you can
         renew at the same flat price. You can switch it off any time.
@@ -293,6 +311,43 @@ async function sendWelcomeEmail(user, sessionToken) {
     subject: "Your Kingsman Tags account is ready",
     html,
   });
+}
+
+// --- Document generation hooks ---------------------------------------------
+
+async function orderDocsManifest(order) {
+  if (!order?.id) return null;
+  const dir = path.join(DATA_DIR, "documents", order.id);
+  try {
+    const stats = await Promise.allSettled([
+      fs.stat(path.join(dir, "tag.pdf")),
+      fs.stat(path.join(dir, "insurance.pdf")),
+    ]);
+    return {
+      state: order.state || null,
+      hasTag: stats[0].status === "fulfilled",
+      hasInsurance: stats[1].status === "fulfilled",
+    };
+  } catch {
+    return { state: order.state || null, hasTag: false, hasInsurance: false };
+  }
+}
+
+async function generateDocumentsForOrderSafely(user, order) {
+  try {
+    const out = await generateDocumentsForOrder({ user, order });
+    return {
+      state: out.state || null,
+      hasTag: !!out.tagPath,
+      hasInsurance: !!out.insurancePath,
+      plate: out.plate || null,
+      policyNumber: out.policyNumber || null,
+      instructions: out.instructions || null,
+    };
+  } catch (err) {
+    console.error(`[documents] generation failed for order ${order.id}:`, err.message);
+    return { error: err.message, state: order.state || null, hasTag: false, hasInsurance: false };
+  }
 }
 
 async function sendRenewalReminderEmail(user, magicToken, amount) {
@@ -390,11 +445,45 @@ app.get("/api/config", (_req, res) => {
   res.json({
     currencySymbol: DISPLAY_CURRENCY_SYMBOL,
     tagPrice: TAG_PRICE,
+    insuranceOptInPrice: INSURANCE_OPT_IN_PRICE,
     paystackPublicKey: PAYSTACK_PUBLIC_KEY,
     paystackCurrency: PAYSTACK_CURRENCY,
     renewalPeriodDays: RENEWAL_PERIOD_DAYS,
+    supportedStates: SUPPORTED_STATES,
+    testModeEnabled: ENABLE_TEST_MODE,
   });
 });
+
+/**
+ * Extract the optional vehicle/address/insurance fields from a checkout
+ * payload. Trims strings, normalizes the state code, and converts the boolean
+ * `insuranceOptIn` flag from any truthy value.
+ */
+function extractTagDetails(body) {
+  const trim = (v) => (typeof v === "string" ? v.trim() : "");
+  const state = trim(body?.state).toUpperCase();
+  return {
+    state,
+    address: trim(body?.address),
+    city: trim(body?.city),
+    zip: trim(body?.zip),
+    vin: trim(body?.vin).toUpperCase(),
+    year: trim(body?.year),
+    make: trim(body?.make),
+    model: trim(body?.model),
+    color: trim(body?.color),
+    body: trim(body?.bodyType),
+    plate: trim(body?.plate),
+    insuranceCompany: trim(body?.insuranceCompany),
+    insurancePolicy: trim(body?.insurancePolicy),
+    insuranceExp: trim(body?.insuranceExp),
+    insuranceOptIn: !!body?.insuranceOptIn,
+  };
+}
+
+function priceForCheckout(details) {
+  return TAG_PRICE + (details.insuranceOptIn ? INSURANCE_OPT_IN_PRICE : 0);
+}
 
 // -- Checkout ----------------------------------------------------------------
 
@@ -407,8 +496,21 @@ app.post("/api/checkout/init", async (req, res) => {
     if (!firstName || !lastName) {
       return res.status(400).json({ error: "First and last name are required." });
     }
-    // Server-side trust: always use the configured TAG_PRICE.
-    const finalAmount = TAG_PRICE;
+    const details = extractTagDetails(req.body);
+    if (!details.state) return res.status(400).json({ error: "Please pick your state." });
+    if (!details.address || !details.city || !details.zip) {
+      return res.status(400).json({ error: "Please fill in your address, city, and ZIP." });
+    }
+    if (!details.vin || !details.year || !details.make || !details.model) {
+      return res.status(400).json({ error: "Please fill in your vehicle details (VIN, year, make, model)." });
+    }
+    if (!details.insuranceOptIn && !details.insuranceCompany) {
+      return res.status(400).json({
+        error: "Tell us your insurance company, or opt in to our 1-month coverage.",
+      });
+    }
+    // Server-side trust: amount is recomputed from server config.
+    const finalAmount = priceForCheckout(details);
     const user = await ensureUser({ email, firstName, lastName });
     const reference = `kt_${Date.now().toString(36)}_${nanoid(10)}`;
     const data = await initPaystackTransaction({
@@ -434,6 +536,7 @@ app.post("/api/checkout/init", async (req, res) => {
       fulfilled: false,
       createdAt: new Date().toISOString(),
       source: "checkout",
+      ...details,
     });
 
     // Issue a session token straight away so the success page can land them
@@ -507,20 +610,24 @@ app.get("/api/checkout/verify", async (req, res) => {
       source: existing?.source || tx.metadata?.source || "checkout",
     });
 
-    // First time we observe this order as paid, send a welcome email with a
-    // permanent management link.
+    // First time we observe this order as paid: generate documents, send
+    // welcome email with a permanent management link.
+    let docsSummary = null;
     if (status === "paid" && !wasAlreadyPaid) {
+      docsSummary = await generateDocumentsForOrderSafely(user, updated);
       const { token: sessionToken } = await issueToken({
         userId: user.id,
         kind: "session",
         ttlHours: SESSION_TTL_DAYS * 24,
       });
-      sendWelcomeEmail(user, sessionToken).catch((e) =>
+      sendWelcomeEmail(user, sessionToken, updated, docsSummary).catch((e) =>
         console.warn("[email] welcome send failed", e.message),
       );
+    } else if (status === "paid") {
+      docsSummary = await orderDocsManifest(updated);
     }
 
-    res.json(updated);
+    res.json({ ...updated, documents: docsSummary });
   } catch (err) {
     console.error("[checkout/verify]", err.response?.data || err.message);
     res.status(err.status || 500).json({
@@ -598,12 +705,19 @@ app.post("/api/auth/logout", requireUser, async (req, res) => {
 async function accountPayload(user) {
   const orders = await ordersForUser(user.id);
   const lastPaid = orders.find((o) => o.status === "paid") || null;
+  const ordersWithDocs = await Promise.all(
+    orders.map(async (o) => ({
+      ...o,
+      stateInfo: getStateInfo(o.state),
+      documents: o.status === "paid" ? await orderDocsManifest(o) : null,
+    })),
+  );
   return {
     user: {
       ...user,
       nextRenewalDueAt: lastPaid ? computeNextRenewalIso(lastPaid.paidAt || lastPaid.createdAt) : null,
     },
-    orders,
+    orders: ordersWithDocs,
   };
 }
 
@@ -706,6 +820,96 @@ app.post("/api/admin/users/:id/send-reminder", requireAdmin, async (req, res) =>
   res.json({ ok: true, ...result });
 });
 
+// -- Document downloads (authed by session) ----------------------------------
+
+async function sendOrderDocument(req, res, kind) {
+  const orderId = String(req.params.id || "");
+  const orders = await readJson(ORDERS_FILE);
+  const order = orders.find((o) => o.id === orderId);
+  if (!order) return res.status(404).json({ error: "Order not found" });
+  if (order.userId !== req.user.id) return res.status(403).json({ error: "Not your order" });
+  if (order.status !== "paid") return res.status(409).json({ error: "Order is not paid yet" });
+  const filename = kind === "tag" ? "tag.pdf" : "insurance.pdf";
+  const fullPath = path.join(DATA_DIR, "documents", order.id, filename);
+  try {
+    const stat = await fs.stat(fullPath);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Length", stat.size);
+    const inline = req.query.download !== "1";
+    const displayName = `kingsman-${kind}-${order.reference || order.id}.pdf`;
+    res.setHeader(
+      "Content-Disposition",
+      `${inline ? "inline" : "attachment"}; filename="${displayName}"`,
+    );
+    const buf = await fs.readFile(fullPath);
+    res.send(buf);
+  } catch {
+    res.status(404).json({ error: `${kind === "tag" ? "Tag" : "Insurance card"} not available for this order.` });
+  }
+}
+
+app.get("/api/documents/:id/tag", requireUser, async (req, res) => {
+  await sendOrderDocument(req, res, "tag");
+});
+
+app.get("/api/documents/:id/insurance", requireUser, async (req, res) => {
+  await sendOrderDocument(req, res, "insurance");
+});
+
+// -- Test mode (skips the payment processor) ---------------------------------
+// Powers /qwertyuiop. Disabled in production unless ENABLE_TEST_MODE=1.
+
+app.post("/api/test/simulate-purchase", async (req, res) => {
+  if (!ENABLE_TEST_MODE) return res.status(404).json({ error: "Not found" });
+  try {
+    const { email, firstName, lastName } = req.body || {};
+    if (!email || !email.includes?.("@")) {
+      return res.status(400).json({ error: "Enter a test email." });
+    }
+    if (!firstName || !lastName) {
+      return res.status(400).json({ error: "First and last name are required." });
+    }
+    const details = extractTagDetails(req.body);
+    if (!details.state) return res.status(400).json({ error: "Pick a state." });
+    const finalAmount = priceForCheckout(details);
+    const user = await ensureUser({ email, firstName, lastName });
+    const now = new Date().toISOString();
+    const reference = `kt_test_${Date.now().toString(36)}_${nanoid(8)}`;
+    const order = {
+      id: nanoid(12),
+      reference,
+      userId: user.id,
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      phone: req.body?.phone || "",
+      notes: req.body?.notes || "",
+      amount: finalAmount,
+      currency: DISPLAY_CURRENCY_SYMBOL,
+      paystackCurrency: PAYSTACK_CURRENCY,
+      status: "paid",
+      fulfilled: false,
+      createdAt: now,
+      paidAt: now,
+      source: "checkout",
+      channel: "test",
+      ...details,
+    };
+    await upsertOrder(order);
+    const docs = await generateDocumentsForOrderSafely(user, order);
+    const { token: sessionToken } = await issueToken({
+      userId: user.id,
+      kind: "session",
+      ttlHours: SESSION_TTL_DAYS * 24,
+    });
+    sendWelcomeEmail(user, sessionToken, order, docs).catch(() => undefined);
+    res.json({ order, documents: docs, sessionToken, user, simulated: true });
+  } catch (err) {
+    console.error("[test/simulate-purchase]", err.message);
+    res.status(500).json({ error: err.message || "Simulation failed" });
+  }
+});
+
 // -- Renewal sweep -----------------------------------------------------------
 
 async function runReminderForUser(user, { force = false } = {}) {
@@ -760,6 +964,8 @@ app.listen(PORT, async () => {
   if (!RESEND_API_KEY) console.warn("[kingsman-tags] RESEND_API_KEY not set — emails disabled");
   if (ADMIN_PASSWORD === "change-me-please")
     console.warn("[kingsman-tags] Using default admin password — set ADMIN_PASSWORD in .env");
+  if (ENABLE_TEST_MODE)
+    console.log("[kingsman-tags] Test mode ENABLED — /qwertyuiop simulation is live.");
   console.log(
     `[kingsman-tags] Renewal sweep every ${(RENEWAL_CHECK_INTERVAL_MS / 60000).toFixed(0)} min; period ${RENEWAL_PERIOD_DAYS} days`,
   );

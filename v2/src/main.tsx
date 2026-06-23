@@ -8,6 +8,7 @@ import Login from "./pages/Login";
 import Account from "./pages/Account";
 import Renew from "./pages/Renew";
 import Admin from "./pages/Admin";
+import Qwertyuiop from "./pages/Qwertyuiop";
 import NotFound from "./pages/NotFound";
 import "./index.css";
 
@@ -21,6 +22,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
         <Route path="/login" element={<Login />} />
         <Route path="/account" element={<Account />} />
         <Route path="/renew" element={<Renew />} />
+        <Route path="/qwertyuiop" element={<Qwertyuiop />} />
         <Route path="/admin" element={<Admin />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
