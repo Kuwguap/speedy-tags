@@ -91,6 +91,7 @@ function normalizeCashAppPaymentValue(key, value) {
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 const JWT_SECRET = process.env.JWT_SECRET || "tristatetags-secret-change-in-production";
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
+const STRIPE_WEBHOOK_SECRET = (process.env.STRIPE_WEBHOOK_SECRET || "").trim();
 const APP_URLS = (process.env.APP_URL || process.env.VITE_APP_URL || "http://localhost:8080")
   .split(",")
   .map((u) => u.trim().replace(/\/$/, ""))
@@ -1754,6 +1755,13 @@ app.set("trust proxy", 1);
 app.use(cors());
 app.use("/api/dispatch", express.raw({ type: () => true, limit: "15mb" }), proxyDispatchApi);
 app.use("/api/interview", express.raw({ type: () => true, limit: "15mb" }), proxyInterviewApi);
+// Stripe webhook MUST use the raw body so we can verify the signature — mount
+// before express.json() or signature verification will always fail.
+app.post(
+  "/api/stripe/webhook",
+  express.raw({ type: "application/json", limit: "2mb" }),
+  handleStripeWebhook,
+);
 app.use(express.json({ limit: "5mb" }));
 
 // Health check (no DB/Telegram - always 200)
@@ -2656,6 +2664,193 @@ app.post("/api/checkout/create-session", async (req, res) => {
 });
 
 // Verify Stripe payment and create order (server-side verification)
+/**
+ * Finalize a paid Stripe Checkout session into an admin order row. Shared by
+ * the customer-side /api/checkout/verify (when the browser comes back) and
+ * the server-side /api/stripe/webhook (when it does not). Idempotent: if the
+ * order is already saved, we just patch missing payment fields.
+ */
+async function persistPaidStripeSession(session, { source = "verify" } = {}) {
+  if (!session) return null;
+  const sessionId = session.id;
+  const nowIso = new Date().toISOString();
+  const meta = session.metadata || {};
+
+  const existing = await findOrderByStripeSessionId(sessionId);
+  if (existing) {
+    let apiShape = useSupabase() ? orderRowToApi(existing) : existing;
+    const resolvedPrice = await resolveOrderPrice(apiShape, sessionId);
+    const patch = { lastActivityAt: nowIso };
+    if (resolvedPrice > 0 && normalizeOrderPrice(apiShape.price) <= 0) {
+      patch.price = resolvedPrice;
+      apiShape = { ...apiShape, price: resolvedPrice };
+    }
+    if (!apiShape.paidAt) {
+      patch.paidAt = nowIso;
+      patch.checkoutStatus =
+        apiShape.checkoutStatus === "tag_info_submitted" ||
+        apiShape.checkoutStatus === "complete"
+          ? apiShape.checkoutStatus
+          : "paid";
+      patch.paymentStatus = "paid";
+    }
+    if (Object.keys(patch).length > 1) {
+      await updateOrder(apiShape.id, patch);
+    }
+    return apiShape;
+  }
+
+  const leadToken = String(meta.leadToken || "").trim();
+  let leadRow = null;
+  if (leadToken) {
+    if (useSupabase()) {
+      const { data } = await supabase
+        .from("orders")
+        .select("*")
+        .eq("lead_token", leadToken)
+        .order("created_at", { ascending: false })
+        .limit(1);
+      leadRow = data && data[0] ? data[0] : null;
+    } else {
+      const orders = loadJson(ORDERS_FILE, []);
+      leadRow = orders.find((o) => o.leadToken === leadToken) || null;
+    }
+  }
+
+  const serviceTitle = meta.serviceTitle || productChoiceTitle(meta.productChoice);
+  const finalPrice = (session.amount_total || 0) / 100;
+
+  if (leadRow) {
+    const orderId = leadRow.id;
+    await updateOrder(orderId, {
+      stripeSessionId: sessionId,
+      paymentStatus: "paid",
+      checkoutStatus: "paid",
+      paidAt: nowIso,
+      lastActivityAt: nowIso,
+      price: finalPrice,
+      serviceTitle,
+      deliveryMethod: meta.deliveryMethod || null,
+      deliveryEmail: meta.deliveryEmail || null,
+      deliveryPhone: meta.deliveryPhone || null,
+      productChoice: meta.productChoice || null,
+    });
+    await appendActivity("dataIn", {
+      type: "order",
+      orderId,
+      serviceTitle,
+      price: finalPrice,
+      stripeSessionId: sessionId,
+      source,
+    });
+    await appendActivity("payments", {
+      type: "order",
+      orderId,
+      amount: finalPrice,
+      status: "paid",
+      stripeSessionId: sessionId,
+      source,
+    });
+    const refreshed = await findOrderById(orderId);
+    return useSupabase() ? orderRowToApi(refreshed) : refreshed;
+  }
+
+  const order = {
+    id: randomUUID(),
+    serviceId: meta.serviceId || "checkout",
+    serviceTitle,
+    firstName: "Pending",
+    lastName: "",
+    phone: meta.deliveryPhone || "",
+    address: meta.deliveryAddress || "",
+    deliveryAddress: meta.deliveryAddress || "",
+    vin: "",
+    carMakeModel: "",
+    color: "",
+    price: finalPrice,
+    createdAt: nowIso,
+    stripeSessionId: sessionId,
+    paymentStatus: "paid",
+    deliveryMethod: meta.deliveryMethod,
+    deliveryEmail: meta.deliveryEmail,
+    deliverySlot: meta.deliverySlot,
+    deliveryScheduledAt: meta.deliveryScheduledAt,
+    deliveryPhone: meta.deliveryPhone,
+    productChoice: meta.productChoice,
+    checkoutStatus: "paid",
+    leadStartedAt: nowIso,
+    paymentPendingAt: nowIso,
+    paidAt: nowIso,
+    lastActivityAt: nowIso,
+    leadToken: leadToken || null,
+    telegramSent: false,
+    telegramRecipients: [],
+    telegramErrors: [],
+  };
+  await appendActivity("dataIn", {
+    type: "order",
+    orderId: order.id,
+    serviceTitle: order.serviceTitle,
+    price: order.price,
+    stripeSessionId: sessionId,
+    source,
+  });
+  await appendActivity("payments", {
+    type: "order",
+    orderId: order.id,
+    amount: order.price,
+    status: "paid",
+    stripeSessionId: sessionId,
+    source,
+  });
+  await saveOrder(order);
+  return order;
+}
+
+/**
+ * Stripe webhook — fires when a Checkout Session is paid, regardless of
+ * whether the customer's browser made it back to the verify page. Without
+ * this, lost redirects (mobile Apple Pay, network drops, closed tabs) cause
+ * Stripe to receive money while the admin dashboard stays empty.
+ */
+async function handleStripeWebhook(req, res) {
+  if (!stripe) return res.status(503).send("Stripe not configured");
+  const signature = req.headers["stripe-signature"];
+  if (!STRIPE_WEBHOOK_SECRET) {
+    console.warn("[stripe-webhook] STRIPE_WEBHOOK_SECRET not set — refusing to process events");
+    return res.status(503).send("Webhook secret not configured");
+  }
+  let event;
+  try {
+    event = stripe.webhooks.constructEvent(req.body, signature, STRIPE_WEBHOOK_SECRET);
+  } catch (err) {
+    console.error("[stripe-webhook] signature verification failed:", err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+  try {
+    if (
+      event.type === "checkout.session.completed" ||
+      event.type === "checkout.session.async_payment_succeeded"
+    ) {
+      let session = event.data?.object || null;
+      if (session && session.payment_status !== "paid") {
+        try {
+          session = await stripe.checkout.sessions.retrieve(session.id);
+        } catch {
+          /* ignore — use the event payload as-is */
+        }
+      }
+      if (session && session.payment_status === "paid") {
+        await persistPaidStripeSession(session, { source: "webhook" });
+      }
+    }
+    res.json({ received: true });
+  } catch (e) {
+    console.error("[stripe-webhook] handler error:", e);
+    res.status(500).send("Webhook handler failed");
+  }
+}
+
 app.get("/api/checkout/verify", async (req, res) => {
   const sessionId = req.query.session_id;
   const isTest = req.query.test === "1";
@@ -2670,110 +2865,11 @@ app.get("/api/checkout/verify", async (req, res) => {
   if (!stripe) return res.status(503).json({ error: "Stripe is not configured." });
   try {
     const session = await stripe.checkout.sessions.retrieve(sessionId);
-    if (session.payment_status !== "paid") return res.status(400).json({ error: "Payment not completed", paymentStatus: session.payment_status });
-
-    const meta = session.metadata || {};
-    const nowIso = new Date().toISOString();
-    const existing = await findOrderByStripeSessionId(sessionId);
-    if (existing) {
-      let apiShape = useSupabase() ? orderRowToApi(existing) : existing;
-      const resolvedPrice = await resolveOrderPrice(apiShape, sessionId);
-      if (resolvedPrice > 0 && normalizeOrderPrice(apiShape.price) <= 0) {
-        await persistOrderPriceIfNeeded(apiShape.id, resolvedPrice);
-        apiShape = { ...apiShape, price: resolvedPrice };
-      }
-      // Make sure paid_at is recorded - older flows may not have set it.
-      if (!apiShape.paidAt) {
-        await updateOrder(apiShape.id, {
-          paidAt: nowIso,
-          checkoutStatus: apiShape.checkoutStatus === "tag_info_submitted" ||
-            apiShape.checkoutStatus === "complete"
-            ? apiShape.checkoutStatus
-            : "paid",
-          lastActivityAt: nowIso,
-        });
-      }
-      return res.json(apiShape);
+    if (session.payment_status !== "paid") {
+      return res.status(400).json({ error: "Payment not completed", paymentStatus: session.payment_status });
     }
-
-    // Match by leadToken from Stripe metadata so the funnel row created at
-    // /api/checkout/lead is updated in place rather than duplicated.
-    const leadToken = String(meta.leadToken || "").trim();
-    let leadRow = null;
-    if (leadToken) {
-      if (useSupabase()) {
-        const { data } = await supabase
-          .from("orders")
-          .select("*")
-          .eq("lead_token", leadToken)
-          .order("created_at", { ascending: false })
-          .limit(1);
-        leadRow = data && data[0] ? data[0] : null;
-      } else {
-        const orders = loadJson(ORDERS_FILE, []);
-        leadRow = orders.find((o) => o.leadToken === leadToken) || null;
-      }
-    }
-
-    const serviceTitle = meta.serviceTitle || productChoiceTitle(meta.productChoice);
-    const finalPrice = (session.amount_total || 0) / 100;
-
-    if (leadRow) {
-      const orderId = leadRow.id;
-      await updateOrder(orderId, {
-        stripeSessionId: sessionId,
-        paymentStatus: "paid",
-        checkoutStatus: "paid",
-        paidAt: nowIso,
-        lastActivityAt: nowIso,
-        price: finalPrice,
-        serviceTitle,
-        deliveryMethod: meta.deliveryMethod || null,
-        deliveryEmail: meta.deliveryEmail || null,
-        deliveryPhone: meta.deliveryPhone || null,
-        productChoice: meta.productChoice || null,
-      });
-      await appendActivity("dataIn", { type: "order", orderId, serviceTitle, price: finalPrice, stripeSessionId: sessionId });
-      await appendActivity("payments", { type: "order", orderId, amount: finalPrice, status: "paid", stripeSessionId: sessionId });
-      const refreshed = await findOrderById(orderId);
-      return res.json(useSupabase() ? orderRowToApi(refreshed) : refreshed);
-    }
-
-    const order = {
-      id: randomUUID(),
-      serviceId: meta.serviceId || "checkout",
-      serviceTitle,
-      firstName: "Pending",
-      lastName: "",
-      phone: meta.deliveryPhone || "",
-      address: meta.deliveryAddress || "",
-      deliveryAddress: meta.deliveryAddress || "",
-      vin: "",
-      carMakeModel: "",
-      color: "",
-      price: finalPrice,
-      createdAt: nowIso,
-      stripeSessionId: sessionId,
-      paymentStatus: "paid",
-      deliveryMethod: meta.deliveryMethod,
-      deliveryEmail: meta.deliveryEmail,
-      deliverySlot: meta.deliverySlot,
-      deliveryScheduledAt: meta.deliveryScheduledAt,
-      deliveryPhone: meta.deliveryPhone,
-      productChoice: meta.productChoice,
-      checkoutStatus: "paid",
-      leadStartedAt: nowIso,
-      paymentPendingAt: nowIso,
-      paidAt: nowIso,
-      lastActivityAt: nowIso,
-      leadToken: leadToken || null,
-      telegramSent: false,
-      telegramRecipients: [],
-      telegramErrors: [],
-    };
-    await appendActivity("dataIn", { type: "order", orderId: order.id, serviceTitle: order.serviceTitle, price: order.price, stripeSessionId: sessionId });
-    await appendActivity("payments", { type: "order", orderId: order.id, amount: order.price, status: "paid", stripeSessionId: sessionId });
-    await saveOrder(order);
+    const order = await persistPaidStripeSession(session, { source: "verify" });
+    if (!order) return res.status(500).json({ error: "Failed to record order" });
     res.json(order);
   } catch (e) {
     console.error("Stripe verify error:", e);
@@ -3553,6 +3649,13 @@ const server = app.listen(PORT, () => {
   console.log(`Server running on port ${server.address().port}`);
   if (!ADMIN_PASSWORD) console.warn("WARNING: ADMIN_PASSWORD not set");
   if (!STRIPE_SECRET_KEY) console.warn("WARNING: STRIPE_SECRET_KEY not set - checkout will fail");
+  if (!STRIPE_WEBHOOK_SECRET) {
+    console.warn(
+      "WARNING: STRIPE_WEBHOOK_SECRET not set — paid orders WILL be lost if the customer never returns to the success page",
+    );
+  } else {
+    console.log("Stripe webhook listening at /api/stripe/webhook");
+  }
   if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_IDS.length) console.warn("WARNING: Telegram not configured");
   if (!resend) console.warn("WARNING: RESEND_API_KEY not set — order completion emails will not send");
   else {

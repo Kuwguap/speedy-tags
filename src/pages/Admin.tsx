@@ -96,6 +96,8 @@ import {
   XCircle,
   Settings as SettingsIcon,
   Wallet,
+  Menu,
+  X,
 } from "lucide-react";
 import AdminLogin from "./AdminLogin";
 
@@ -135,9 +137,9 @@ function OrderDetailBlock({
   const deliveryLabel = deliveryMethodLabel(order.deliveryMethod);
 
   const Field = ({ label, value }: { label: string; value: React.ReactNode }) => (
-    <div className="grid grid-cols-3 gap-2 py-1.5 border-b border-border/40 last:border-0">
-      <span className="text-xs uppercase tracking-wide text-muted-foreground col-span-1">{label}</span>
-      <span className="text-sm col-span-2 break-words">{value || "—"}</span>
+    <div className="flex flex-col gap-0.5 py-2 border-b border-border/40 last:border-0 sm:grid sm:grid-cols-3 sm:gap-2 sm:py-1.5">
+      <span className="text-[11px] sm:text-xs uppercase tracking-wide text-muted-foreground sm:col-span-1">{label}</span>
+      <span className="text-sm sm:col-span-2 break-words">{value || "—"}</span>
     </div>
   );
 
@@ -420,6 +422,7 @@ export default function Admin() {
   const [webhookBusy, setWebhookBusy] = useState(false);
   const [webhookCustomUrl, setWebhookCustomUrl] = useState("");
   const [orderDetail, setOrderDetail] = useState<OrderRecord | null>(null);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   async function refreshWebhookInfo() {
     setWebhookLoading(true);
@@ -613,24 +616,78 @@ export default function Admin() {
     );
   }
 
+  const currentNavLabel =
+    navItems.find((item) => item.key === view)?.label || "Admin";
+
   return (
     <div className="flex min-h-screen">
-      {/* Sidebar */}
-      <aside className="w-64 shrink-0 bg-sidebar text-sidebar-foreground border-r border-sidebar-border flex flex-col">
-        <div className="p-5 border-b border-sidebar-border">
-          <Link to="/" className="flex items-center gap-2.5">
-            <div className="h-8 w-8 flex items-center justify-center rounded-lg bg-sidebar-primary">
+      {/* Mobile top bar */}
+      <header className="md:hidden fixed top-0 inset-x-0 z-40 flex items-center justify-between gap-3 border-b border-sidebar-border bg-sidebar text-sidebar-foreground px-3 py-2.5 h-14">
+        <Link to="/" className="flex items-center gap-2 min-w-0">
+          <div className="h-8 w-8 shrink-0 flex items-center justify-center rounded-lg bg-sidebar-primary">
+            <Car className="h-4 w-4 text-sidebar-primary-foreground" />
+          </div>
+          <span className="font-display text-sm font-bold text-sidebar-primary-foreground truncate">
+            {currentNavLabel}
+          </span>
+        </Link>
+        <button
+          type="button"
+          aria-label="Open admin menu"
+          onClick={() => setMobileNavOpen(true)}
+          className="cursor-pointer h-10 w-10 inline-flex items-center justify-center rounded-lg border border-sidebar-border/70 bg-sidebar-accent/30 text-sidebar-foreground hover:bg-sidebar-accent/60 transition-colors"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
+      </header>
+
+      {/* Mobile drawer backdrop */}
+      {mobileNavOpen && (
+        <button
+          type="button"
+          aria-label="Close menu"
+          onClick={() => setMobileNavOpen(false)}
+          className="md:hidden fixed inset-0 z-40 bg-black/50 backdrop-blur-sm cursor-pointer"
+        />
+      )}
+
+      {/* Sidebar / mobile drawer */}
+      <aside
+        className={`fixed md:static inset-y-0 left-0 z-50 w-64 shrink-0 bg-sidebar text-sidebar-foreground border-r border-sidebar-border flex flex-col transform transition-transform duration-200 ease-out md:translate-x-0 ${
+          mobileNavOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
+        }`}
+      >
+        <div className="p-5 border-b border-sidebar-border flex items-center justify-between">
+          <Link
+            to="/"
+            className="flex items-center gap-2.5 min-w-0"
+            onClick={() => setMobileNavOpen(false)}
+          >
+            <div className="h-8 w-8 shrink-0 flex items-center justify-center rounded-lg bg-sidebar-primary">
               <Car className="h-4 w-4 text-sidebar-primary-foreground" />
             </div>
-            <span className="font-display text-lg font-bold text-sidebar-primary-foreground">TriStateTags</span>
+            <span className="font-display text-lg font-bold text-sidebar-primary-foreground truncate">
+              TriStateTags
+            </span>
           </Link>
+          <button
+            type="button"
+            aria-label="Close menu"
+            onClick={() => setMobileNavOpen(false)}
+            className="md:hidden cursor-pointer h-9 w-9 inline-flex items-center justify-center rounded-lg text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground transition-colors"
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
-        <nav className="flex-1 p-3 space-y-1">
+        <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
           {navItems.map((item) => (
             <button
               key={item.key}
-              onClick={() => setView(item.key)}
-              className={`w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+              onClick={() => {
+                setView(item.key);
+                setMobileNavOpen(false);
+              }}
+              className={`w-full flex items-center gap-3 rounded-lg px-3 py-3 md:py-2.5 text-sm font-medium transition-colors cursor-pointer ${
                 view === item.key
                   ? "bg-sidebar-accent text-sidebar-accent-foreground"
                   : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground"
@@ -642,20 +699,32 @@ export default function Admin() {
           ))}
         </nav>
         <div className="p-3 border-t border-sidebar-border space-y-1">
-          <Button variant="ghost" size="sm" onClick={handleLogout} className="w-full justify-start text-sidebar-foreground/70 hover:text-destructive">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleLogout}
+            className="w-full justify-start text-sidebar-foreground/70 hover:text-destructive cursor-pointer"
+          >
             <LogOut className="h-4 w-4 mr-2" /> Log out
           </Button>
-          <Button variant="ghost" size="sm" asChild className="w-full justify-start text-sidebar-foreground/70 hover:text-sidebar-accent-foreground">
-            <Link to="/" className="gap-2"><ArrowLeft className="h-4 w-4" /> Back to Site</Link>
+          <Button
+            variant="ghost"
+            size="sm"
+            asChild
+            className="w-full justify-start text-sidebar-foreground/70 hover:text-sidebar-accent-foreground cursor-pointer"
+          >
+            <Link to="/" className="gap-2" onClick={() => setMobileNavOpen(false)}>
+              <ArrowLeft className="h-4 w-4" /> Back to Site
+            </Link>
           </Button>
         </div>
       </aside>
 
       {/* Main */}
-      <main className="flex-1 bg-background p-6 md:p-10 overflow-auto">
+      <main className="flex-1 bg-background p-4 sm:p-6 md:p-10 pt-[4.5rem] md:pt-10 overflow-auto">
         {view === "analytics" && (
-          <div className="space-y-8 max-w-5xl">
-            <h1 className="font-display text-2xl font-bold text-foreground">Analytics</h1>
+          <div className="space-y-6 md:space-y-8 max-w-5xl">
+            <h1 className="font-display text-xl sm:text-2xl font-bold text-foreground">Analytics</h1>
 
             {stats && (
               <>
@@ -717,7 +786,7 @@ export default function Admin() {
                     {stats.ordersWithTelegramStatus?.length === 0 ? (
                       <p className="p-6 text-muted-foreground">No orders yet.</p>
                     ) : (
-                      <div className="overflow-x-auto">
+                      <div className="hidden md:block overflow-x-auto">
                         <Table>
                           <TableHeader>
                             <TableRow>
@@ -761,6 +830,47 @@ export default function Admin() {
                           </TableBody>
                         </Table>
                       </div>
+                    )}
+                    {(stats.ordersWithTelegramStatus?.length ?? 0) > 0 && (
+                      <ul className="md:hidden divide-y divide-border/40">
+                        {stats.ordersWithTelegramStatus?.map((o) => (
+                          <li key={o.id} className="px-4 py-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0 flex-1">
+                                <div className="font-mono text-[11px] text-muted-foreground">
+                                  #{o.id.slice(0, 8)}…
+                                </div>
+                                <div className="text-sm font-medium truncate">{o.serviceTitle}</div>
+                                <div className="text-[11px] text-muted-foreground">
+                                  {new Date(o.createdAt).toLocaleString()}
+                                </div>
+                                {o.telegramRecipients?.length ? (
+                                  <div className="text-[11px] font-mono text-muted-foreground mt-1 truncate">
+                                    {o.telegramRecipients.join(", ")}
+                                  </div>
+                                ) : null}
+                                {o.telegramErrors?.length ? (
+                                  <div className="text-[11px] text-destructive mt-1">
+                                    {o.telegramErrors.map((e) => `${e.chatId}: ${e.error}`).join("; ")}
+                                  </div>
+                                ) : null}
+                              </div>
+                              <div className="text-right shrink-0">
+                                <div className="font-semibold text-sm">${formatUsd(o.price)}</div>
+                                {o.telegramSent ? (
+                                  <Badge variant="secondary" className="bg-success/10 text-success text-[10px] mt-1">
+                                    <CheckCircle2 className="h-3 w-3 mr-1" /> Sent
+                                  </Badge>
+                                ) : (
+                                  <Badge variant="secondary" className="bg-destructive/10 text-destructive text-[10px] mt-1">
+                                    <XCircle className="h-3 w-3 mr-1" /> Not sent
+                                  </Badge>
+                                )}
+                              </div>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
                     )}
                   </CardContent>
                 </Card>
@@ -812,8 +922,8 @@ export default function Admin() {
         )}
 
         {view === "services" && (
-          <div className="max-w-4xl space-y-8">
-            <h1 className="font-display text-2xl font-bold text-foreground">Manage Services</h1>
+          <div className="max-w-4xl space-y-6 md:space-y-8">
+            <h1 className="font-display text-xl sm:text-2xl font-bold text-foreground">Manage Services</h1>
 
             <Card className="shadow-card border-border/50">
               <CardHeader><CardTitle className="text-lg flex items-center gap-2"><Plus className="h-4 w-4" /> Add New Service</CardTitle></CardHeader>
@@ -842,12 +952,12 @@ export default function Admin() {
 
             <div className="space-y-3">
               {services.map((s) => (
-                <div key={s.id} className="flex items-center justify-between p-4 rounded-lg bg-card border border-border/50 shadow-card">
-                  <div>
-                    <h3 className="font-semibold text-foreground">{s.title}</h3>
+                <div key={s.id} className="flex items-center justify-between gap-3 p-3 sm:p-4 rounded-lg bg-card border border-border/50 shadow-card">
+                  <div className="min-w-0 flex-1">
+                    <h3 className="font-semibold text-foreground truncate">{s.title}</h3>
                     <p className="text-sm text-muted-foreground">${formatUsd(s.price)}</p>
                   </div>
-                  <Button variant="ghost" size="icon" onClick={() => handleDelete(s.id)} className="text-destructive hover:text-destructive">
+                  <Button variant="ghost" size="icon" onClick={() => handleDelete(s.id)} className="text-destructive hover:text-destructive cursor-pointer shrink-0">
                     <Trash2 className="h-4 w-4" />
                   </Button>
                 </div>
@@ -857,8 +967,8 @@ export default function Admin() {
         )}
 
         {view === "settings" && (
-          <div className="max-w-2xl space-y-6">
-            <h1 className="font-display text-2xl font-bold text-foreground">Settings</h1>
+          <div className="max-w-2xl space-y-5 md:space-y-6">
+            <h1 className="font-display text-xl sm:text-2xl font-bold text-foreground">Settings</h1>
             <Card className="shadow-card border-border/50">
               <CardHeader>
                 <CardTitle className="text-lg flex items-center gap-2"><SettingsIcon className="h-4 w-4" /> Checkout & Pricing</CardTitle>
@@ -867,7 +977,7 @@ export default function Admin() {
               <CardContent className="space-y-6">
                 {settings && (
                   <>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                       <div>
                         <Label>Plate Only ($)</Label>
                         <Input
@@ -1208,38 +1318,43 @@ export default function Admin() {
         )}
 
         {view === "orders" && (
-          <div className="space-y-6">
-            <h1 className="font-display text-2xl font-bold text-foreground">Orders & Leads</h1>
-            <p className="text-sm text-muted-foreground -mt-4">
+          <div className="space-y-5 md:space-y-6">
+            <h1 className="font-display text-xl sm:text-2xl font-bold text-foreground">Orders & Leads</h1>
+            <p className="text-sm text-muted-foreground -mt-3">
               Every shopper who reaches the delivery step is captured here, even
               if they never finish. Use the &quot;Paid but unfinished&quot; filter to find
               clients who could dispute their charge.
             </p>
-            <div className="flex flex-wrap items-center gap-2">
-              {CHECKOUT_STATUS_FILTERS.map((f) => (
-                <Button
-                  key={f.id}
-                  size="sm"
-                  variant={checkoutStatusFilter === f.id ? "default" : "outline"}
-                  onClick={() => setCheckoutStatusFilter(f.id)}
-                >
-                  {f.label}
-                </Button>
-              ))}
-              <div className="ml-auto w-full sm:w-72">
-                <Input
-                  placeholder="Search name, email, phone, Stripe ID…"
-                  value={orderSearch}
-                  onChange={(e) => setOrderSearch(e.target.value)}
-                  className="h-9"
-                />
+            <div className="space-y-2">
+              <Input
+                placeholder="Search name, email, phone, Stripe ID…"
+                value={orderSearch}
+                onChange={(e) => setOrderSearch(e.target.value)}
+                inputMode="search"
+                className="h-11 sm:h-9"
+              />
+              <div className="-mx-1 overflow-x-auto pb-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+                <div className="flex items-center gap-2 px-1 min-w-max">
+                  {CHECKOUT_STATUS_FILTERS.map((f) => (
+                    <Button
+                      key={f.id}
+                      size="sm"
+                      variant={checkoutStatusFilter === f.id ? "default" : "outline"}
+                      onClick={() => setCheckoutStatusFilter(f.id)}
+                      className="cursor-pointer h-9 px-3 whitespace-nowrap"
+                    >
+                      {f.label}
+                    </Button>
+                  ))}
+                </div>
               </div>
             </div>
             {orders.length === 0 ? (
               <p className="text-muted-foreground">No orders yet.</p>
             ) : (
               <Card className="shadow-card border-border/50 overflow-hidden">
-                <div className="overflow-x-auto">
+                {/* Desktop table */}
+                <div className="hidden md:block overflow-x-auto">
                     <Table>
                     <TableHeader>
                       <TableRow>
@@ -1312,7 +1427,7 @@ export default function Admin() {
                         return (
                           <TableRow
                             key={o.id}
-                            className={`cursor-pointer hover:bg-muted/40 ${
+                            className={`cursor-pointer hover:bg-muted/40 transition-colors ${
                               funnel.stage === "paid_unfinished"
                                 ? "bg-destructive/5"
                                 : ""
@@ -1404,15 +1519,130 @@ export default function Admin() {
                     </TableBody>
                   </Table>
                 </div>
+
+                {/* Mobile card list */}
+                <ul className="md:hidden divide-y divide-border/40">
+                  {orders
+                    .filter((o) => {
+                      const stage = checkoutFunnelStage(o).stage;
+                      if (checkoutStatusFilter === "all") return true;
+                      if (checkoutStatusFilter === "dispute_risk")
+                        return stage === "paid_unfinished";
+                      if (checkoutStatusFilter === "lead") return stage === "lead";
+                      if (checkoutStatusFilter === "payment_pending")
+                        return stage === "payment_pending";
+                      if (checkoutStatusFilter === "paid")
+                        return ["paid_unfinished", "tag_info", "complete"].includes(stage);
+                      if (checkoutStatusFilter === "complete")
+                        return stage === "complete";
+                      return true;
+                    })
+                    .filter((o) => {
+                      const q = orderSearch.trim().toLowerCase();
+                      if (!q) return true;
+                      const hay = [
+                        o.firstName,
+                        o.lastName,
+                        o.phone,
+                        o.deliveryPhone,
+                        o.deliveryEmail,
+                        o.deliveryAddress,
+                        o.address,
+                        o.stripeSessionId,
+                        o.vin,
+                        o.id,
+                        o.krableadsReferenceId,
+                      ]
+                        .filter(Boolean)
+                        .join(" ")
+                        .toLowerCase();
+                      return hay.includes(q);
+                    })
+                    .map((o) => {
+                      const dispatcher = (settings?.telegramDispatchers ?? []).find(
+                        (d) =>
+                          String(d.groupId).trim() ===
+                          String(o.telegramAcceptedGroupId || "").trim(),
+                      );
+                      const pickedByName =
+                        (o.telegramAcceptedGroupName && o.telegramAcceptedGroupName.trim()) ||
+                        dispatcher?.groupName?.trim() ||
+                        (o.telegramAcceptedGroupId ? `Group ${String(o.telegramAcceptedGroupId).slice(-4)}` : "");
+                      const funnel = checkoutFunnelStage(o);
+                      const fullName = `${o.firstName || ""} ${o.lastName || ""}`.trim();
+                      const isPlaceholder = !fullName || fullName === "Pending";
+                      const contactLine = o.deliveryEmail || o.deliveryPhone || o.phone || "—";
+                      return (
+                        <li key={o.id}>
+                          <button
+                            type="button"
+                            onClick={() => setOrderDetail(o)}
+                            className={`w-full text-left px-4 py-3.5 cursor-pointer hover:bg-muted/40 active:bg-muted/60 transition-colors ${
+                              funnel.stage === "paid_unfinished" ? "bg-destructive/5" : ""
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <Badge variant="secondary" className={`${funnel.color} text-[11px]`}>
+                                    {funnel.label}
+                                  </Badge>
+                                  <span className="text-[11px] text-muted-foreground">
+                                    {new Date(o.createdAt).toLocaleDateString()}
+                                  </span>
+                                </div>
+                                <div className="font-medium text-sm mt-1.5 truncate">
+                                  {isPlaceholder ? (
+                                    <span className="text-muted-foreground">(no name yet)</span>
+                                  ) : (
+                                    fullName
+                                  )}
+                                </div>
+                                <div className="text-xs text-muted-foreground truncate">
+                                  {contactLine}
+                                </div>
+                                <div className="text-xs text-muted-foreground mt-1 truncate">
+                                  {deliveryMethodLabel(o.deliveryMethod)}
+                                  {o.carMakeModel ? ` · ${o.carMakeModel}` : ""}
+                                </div>
+                                {pickedByName ? (
+                                  <div className="mt-1.5">
+                                    <Badge variant="secondary" className="bg-success/10 text-success text-[11px]">
+                                      <CheckCircle2 className="h-3 w-3 mr-1" />
+                                      {pickedByName}
+                                    </Badge>
+                                  </div>
+                                ) : funnel.stage !== "lead" && funnel.stage !== "payment_pending" ? (
+                                  <div className="mt-1.5">
+                                    <Badge variant="secondary" className="bg-amber-500/10 text-amber-600 text-[11px]">
+                                      Unclaimed
+                                    </Badge>
+                                  </div>
+                                ) : null}
+                              </div>
+                              <div className="text-right shrink-0">
+                                <div className="text-base font-semibold">${formatUsd(o.price)}</div>
+                                {o.krableadsReferenceId && !o.krableadsIngestError ? (
+                                  <div className="text-[10px] font-mono text-muted-foreground mt-1 truncate max-w-[6.5rem]">
+                                    {o.krableadsReferenceId}
+                                  </div>
+                                ) : null}
+                              </div>
+                            </div>
+                          </button>
+                        </li>
+                      );
+                    })}
+                </ul>
               </Card>
             )}
           </div>
         )}
 
         <Dialog open={!!orderDetail} onOpenChange={(open) => !open && setOrderDetail(null)}>
-          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogContent className="max-w-2xl w-[calc(100vw-1.5rem)] sm:w-full max-h-[92vh] overflow-y-auto p-4 sm:p-6">
             <DialogHeader>
-              <DialogTitle>
+              <DialogTitle className="text-base sm:text-lg break-all">
                 Lead details — #{orderDetail?.id?.slice(0, 8)}
               </DialogTitle>
             </DialogHeader>
