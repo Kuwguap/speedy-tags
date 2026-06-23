@@ -23,8 +23,8 @@ export default {
         },
       },
       fontFamily: {
-        display: ['"Bodoni Moda"', "Georgia", "serif"],
-        body: ['"Jost"', "system-ui", "sans-serif"],
+        display: ['"Playfair Display"', "Georgia", "serif"],
+        body: ['"Manrope"', "system-ui", "sans-serif"],
       },
       boxShadow: {
         card: "0 1px 2px 0 rgb(15 23 42 / 0.04), 0 8px 24px -8px rgb(15 23 42 / 0.12)",
