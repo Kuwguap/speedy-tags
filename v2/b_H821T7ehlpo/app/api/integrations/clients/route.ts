@@ -3,6 +3,7 @@ import { z } from 'zod'
 import {
   addVehicleToExistingClient,
   createInsuredClientFromFormAction,
+  lookupExistingClientByEmail,
   type AdminCreateInput,
 } from '@/app/actions/admin-create-client'
 import { classifyInsuranceCardUpload } from '@/lib/insurance-card-format'
@@ -129,6 +130,58 @@ function jsonError (status: number, error: string, extra?: Record<string, unknow
   return NextResponse.json({ ok: false, error, ...(extra ?? {}) }, { status })
 }
 
+function isDuplicateEmailError (message: string): boolean {
+  return /already(\s+been)?\s+(registered|exists)|duplicate key/i.test(message)
+}
+
+function buildAdminInputFromBody (b: CreateClientApiBody): AdminCreateInput {
+  return {
+    email: b.email,
+    password: b.password,
+    name: b.name,
+    memberSince: b.memberSince ?? '',
+    phone: b.phone,
+    vehicleName: b.vehicleName,
+    vin: b.vin,
+    modelYear: b.modelYear ?? '',
+    vehicleMake: b.vehicleMake ?? '',
+    vehicleModel: b.vehicleModel ?? '',
+    trimLevel: b.trimLevel ?? '',
+    bodyClass: b.bodyClass ?? '',
+    policyNumber: b.policyNumber,
+    policyEffectiveDate: b.policyEffectiveDate,
+    policyExpirationDate: b.policyExpirationDate,
+    policyAddress: b.policyAddress ?? '',
+    annualPremium: b.annualPremium,
+    liability: b.liability,
+    collision: b.collision,
+    comprehensive: b.comprehensive,
+    uninsuredMotorist: b.uninsuredMotorist,
+    medicalPayments: b.medicalPayments,
+    roadsideAssistance: b.roadsideAssistance,
+    skipWelcomeEmail: b.skipWelcomeEmail,
+  }
+}
+
+async function pdfOptionalFromBlob (
+  pdfBlob: Blob | null,
+  pdfFilename: string
+): Promise<{
+  pdfBuffer?: Buffer
+  pdfMeta?: { objectName: string; contentType: string } | null
+}> {
+  if (!pdfBlob) return {}
+  const classified = classifyInsuranceCardUpload(
+    new File([pdfBlob], pdfFilename, { type: 'application/pdf' })
+  )
+  return {
+    pdfBuffer: Buffer.from(await pdfBlob.arrayBuffer()),
+    pdfMeta: classified.ok
+      ? { objectName: pdfFilename, contentType: 'application/pdf' }
+      : null,
+  }
+}
+
 export async function POST (request: NextRequest) {
   if (!getIntegrationSecret(ENV_VAR_NAMES)) {
     return jsonError(
@@ -199,59 +252,42 @@ export async function POST (request: NextRequest) {
     fd.set('insuranceCard', pdfBlob, pdfFilename)
   }
 
+  const adminInput = buildAdminInputFromBody(b)
+  const pdfOptional = await pdfOptionalFromBlob(pdfBlob, pdfFilename)
+
+  // Existing account: add a vehicle without calling createUser (which would
+  // risk overwriting profile / auth metadata with the new submission's name).
+  const existing = await lookupExistingClientByEmail(b.email)
+  if (existing) {
+    const addResult = await addVehicleToExistingClient(adminInput, pdfOptional)
+    if (!addResult.ok) {
+      return jsonError(400, addResult.message)
+    }
+    return NextResponse.json({
+      ok: true,
+      email: b.email.trim(),
+      policyNumber: b.policyNumber.trim(),
+      added: 'vehicle',
+      userId: addResult.userId,
+      vehicleId: addResult.vehicleId,
+      policyId: addResult.policyId,
+      insuranceCardStored: pdfBlob !== null && !addResult.warning,
+      ...(addResult.warning ? { warning: addResult.warning } : {}),
+    })
+  }
+
   const result = await createInsuredClientFromFormAction(fd)
 
   if (!result.ok) {
-    const isDuplicate = /already (registered|exists)|duplicate key/i.test(result.message)
+    const isDuplicate = isDuplicateEmailError(result.message)
     const friendly = formatSupabaseClientError(result.message)
     const isInfra =
       friendly !== result.message ||
       /cannot reach supabase|invalid supabase service role/i.test(friendly)
 
-    // Existing customer: instead of failing, add this car as a second vehicle
-    // + second policy on the same account so the member dashboard shows both.
+    // Safety net: race or lookup miss — still try add-vehicle on duplicate email.
     if (isDuplicate) {
-      const addResult = await addVehicleToExistingClient(
-        {
-          email: b.email,
-          password: b.password,
-          name: b.name,
-          memberSince: b.memberSince ?? '',
-          phone: b.phone,
-          vehicleName: b.vehicleName,
-          vin: b.vin,
-          modelYear: b.modelYear ?? '',
-          vehicleMake: b.vehicleMake ?? '',
-          vehicleModel: b.vehicleModel ?? '',
-          trimLevel: b.trimLevel ?? '',
-          bodyClass: b.bodyClass ?? '',
-          policyNumber: b.policyNumber,
-          policyEffectiveDate: b.policyEffectiveDate,
-          policyExpirationDate: b.policyExpirationDate,
-          policyAddress: b.policyAddress ?? '',
-          annualPremium: b.annualPremium,
-          liability: b.liability,
-          collision: b.collision,
-          comprehensive: b.comprehensive,
-          uninsuredMotorist: b.uninsuredMotorist,
-          medicalPayments: b.medicalPayments,
-          roadsideAssistance: b.roadsideAssistance,
-          skipWelcomeEmail: b.skipWelcomeEmail,
-        } satisfies AdminCreateInput,
-        pdfBlob
-          ? {
-              pdfBuffer: Buffer.from(await pdfBlob.arrayBuffer()),
-              pdfMeta: classifyInsuranceCardUpload(
-                new File([pdfBlob], pdfFilename, { type: 'application/pdf' })
-              ).ok
-                ? {
-                    objectName: pdfFilename,
-                    contentType: 'application/pdf',
-                  }
-                : null,
-            }
-          : {}
-      )
+      const addResult = await addVehicleToExistingClient(adminInput, pdfOptional)
 
       if (!addResult.ok) {
         return jsonError(400, addResult.message)

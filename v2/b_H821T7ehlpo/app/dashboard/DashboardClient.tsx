@@ -11,6 +11,67 @@ import DocumentsCard from '@/components/dashboard/DocumentsCard'
 import AccountSettingsCard from '@/components/dashboard/AccountSettingsCard'
 import BuyInsuranceCta from '@/components/dashboard/BuyInsuranceCta'
 import NoPolicyCard from '@/components/dashboard/NoPolicyCard'
+import type { DashboardInsuranceData, DashboardPolicy } from '@/lib/supabase/dashboard-data'
+import { DEFAULT_MONTHLY_PREMIUM_CENTS } from '@/lib/supabase/dashboard-data'
+
+function parseLooseDateToIso (s: string | null | undefined): string | null {
+  const t = (s ?? '').trim()
+  if (!t || t === '—') return null
+  const iso = t.match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`
+  const d = new Date(t)
+  if (Number.isNaN(d.getTime())) return null
+  const yyyy = d.getUTCFullYear()
+  const mm = String(d.getUTCMonth() + 1).padStart(2, '0')
+  const dd = String(d.getUTCDate()).padStart(2, '0')
+  return `${yyyy}-${mm}-${dd}`
+}
+
+function addMonthsToIsoDate (iso: string, months: number): string {
+  const d = new Date(`${iso}T12:00:00Z`)
+  if (Number.isNaN(d.getTime())) return iso
+  d.setUTCMonth(d.getUTCMonth() + Math.max(0, months))
+  const yyyy = d.getUTCFullYear()
+  const mm = String(d.getUTCMonth() + 1).padStart(2, '0')
+  const dd = String(d.getUTCDate()).padStart(2, '0')
+  return `${yyyy}-${mm}-${dd}`
+}
+
+function monthsBetween (effIso: string, expIso: string): number {
+  const a = new Date(`${effIso}T00:00:00Z`).getTime()
+  const b = new Date(`${expIso}T00:00:00Z`).getTime()
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b <= a) return 1
+  return Math.max(1, Math.round((b - a) / (1000 * 60 * 60 * 24 * 30.4375)))
+}
+
+function currentPeriodEnd (effectiveIso: string, renewalIso: string): string {
+  const termMonths = monthsBetween(effectiveIso, renewalIso)
+  if (termMonths <= 1) return renewalIso
+  const first = addMonthsToIsoDate(effectiveIso, 1)
+  return first <= renewalIso ? first : renewalIso
+}
+
+/** Last-resort display policy built from a `vehicles` row when no `policies` link exists. */
+function policyFromVehicleRow (vehicle: DashboardInsuranceData): DashboardPolicy | null {
+  const polNum = vehicle.policyNumber?.trim()
+  if (!polNum || polNum === '—') return null
+  const effIso = parseLooseDateToIso(vehicle.policyEffectiveDate)
+  const expIso = parseLooseDateToIso(vehicle.policyExpirationDate)
+  if (!effIso || !expIso) return null
+  const months = monthsBetween(effIso, expIso)
+  return {
+    id: `veh:${vehicle.vehicleId ?? vehicle.vin}`,
+    policyNumber: polNum,
+    planKey: months >= 12 ? '12m' : months >= 6 ? '6m' : '1m',
+    status: new Date(`${expIso}T00:00:00Z`).getTime() < Date.now() ? 'lapsed' : 'active',
+    monthlyPremiumCents: DEFAULT_MONTHLY_PREMIUM_CENTS,
+    effectiveDateIso: effIso,
+    renewalDateIso: expIso,
+    currentPeriodEndIso: currentPeriodEnd(effIso, expIso),
+    autopayEnabled: false,
+    vehicleId: vehicle.vehicleId ?? null,
+  }
+}
 
 export default function DashboardClient () {
   const {
@@ -64,7 +125,7 @@ export default function DashboardClient () {
   }
 
   const firstName = user.name.split(' ')[0] || user.name
-  const hasActivePolicy = activePolicy !== null
+  const hasActivePolicy = activePolicies.length > 0 || vehicles.length > 0
 
   // Pair each vehicle (oldest first) with its policy so multi-car customers
   // see one card per vehicle instead of a naked list of policy numbers.
@@ -89,14 +150,18 @@ export default function DashboardClient () {
       consumedPolicyIds.add(linked.id)
       continue
     }
-    // Vehicle without a linked policy row: synthesize a display-only one so
-    // the card still renders (falls back to $100/mo default).
     const legacyPolicy = activePolicies.find(
-      p => p.policyNumber && p.policyNumber === v.policyNumber
+      p => p.policyNumber && p.policyNumber === v.policyNumber && !consumedPolicyIds.has(p.id)
     )
-    if (legacyPolicy && !consumedPolicyIds.has(legacyPolicy.id)) {
+    if (legacyPolicy) {
       pairs.push({ key: `veh:${v.vehicleId ?? v.vin}`, policy: legacyPolicy, vehicle: v })
       consumedPolicyIds.add(legacyPolicy.id)
+      continue
+    }
+    const synthesized = policyFromVehicleRow(v)
+    if (synthesized) {
+      pairs.push({ key: `veh:${v.vehicleId ?? v.vin}`, policy: synthesized, vehicle: v })
+      consumedPolicyIds.add(synthesized.id)
     }
   }
   // Any policies we couldn't pair (missing vehicle_id / vehicle row) still

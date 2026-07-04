@@ -4,6 +4,7 @@ import type {
   DashboardInsuranceData,
   DashboardPolicy,
 } from '@/lib/supabase/dashboard-data'
+import { DEFAULT_MONTHLY_PREMIUM_CENTS } from '@/lib/supabase/dashboard-data'
 
 function dollarLabel (cents: number): string {
   return `$${(Math.max(0, cents) / 100).toFixed(2)}`
@@ -14,6 +15,13 @@ function dateLabel (iso: string | null | undefined): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso
   return d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+}
+
+function planTermLabel (planKey: string): string {
+  if (planKey === '12m') return '12-month term'
+  if (planKey === '6m') return '6-month term'
+  if (planKey === '1m') return '1-month term'
+  return 'Policy term'
 }
 
 function buildVehicleLabel (vehicle: DashboardInsuranceData | null | undefined): string {
@@ -132,6 +140,14 @@ export default function PolicyOverviewCard ({
         </div>
         <div>
           <dt className="text-xs font-medium uppercase tracking-wider text-slate-500">
+            Policy term
+          </dt>
+          <dd className="mt-1 text-base font-semibold text-slate-900">
+            {planTermLabel(policy.planKey)}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-xs font-medium uppercase tracking-wider text-slate-500">
             Renewal date
           </dt>
           <dd className="mt-1 text-base font-semibold text-slate-900">
@@ -143,7 +159,7 @@ export default function PolicyOverviewCard ({
             Monthly premium
           </dt>
           <dd className="mt-1 text-base font-semibold text-slate-900">
-            {dollarLabel(policy.monthlyPremiumCents)}
+            {dollarLabel(policy.monthlyPremiumCents || DEFAULT_MONTHLY_PREMIUM_CENTS)}
           </dd>
         </div>
         <div>

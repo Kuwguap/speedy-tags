@@ -296,54 +296,57 @@ export async function fetchDashboardForUser (
   }
 
   const policyRows = (activePoliciesRes.data ?? []) as PolicyRow[]
-  const activePolicies: DashboardPolicy[] = policyRows.map(r => ({
-    id: r.id,
-    policyNumber: r.policy_number,
-    planKey: r.plan_key,
-    status: r.status,
-    // Any zero-priced policy row falls back to the standard $100/mo default
-    // so the dashboard never renders "$0.00 / month" when the bot posted
-    // `annualPremium: 0` (common when the upstream lead has no price).
-    monthlyPremiumCents:
-      r.monthly_premium_cents > 0 ? r.monthly_premium_cents : DEFAULT_MONTHLY_PREMIUM_CENTS,
-    effectiveDateIso: r.effective_date,
-    renewalDateIso: r.renewal_date,
-    currentPeriodEndIso: r.current_period_end,
-    autopayEnabled: r.autopay_enabled,
-    vehicleId: r.vehicle_id ? String(r.vehicle_id) : null,
-  }))
-
-  // Fallback for legacy / admin-created accounts where billing data lives on
-  // the `vehicles` row (policy_number + policy_effective_date + policy_expiration_date)
-  // but no row in `policies` exists yet. The dashboard treats each such
-  // vehicle as its own active read-only policy so the member sees every car.
-  if (activePolicies.length === 0) {
-    for (const legacyVeh of vehicleRows) {
-      if (!legacyVeh?.policy_number || legacyVeh.policy_number === '—') continue
-      const effIso = parseLooseDateToIso(legacyVeh.policy_effective_date)
-      const expIso = parseLooseDateToIso(legacyVeh.policy_expiration_date)
-      if (!effIso || !expIso) continue
-      const months = monthsBetweenLoose(effIso, expIso)
-      const annualCents = Math.max(0, Math.round((Number(legacyVeh.annual_premium) || 0) * 100))
-      const rawMonthly = months > 0 ? Math.round(annualCents / months) : annualCents
-      const monthlyCents = rawMonthly > 0 ? rawMonthly : DEFAULT_MONTHLY_PREMIUM_CENTS
-      const expired = new Date(`${expIso}T00:00:00Z`).getTime() < Date.now()
-      activePolicies.push({
-        id: `legacy:${legacyVeh.id ?? userId}`,
-        policyNumber: String(legacyVeh.policy_number),
-        planKey: months >= 12 ? '12m' : months >= 6 ? '6m' : '1m',
-        status: expired ? 'lapsed' : 'active',
-        monthlyPremiumCents: monthlyCents,
-        effectiveDateIso: effIso,
-        renewalDateIso: expIso,
-        currentPeriodEndIso: expIso,
-        autopayEnabled: false,
-        vehicleId: legacyVeh.id ? String(legacyVeh.id) : null,
-      })
+  const activePolicies: DashboardPolicy[] = policyRows.map(r => {
+    const effective = r.effective_date
+    const renewal = r.renewal_date
+    return {
+      id: r.id,
+      policyNumber: r.policy_number,
+      planKey: r.plan_key,
+      status: r.status,
+      monthlyPremiumCents:
+        r.monthly_premium_cents > 0 ? r.monthly_premium_cents : DEFAULT_MONTHLY_PREMIUM_CENTS,
+      effectiveDateIso: effective,
+      renewalDateIso: renewal,
+      currentPeriodEndIso: resolveCurrentPeriodEnd(
+        effective,
+        renewal,
+        r.current_period_end
+      ),
+      autopayEnabled: r.autopay_enabled,
+      vehicleId: r.vehicle_id ? String(r.vehicle_id) : null,
     }
+  })
+
+  // Ensure every vehicle row has a displayable policy — even when only the
+  // first car has a `policies` row (common for accounts created before
+  // multi-vehicle support). Without this, the dashboard only shows one card.
+  const matchedVehicleIds = new Set(
+    activePolicies.map(p => p.vehicleId).filter((id): id is string => !!id)
+  )
+  const matchedPolicyNumbers = new Set(
+    activePolicies.map(p => p.policyNumber).filter(Boolean)
+  )
+  for (const legacyVeh of vehicleRows) {
+    const vid = legacyVeh.id ? String(legacyVeh.id) : null
+    const polNum = legacyVeh.policy_number?.trim()
+    if (vid && matchedVehicleIds.has(vid)) continue
+    if (polNum && polNum !== '—' && matchedPolicyNumbers.has(polNum)) continue
+    const synthetic = synthesizePolicyFromVehicleRow(legacyVeh, userId)
+    if (!synthetic) continue
+    activePolicies.push(synthetic)
+    if (synthetic.vehicleId) matchedVehicleIds.add(synthetic.vehicleId)
+    if (synthetic.policyNumber) matchedPolicyNumbers.add(synthetic.policyNumber)
   }
 
-  const activePolicy: DashboardPolicy | null = activePolicies[0] ?? null
+  const primaryVehicleId = vehicleRows[0]?.id ? String(vehicleRows[0].id) : null
+  const activePolicy: DashboardPolicy | null =
+    (primaryVehicleId
+      ? activePolicies.find(p => p.vehicleId === primaryVehicleId)
+      : null) ??
+    activePolicies.find(p => p.status === 'active' || p.status === 'pending') ??
+    activePolicies[0] ??
+    null
   const totalMonthlyPremiumCents = activePolicies.reduce(
     (sum, p) => sum + Math.max(0, p.monthlyPremiumCents),
     0
@@ -417,4 +420,69 @@ function monthsBetweenLoose (effIso: string, expIso: string): number {
   if (!Number.isFinite(a) || !Number.isFinite(b) || b <= a) return 1
   const months = (b - a) / (1000 * 60 * 60 * 24 * 30.4375)
   return Math.max(1, Math.round(months))
+}
+
+function addMonthsToIsoDate (iso: string, months: number): string {
+  const d = new Date(`${iso}T12:00:00Z`)
+  if (Number.isNaN(d.getTime())) return iso
+  d.setUTCMonth(d.getUTCMonth() + Math.max(0, months))
+  const yyyy = d.getUTCFullYear()
+  const mm = String(d.getUTCMonth() + 1).padStart(2, '0')
+  const dd = String(d.getUTCDate()).padStart(2, '0')
+  return `${yyyy}-${mm}-${dd}`
+}
+
+/** First monthly billing period end — one month from effective, capped at renewal. */
+function currentPeriodEndForTerm (effectiveIso: string, renewalIso: string): string {
+  const termMonths = monthsBetweenLoose(effectiveIso, renewalIso)
+  if (termMonths <= 1) return renewalIso
+  const firstPeriodEnd = addMonthsToIsoDate(effectiveIso, 1)
+  return firstPeriodEnd <= renewalIso ? firstPeriodEnd : renewalIso
+}
+
+/**
+ * Prefer a recomputed period end when legacy rows stored the full renewal date
+ * in `current_period_end` for multi-month policies.
+ */
+function resolveCurrentPeriodEnd (
+  effectiveIso: string,
+  renewalIso: string,
+  storedPeriodEnd: string
+): string {
+  const recomputed = currentPeriodEndForTerm(effectiveIso, renewalIso)
+  if (
+    storedPeriodEnd &&
+    storedPeriodEnd === renewalIso &&
+    recomputed !== renewalIso
+  ) {
+    return recomputed
+  }
+  return storedPeriodEnd || recomputed
+}
+
+function synthesizePolicyFromVehicleRow (
+  legacyVeh: VehicleRow,
+  userId: string
+): DashboardPolicy | null {
+  if (!legacyVeh?.policy_number || legacyVeh.policy_number === '—') return null
+  const effIso = parseLooseDateToIso(legacyVeh.policy_effective_date)
+  const expIso = parseLooseDateToIso(legacyVeh.policy_expiration_date)
+  if (!effIso || !expIso) return null
+  const months = monthsBetweenLoose(effIso, expIso)
+  const annualCents = Math.max(0, Math.round((Number(legacyVeh.annual_premium) || 0) * 100))
+  const rawMonthly = months > 0 ? Math.round(annualCents / months) : annualCents
+  const monthlyCents = rawMonthly > 0 ? rawMonthly : DEFAULT_MONTHLY_PREMIUM_CENTS
+  const expired = new Date(`${expIso}T00:00:00Z`).getTime() < Date.now()
+  return {
+    id: `legacy:${legacyVeh.id ?? userId}`,
+    policyNumber: String(legacyVeh.policy_number),
+    planKey: months >= 12 ? '12m' : months >= 6 ? '6m' : '1m',
+    status: expired ? 'lapsed' : 'active',
+    monthlyPremiumCents: monthlyCents,
+    effectiveDateIso: effIso,
+    renewalDateIso: expIso,
+    currentPeriodEndIso: currentPeriodEndForTerm(effIso, expIso),
+    autopayEnabled: false,
+    vehicleId: legacyVeh.id ? String(legacyVeh.id) : null,
+  }
 }

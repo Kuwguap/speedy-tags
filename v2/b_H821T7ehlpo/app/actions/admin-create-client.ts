@@ -86,6 +86,29 @@ function roundedMonthsBetween (effIso: string, expIso: string): number {
   return Math.max(1, Math.round(months))
 }
 
+/** Add whole calendar months to a `YYYY-MM-DD` date (UTC). */
+function addMonthsToIsoDate (iso: string, months: number): string {
+  const d = new Date(`${iso}T12:00:00Z`)
+  if (Number.isNaN(d.getTime())) return iso
+  d.setUTCMonth(d.getUTCMonth() + Math.max(0, months))
+  const yyyy = d.getUTCFullYear()
+  const mm = String(d.getUTCMonth() + 1).padStart(2, '0')
+  const dd = String(d.getUTCDate()).padStart(2, '0')
+  return `${yyyy}-${mm}-${dd}`
+}
+
+/**
+ * End of the current monthly billing period — always one month after
+ * effective, capped at the full policy renewal date. For a 6-month term this
+ * is month 1's end, not the full term end (which lives in `renewal_date`).
+ */
+function currentPeriodEndForTerm (effectiveIso: string, renewalIso: string): string {
+  const termMonths = roundedMonthsBetween(effectiveIso, renewalIso)
+  if (termMonths <= 1) return renewalIso
+  const firstPeriodEnd = addMonthsToIsoDate(effectiveIso, 1)
+  return firstPeriodEnd <= renewalIso ? firstPeriodEnd : renewalIso
+}
+
 function planKeyForMonths (n: number): '1m' | '6m' | '12m' {
   if (n >= 12) return '12m'
   if (n >= 6) return '6m'
@@ -141,7 +164,7 @@ function adminPolicyToDashboardRow (args: {
     effective_date: effective,
     renewal_date: expiration,
     current_period_start: effective,
-    current_period_end: expiration,
+    current_period_end: currentPeriodEndForTerm(effective, expiration),
     autopay_enabled: false,
   }
 }
@@ -472,6 +495,23 @@ export type AddVehicleToExistingClientResult =
     }
   | { ok: false; message: string }
 
+/**
+ * Look up an existing portal account by email. Used by the integrations API
+ * to branch to "add vehicle" without attempting `createUser` (which can have
+ * side effects and must never overwrite the account holder's name).
+ */
+export async function lookupExistingClientByEmail (
+  email: string
+): Promise<{ id: string; name: string | null } | null> {
+  const url = getSupabaseProjectUrl()
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()
+  if (!url || !key) return null
+  const admin = createClient(url, key, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  })
+  return findExistingUserId(admin, email)
+}
+
 async function findExistingUserId (
   admin: SupabaseClient,
   email: string
@@ -547,7 +587,9 @@ export async function addVehicleToExistingClient (
     }
   }
   const uid = found.id
-  const displayName = (input.name || found.name || '').trim()
+  // Never adopt the bot's per-vehicle insured name on the account — keep the
+  // original profile name for welcome emails and the member dashboard header.
+  const displayName = (found.name || '').trim() || 'Policyholder'
 
   const { data: insertedVehicle, error: vehicleError } = await admin
     .from('vehicles')
