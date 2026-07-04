@@ -225,8 +225,22 @@ export async function fetchDashboardForUser (
 
   function mapVehicleRow (
     row: VehicleRow,
-    fallbackCardPath: string | null
+    fallbackCardPath: string | null,
+    isPrimaryVehicle: boolean
   ): DashboardInsuranceData {
+    const rowPath = row.insurance_card_pdf_path ?? null
+    const profileForRow =
+      fallbackCardPath &&
+      row.id &&
+      fallbackCardPath.includes(`/vehicle-${row.id}`)
+        ? fallbackCardPath
+        : null
+    const legacyProfile =
+      isPrimaryVehicle &&
+      fallbackCardPath &&
+      !fallbackCardPath.includes('/vehicle-')
+        ? fallbackCardPath
+        : null
     return {
       vehicleId: row.id ? String(row.id) : undefined,
       vehicleName: row.vehicle_name ?? '—',
@@ -242,14 +256,12 @@ export async function fetchDashboardForUser (
       policyExpirationDate: row.policy_expiration_date?.trim() || '—',
       policyAddress: row.policy_address?.trim() || '—',
       coverage,
-      insuranceCardPdfPath: row.insurance_card_pdf_path ?? fallbackCardPath,
+      insuranceCardPdfPath: rowPath ?? profileForRow ?? legacyProfile,
     }
   }
 
   const vehicles: DashboardInsuranceData[] = vehicleRows.length
-    ? vehicleRows.map((row, idx) =>
-        mapVehicleRow(row, idx === 0 ? profileCardPath : null)
-      )
+    ? vehicleRows.map((row, idx) => mapVehicleRow(row, profileCardPath, idx === 0))
     : []
 
   const insuranceData: DashboardInsuranceData =

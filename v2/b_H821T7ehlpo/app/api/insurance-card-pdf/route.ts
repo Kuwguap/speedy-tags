@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/server'
 import { contentTypeForInsuranceCardPath } from '@/lib/insurance-card-format'
+import { resolveInsuranceCardStoragePath } from '@/lib/insurance-card-storage'
 import { insuranceCardDownloadFilename } from '@/lib/pdf-download-name'
 import { getSupabaseProjectUrl } from '@/lib/supabase/admin-env'
 
@@ -36,47 +37,49 @@ export async function GET (request: Request) {
       return NextResponse.json({ error: 'Server env misconfigured' }, { status: 500 })
     }
 
-    // Use service role for storage reads (more reliable on mobile + Vercel), but
-    // enforce ownership in app logic so users can only read their own object.
     const admin = createAdminClient(url, key, {
       auth: { autoRefreshToken: false, persistSession: false },
     })
 
-    let path: string | null = null
-    let displayName = ''
+    const { data: profile } = await admin
+      .from('profiles')
+      .select('name, insurance_card_pdf_path')
+      .eq('id', user.id)
+      .maybeSingle()
 
+    const profilePath =
+      (profile as { insurance_card_pdf_path?: string | null } | null)
+        ?.insurance_card_pdf_path ?? null
+    let displayName =
+      typeof (profile as { name?: string } | null)?.name === 'string'
+        ? (profile as { name: string }).name
+        : ''
+
+    let storedPath: string | null = null
     if (requestedVehicleId) {
-      const { data: veh, error: vehErr } = await admin
+      const { data: veh } = await admin
         .from('vehicles')
         .select('id, user_id, vehicle_name, insurance_card_pdf_path')
         .eq('id', requestedVehicleId)
         .maybeSingle()
-      if (vehErr || !veh) {
+      if (!veh || veh.user_id !== user.id) {
         return NextResponse.json({ error: 'Not found' }, { status: 404 })
       }
-      if (veh.user_id !== user.id) {
-        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-      }
-      const vehPath = (veh as { insurance_card_pdf_path?: string | null }).insurance_card_pdf_path
-      if (!vehPath) {
-        return NextResponse.json({ error: 'Not found' }, { status: 404 })
-      }
-      path = vehPath
-      displayName = String((veh as { vehicle_name?: string }).vehicle_name ?? '') || ''
+      storedPath =
+        (veh as { insurance_card_pdf_path?: string | null }).insurance_card_pdf_path ??
+        null
+      const vehName = String((veh as { vehicle_name?: string }).vehicle_name ?? '')
+      if (vehName) displayName = vehName
     }
 
-    if (!path) {
-      const { data: profile, error: profileErr } = await admin
-        .from('profiles')
-        .select('name, insurance_card_pdf_path')
-        .eq('id', user.id)
-        .maybeSingle()
+    const path = await resolveInsuranceCardStoragePath(admin, user.id, {
+      vehicleId: requestedVehicleId,
+      storedPath,
+      profilePath,
+    })
 
-      if (profileErr || !profile?.insurance_card_pdf_path) {
-        return NextResponse.json({ error: 'Not found' }, { status: 404 })
-      }
-      path = profile.insurance_card_pdf_path as string
-      displayName = typeof profile.name === 'string' ? profile.name : ''
+    if (!path) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 })
     }
 
     if (!path.startsWith(`${user.id}/`)) {

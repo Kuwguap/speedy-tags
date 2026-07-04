@@ -324,25 +324,30 @@ export async function createInsuredClientFromFormAction (
 
   await admin.from('vehicles').delete().eq('user_id', uid)
 
-  const { error: vehicleError } = await admin.from('vehicles').insert({
-    user_id: uid,
-    vehicle_name: input.vehicleName,
-    vin: input.vin,
-    model_year: input.modelYear,
-    vehicle_make: input.vehicleMake,
-    vehicle_model: input.vehicleModel,
-    trim_level: input.trimLevel,
-    body_class: input.bodyClass,
-    policy_number: input.policyNumber,
-    policy_effective_date: input.policyEffectiveDate,
-    policy_expiration_date: input.policyExpirationDate,
-    policy_address: input.policyAddress,
-    annual_premium: input.annualPremium,
-  })
+  const { data: insertedVehicle, error: vehicleError } = await admin
+    .from('vehicles')
+    .insert({
+      user_id: uid,
+      vehicle_name: input.vehicleName,
+      vin: input.vin,
+      model_year: input.modelYear,
+      vehicle_make: input.vehicleMake,
+      vehicle_model: input.vehicleModel,
+      trim_level: input.trimLevel,
+      body_class: input.bodyClass,
+      policy_number: input.policyNumber,
+      policy_effective_date: input.policyEffectiveDate,
+      policy_expiration_date: input.policyExpirationDate,
+      policy_address: input.policyAddress,
+      annual_premium: input.annualPremium,
+    })
+    .select('id')
+    .maybeSingle()
 
-  if (vehicleError) {
-    return { ok: false, message: vehicleError.message }
+  if (vehicleError || !insertedVehicle?.id) {
+    return { ok: false, message: vehicleError?.message ?? 'Failed to insert vehicle' }
   }
+  const firstVehicleId = String(insertedVehicle.id)
 
   // Mirror the admin-entered policy into the `policies` table so the member
   // dashboard sees "Active policy" instead of "No active policy".
@@ -363,7 +368,7 @@ export async function createInsuredClientFromFormAction (
     await admin.from('policies').delete().eq('user_id', uid)
     const { data: policyInsert, error: policyInsertError } = await admin
       .from('policies')
-      .insert(policyForDashboard)
+      .insert({ ...policyForDashboard, vehicle_id: firstVehicleId })
       .select('id')
       .maybeSingle()
     if (policyInsertError) {
@@ -428,6 +433,10 @@ export async function createInsuredClientFromFormAction (
         .from('profiles')
         .update({ insurance_card_pdf_path: storedCardPath })
         .eq('id', uid)
+      await admin
+        .from('vehicles')
+        .update({ insurance_card_pdf_path: storedCardPath })
+        .eq('id', firstVehicleId)
       if (pathErr) {
         cardWarning = `Account was created, but the insurance card link was not saved: ${pathErr.message}`
       } else {

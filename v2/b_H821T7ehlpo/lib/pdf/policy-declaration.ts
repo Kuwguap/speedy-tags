@@ -21,13 +21,24 @@ export type CoverageDeclLine = {
   value: string
 }
 
-export interface PolicyDeclarationInput {
+export type PolicyDeclarationVehicle = {
   policyNumber: string
-  effectiveLabel: string
-  expirationLabel: string
   termLabel: string
   monthlyPremiumLabel: string
-  totalForTermLabel?: string
+  effectiveLabel: string
+  expirationLabel: string
+  year: string
+  make: string
+  model: string
+  trim?: string
+  vin: string
+  bodyClass?: string
+}
+
+export interface PolicyDeclarationInput {
+  /** Combined monthly premium across every insured vehicle on the account. */
+  accountMonthlyPremiumLabel: string
+  accountTotalForTermLabel?: string
 
   insuredName: string
   insuredEmail: string
@@ -42,14 +53,8 @@ export interface PolicyDeclarationInput {
     country?: string
   }
 
-  vehicle: {
-    year: string
-    make: string
-    model: string
-    trim?: string
-    vin: string
-    bodyClass?: string
-  }
+  /** One entry per vehicle on the account (oldest first). */
+  vehicles: PolicyDeclarationVehicle[]
 
   coverages: CoverageDeclLine[]
 
@@ -60,6 +65,15 @@ export interface PolicyDeclarationInput {
   }
 
   generatedAtIso: string
+
+  /** @deprecated Single-vehicle fields — kept for internal migration only. */
+  policyNumber?: string
+  effectiveLabel?: string
+  expirationLabel?: string
+  termLabel?: string
+  monthlyPremiumLabel?: string
+  totalForTermLabel?: string
+  vehicle?: PolicyDeclarationVehicle
 }
 
 const PAGE_W = 612
@@ -188,26 +202,38 @@ export async function buildPolicyDeclarationPdf (
   moveDown(ctx, 4)
   hr(ctx)
 
-  // === Policy ================================================================
-  sectionHeader(ctx, 'Policy')
-  row(ctx, 'Policy number', input.policyNumber)
-  row(ctx, 'Effective', input.effectiveLabel)
-  row(ctx, 'Expiration', input.expirationLabel)
-  row(ctx, 'Term', input.termLabel)
-  row(ctx, 'Monthly premium', input.monthlyPremiumLabel)
-  if (input.totalForTermLabel) {
-    row(ctx, 'Total for term', input.totalForTermLabel)
+  // === Account premium summary ===============================================
+  sectionHeader(ctx, 'Account summary')
+  row(ctx, 'Vehicles insured', String(input.vehicles.length))
+  row(ctx, 'Total monthly premium', input.accountMonthlyPremiumLabel)
+  if (input.accountTotalForTermLabel) {
+    row(ctx, 'Estimated term total', input.accountTotalForTermLabel)
   }
   hr(ctx)
 
-  // === Vehicle ===============================================================
-  sectionHeader(ctx, 'Insured vehicle')
-  const v = input.vehicle
-  const yearMakeModel = [v.year, v.make, v.model].filter(Boolean).join(' ').trim()
-  row(ctx, 'Year / Make / Model', yearMakeModel || '—')
-  if (v.trim) row(ctx, 'Trim', v.trim)
-  if (v.bodyClass) row(ctx, 'Body class', v.bodyClass)
-  row(ctx, 'VIN', v.vin)
+  // === Each insured vehicle ====================================================
+  for (let i = 0; i < input.vehicles.length; i += 1) {
+    const v = input.vehicles[i]
+    const heading =
+      input.vehicles.length > 1
+        ? `Insured vehicle ${i + 1}`
+        : 'Insured vehicle'
+    sectionHeader(ctx, heading)
+    row(ctx, 'Policy number', v.policyNumber)
+    row(ctx, 'Effective', v.effectiveLabel)
+    row(ctx, 'Expiration', v.expirationLabel)
+    row(ctx, 'Term', v.termLabel)
+    row(ctx, 'Monthly premium', v.monthlyPremiumLabel)
+    const yearMakeModel = [v.year, v.make, v.model].filter(Boolean).join(' ').trim()
+    row(ctx, 'Year / Make / Model', yearMakeModel || '—')
+    if (v.trim) row(ctx, 'Trim', v.trim)
+    if (v.bodyClass) row(ctx, 'Body class', v.bodyClass)
+    row(ctx, 'VIN', v.vin)
+    if (i < input.vehicles.length - 1) {
+      moveDown(ctx, 2)
+      hr(ctx)
+    }
+  }
   hr(ctx)
 
   // === Coverage ==============================================================

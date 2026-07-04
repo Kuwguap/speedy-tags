@@ -48,12 +48,12 @@ export default function DocumentsCard ({
   >(null)
   const [err, setErr] = useState('')
 
-  const perVehicleCards = (vehicles ?? []).filter(
-    v => !!v.insuranceCardPdfPath && !!v.vehicleId
-  )
+  const perVehicleCards = (vehicles ?? []).filter(v => !!v.vehicleId)
   const hasPerVehicleCards = perVehicleCards.length > 1
 
-  const insuranceCardAvailable = isSupabaseConfigured() && !!insuranceCardPath
+  const insuranceCardAvailable =
+    isSupabaseConfigured() &&
+    (!!insuranceCardPath || perVehicleCards.length > 0)
 
   const fname = insuranceCardDownloadFilename(policyholderName, insuranceCardPath ?? null)
 

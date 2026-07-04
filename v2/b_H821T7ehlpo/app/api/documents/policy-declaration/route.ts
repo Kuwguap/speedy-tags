@@ -1,9 +1,15 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { buildPolicyDeclarationPdf, type CoverageDeclLine } from '@/lib/pdf/policy-declaration'
+import {
+  buildPolicyDeclarationPdf,
+  type CoverageDeclLine,
+  type PolicyDeclarationVehicle,
+} from '@/lib/pdf/policy-declaration'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+
+const DEFAULT_MONTHLY_PREMIUM_CENTS = 10000
 
 const DEFAULT_ISSUER = {
   name: 'TRI STATE COVERAGE INC',
@@ -30,8 +36,102 @@ function planTermLabel (planKey: string): string {
   }
 }
 
+function monthsForPlanKey (planKey: string): number {
+  switch (planKey) {
+    case '12m':
+      return 12
+    case '6m':
+      return 6
+    default:
+      return 1
+  }
+}
+
+function formatDateLabel (iso: string | null | undefined): string {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  return d.toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  })
+}
+
+function parseLooseDateToIso (s: string | null | undefined): string | null {
+  const t = (s ?? '').trim()
+  if (!t || t === '—') return null
+  const iso = t.match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`
+  const d = new Date(t)
+  if (Number.isNaN(d.getTime())) return null
+  const yyyy = d.getUTCFullYear()
+  const mm = String(d.getUTCMonth() + 1).padStart(2, '0')
+  const dd = String(d.getUTCDate()).padStart(2, '0')
+  return `${yyyy}-${mm}-${dd}`
+}
+
+type PolicyRow = {
+  id: string
+  policy_number: string
+  plan_key: string
+  monthly_premium_cents: number
+  effective_date: string
+  renewal_date: string
+  current_period_end: string
+  vehicle_id: string | null
+}
+
+type VehicleRow = {
+  id: string
+  vehicle_name?: string
+  vin?: string
+  model_year?: string
+  vehicle_make?: string
+  vehicle_model?: string
+  trim_level?: string
+  body_class?: string
+  policy_number?: string
+  policy_effective_date?: string
+  policy_expiration_date?: string
+  annual_premium?: number
+}
+
+function buildVehicleDeclaration (
+  vehicle: VehicleRow,
+  policy: PolicyRow | null
+): PolicyDeclarationVehicle {
+  const monthlyCents =
+    policy && policy.monthly_premium_cents > 0
+      ? policy.monthly_premium_cents
+      : DEFAULT_MONTHLY_PREMIUM_CENTS
+  const planKey = policy?.plan_key ?? '1m'
+  const effIso =
+    policy?.effective_date ??
+    parseLooseDateToIso(vehicle.policy_effective_date) ??
+    ''
+  const expIso =
+    policy?.renewal_date ??
+    parseLooseDateToIso(vehicle.policy_expiration_date) ??
+    ''
+
+  return {
+    policyNumber: policy?.policy_number ?? vehicle.policy_number ?? '—',
+    termLabel: planTermLabel(planKey),
+    monthlyPremiumLabel: dollarLabel(monthlyCents),
+    effectiveLabel: formatDateLabel(effIso),
+    expirationLabel: formatDateLabel(expIso),
+    year: vehicle.model_year ?? '',
+    make: vehicle.vehicle_make ?? '',
+    model: vehicle.vehicle_model ?? '',
+    trim: vehicle.trim_level ?? '',
+    vin: vehicle.vin ?? '—',
+    bodyClass: vehicle.body_class ?? '',
+  }
+}
+
 /**
- * Streams the Policy Declaration PDF for the signed-in user's active policy.
+ * Streams the Policy Declaration PDF for every vehicle on the signed-in account.
  * Use `?inline=1` to open in-tab; default sends as an attachment.
  */
 export async function GET (request: NextRequest) {
@@ -43,22 +143,19 @@ export async function GET (request: NextRequest) {
     return NextResponse.json({ ok: false, error: 'Not signed in.' }, { status: 401 })
   }
 
-  const [profileRes, policyRes, vehicleRes, coverageRes] = await Promise.all([
+  const [profileRes, policiesRes, vehiclesRes, coverageRes] = await Promise.all([
     supabase.from('profiles').select('*').eq('id', user.id).single(),
     supabase
       .from('policies')
       .select('*')
       .eq('user_id', user.id)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle(),
+      .in('status', ['active', 'pending'])
+      .order('created_at', { ascending: true }),
     supabase
       .from('vehicles')
       .select('*')
       .eq('user_id', user.id)
-      .order('created_at', { ascending: true })
-      .limit(1)
-      .maybeSingle(),
+      .order('created_at', { ascending: true }),
     supabase.from('coverage').select('*').eq('user_id', user.id).maybeSingle(),
   ])
 
@@ -79,36 +176,60 @@ export async function GET (request: NextRequest) {
     return NextResponse.json({ ok: false, error: 'Profile missing.' }, { status: 404 })
   }
 
-  const policy = policyRes.data as
-    | {
-        policy_number: string
-        plan_key: string
-        monthly_premium_cents: number
-        effective_date: string
-        renewal_date: string
-        current_period_start: string
-        current_period_end: string
-      }
-    | null
+  const vehicleRows = (vehiclesRes.data ?? []) as VehicleRow[]
+  const policyRows = (policiesRes.data ?? []) as PolicyRow[]
 
-  if (!policy) {
+  if (vehicleRows.length === 0 && policyRows.length === 0) {
     return NextResponse.json(
       { ok: false, error: 'No policy on file yet — purchase coverage first.' },
       { status: 404 }
     )
   }
 
-  const vehicle = vehicleRes.data as
-    | {
-        vehicle_name?: string
-        vin?: string
-        model_year?: string
-        vehicle_make?: string
-        vehicle_model?: string
-        trim_level?: string
-        body_class?: string
-      }
-    | null
+  const policyByVehicleId = new Map<string, PolicyRow>()
+  const policyByNumber = new Map<string, PolicyRow>()
+  for (const p of policyRows) {
+    if (p.vehicle_id) policyByVehicleId.set(String(p.vehicle_id), p)
+    if (p.policy_number) policyByNumber.set(p.policy_number, p)
+  }
+
+  const declarationVehicles: PolicyDeclarationVehicle[] = []
+  let accountMonthlyCents = 0
+  let accountTermTotalCents = 0
+
+  if (vehicleRows.length > 0) {
+    for (const veh of vehicleRows) {
+      const linked =
+        policyByVehicleId.get(String(veh.id)) ??
+        (veh.policy_number ? policyByNumber.get(veh.policy_number) : null) ??
+        null
+      declarationVehicles.push(buildVehicleDeclaration(veh, linked))
+      const monthly =
+        linked && linked.monthly_premium_cents > 0
+          ? linked.monthly_premium_cents
+          : DEFAULT_MONTHLY_PREMIUM_CENTS
+      accountMonthlyCents += monthly
+      accountTermTotalCents += monthly * monthsForPlanKey(linked?.plan_key ?? '1m')
+    }
+  } else {
+    for (const pol of policyRows) {
+      declarationVehicles.push(
+        buildVehicleDeclaration(
+          {
+            id: pol.vehicle_id ?? pol.id,
+            policy_number: pol.policy_number,
+          },
+          pol
+        )
+      )
+      const monthly =
+        pol.monthly_premium_cents > 0
+          ? pol.monthly_premium_cents
+          : DEFAULT_MONTHLY_PREMIUM_CENTS
+      accountMonthlyCents += monthly
+      accountTermTotalCents += monthly * monthsForPlanKey(pol.plan_key)
+    }
+  }
 
   const cov = coverageRes.data as
     | {
@@ -139,34 +260,9 @@ export async function GET (request: NextRequest) {
     },
   ]
 
-  const monthsForTerm = (() => {
-    switch (policy.plan_key) {
-      case '1m':
-        return 1
-      case '6m':
-        return 6
-      case '12m':
-        return 12
-      default:
-        return 1
-    }
-  })()
-
   const pdfBytes = await buildPolicyDeclarationPdf({
-    policyNumber: policy.policy_number,
-    effectiveLabel: new Date(policy.effective_date).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-    }),
-    expirationLabel: new Date(policy.current_period_end).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-    }),
-    termLabel: planTermLabel(policy.plan_key),
-    monthlyPremiumLabel: dollarLabel(policy.monthly_premium_cents),
-    totalForTermLabel: dollarLabel(policy.monthly_premium_cents * monthsForTerm),
+    accountMonthlyPremiumLabel: dollarLabel(accountMonthlyCents),
+    accountTotalForTermLabel: dollarLabel(accountTermTotalCents),
 
     insuredName: profile.name || '—',
     insuredEmail: profile.email,
@@ -181,22 +277,15 @@ export async function GET (request: NextRequest) {
       country: profile.billing_country ?? 'US',
     },
 
-    vehicle: {
-      year: vehicle?.model_year ?? '',
-      make: vehicle?.vehicle_make ?? '',
-      model: vehicle?.vehicle_model ?? '',
-      trim: vehicle?.trim_level ?? '',
-      vin: vehicle?.vin ?? '—',
-      bodyClass: vehicle?.body_class ?? '',
-    },
-
+    vehicles: declarationVehicles,
     coverages,
     issuer: DEFAULT_ISSUER,
     generatedAtIso: new Date().toISOString(),
   })
 
   const inline = request.nextUrl.searchParams.get('inline') === '1'
-  const filename = `policy-declaration-${policy.policy_number}.pdf`
+  const primaryPolicy = declarationVehicles[0]?.policyNumber ?? 'account'
+  const filename = `policy-declaration-${primaryPolicy}.pdf`
 
   return new NextResponse(new Uint8Array(pdfBytes), {
     status: 200,
