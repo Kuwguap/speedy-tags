@@ -108,11 +108,11 @@ export default function BalanceDueCard ({
 
   return (
     <section className="surface-card overflow-hidden p-0">
-      <div className="bg-gradient-to-br from-teal-700 via-teal-800 to-slate-900 px-6 py-6 text-white md:px-8 md:py-7">
+      <div className="bg-gradient-to-br from-teal-700 via-teal-800 to-slate-900 px-4 py-6 text-white sm:px-6 md:px-8 md:py-7">
         <p className="text-xs font-semibold uppercase tracking-[0.15em] text-teal-200">
           {usingFallback ? 'Estimated monthly total' : 'Balance due'}
         </p>
-        <p className="mt-2 text-4xl font-bold tracking-tight md:text-5xl">
+        <p className="mt-2 text-3xl font-bold tracking-tight sm:text-4xl md:text-5xl">
           {dollarLabel(balanceCents)}
         </p>
         {hasInvoiceTotal && openInvoice && (
@@ -135,13 +135,13 @@ export default function BalanceDueCard ({
         )}
       </div>
 
-      <div className="flex flex-col gap-3 px-6 py-5 sm:flex-row sm:items-center sm:justify-between md:px-8">
-        <div className="flex flex-wrap gap-2">
+      <div className="flex flex-col gap-3 px-4 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6 md:px-8">
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap">
           <button
             type="button"
             disabled={!hasBalance || usingFallback || busy !== null}
             onClick={() => void handlePayNow()}
-            className="btn-primary-brand inline-flex items-center gap-2 px-5 py-2.5 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+            className="btn-touch btn-primary-brand w-full gap-2 sm:w-auto disabled:cursor-not-allowed disabled:opacity-50"
             title={
               usingFallback
                 ? 'No invoice generated yet — enable AutoPay or wait for the next billing cycle.'
@@ -155,11 +155,11 @@ export default function BalanceDueCard ({
             type="button"
             disabled={busy !== null}
             onClick={() => void handleAutopay()}
-            className={`inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
+            className={`btn-touch w-full gap-2 sm:w-auto ${
               autopay
                 ? 'border border-emerald-200 bg-emerald-50 text-emerald-900 hover:bg-emerald-100'
                 : 'border border-slate-200 bg-white text-slate-800 hover:bg-slate-50'
-            }`}
+            } rounded-xl font-semibold transition disabled:cursor-not-allowed disabled:opacity-50`}
           >
             <span aria-hidden>🔄</span>
             {busy === 'autopay'

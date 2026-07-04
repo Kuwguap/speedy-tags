@@ -98,7 +98,7 @@ export default function PolicyOverviewCard ({
   const vehicleLabel = buildVehicleLabel(vehicle)
   const showVehicleBlock = !!vehicle && (vehicleLabel || (vehicle.vin && vehicle.vin !== '—'))
   return (
-    <section className="surface-card p-6 md:p-8">
+    <section className="surface-card p-4 sm:p-6 md:p-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <h2 className="text-lg font-semibold text-slate-900">
@@ -134,7 +134,7 @@ export default function PolicyOverviewCard ({
           <dt className="text-xs font-medium uppercase tracking-wider text-slate-500">
             Policy number
           </dt>
-          <dd className="mt-1 font-mono text-base font-bold text-slate-900">
+          <dd className="mt-1 break-all font-mono text-base font-bold text-slate-900">
             {policy.policyNumber}
           </dd>
         </div>

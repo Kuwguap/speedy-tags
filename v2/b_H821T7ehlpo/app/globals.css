@@ -147,8 +147,14 @@
   * {
     @apply border-border outline-ring/50;
   }
+  html {
+    -webkit-text-size-adjust: 100%;
+    overflow-x: hidden;
+  }
   body {
     @apply bg-background text-foreground antialiased;
+    overflow-x: hidden;
+    min-height: 100dvh;
   }
 }
 
@@ -168,5 +174,21 @@
   }
   .btn-outline-brand {
     @apply inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-5 py-2.5 font-semibold text-slate-800 shadow-sm transition hover:border-slate-400 hover:bg-slate-50 active:scale-[0.98];
+  }
+  /** Minimum 44×44px touch target (Apple HIG / WCAG mobile). */
+  .btn-touch {
+    @apply inline-flex min-h-11 min-w-[2.75rem] items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold;
+  }
+  .safe-page-x {
+    padding-left: max(1rem, env(safe-area-inset-left, 0px));
+    padding-right: max(1rem, env(safe-area-inset-right, 0px));
+  }
+  .safe-page-b {
+    padding-bottom: max(1.5rem, env(safe-area-inset-bottom, 0px));
+  }
+  .document-viewer-toolbar {
+    padding-top: max(0.5rem, env(safe-area-inset-top, 0px));
+    padding-left: max(0.75rem, env(safe-area-inset-left, 0px));
+    padding-right: max(0.75rem, env(safe-area-inset-right, 0px));
   }
 }

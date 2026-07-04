@@ -195,13 +195,13 @@ export default function DashboardClient () {
     <div className="min-h-screen bg-gradient-to-b from-slate-100 via-slate-50 to-white">
       <Header user={user} onLogout={logout} />
 
-      <main className="mx-auto max-w-6xl px-4 py-8 md:py-12">
+      <main className="safe-page-x safe-page-b mx-auto max-w-6xl py-6 sm:py-8 md:py-12">
         <section className="flex flex-wrap items-end justify-between gap-3">
-          <div>
+          <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-teal-700">
               Member dashboard
             </p>
-            <h1 className="mt-1 text-3xl font-bold tracking-tight text-slate-900 md:text-4xl">
+            <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl md:text-4xl">
               Welcome, {firstName}
             </h1>
             <p className="mt-1 text-sm text-slate-600">
@@ -251,11 +251,11 @@ export default function DashboardClient () {
           <BuyInsuranceCta hasActivePolicy={hasActivePolicy} />
         </div>
 
-        <div className="mt-6 grid gap-6 lg:grid-cols-5">
-          <div className="lg:col-span-3">
+        <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-5">
+          <div className="min-w-0 lg:col-span-3">
             <BillingHistoryCard invoices={billingHistory} />
           </div>
-          <div className="lg:col-span-2">
+          <div className="min-w-0 lg:col-span-2">
             <DocumentsCard
               policyholderName={user.name}
               insuranceCardPath={insuranceData?.insuranceCardPdfPath ?? null}

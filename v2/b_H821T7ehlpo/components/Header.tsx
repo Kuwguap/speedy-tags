@@ -27,17 +27,17 @@ export default function Header ({ user, onLogout }: HeaderProps) {
 
   return (
     <header className="sticky top-0 z-50 border-b border-slate-200/90 bg-white/85 backdrop-blur-md">
-      <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3.5">
+      <div className="safe-page-x mx-auto flex max-w-7xl items-center justify-between gap-2 py-3 sm:px-4 sm:py-3.5">
         <BrandMark href="/dashboard" />
 
-        <div className="flex items-center gap-3">
-          <span className="hidden max-w-[140px] truncate text-sm font-medium text-slate-600 sm:inline sm:max-w-[200px]">
+        <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+          <span className="hidden max-w-[120px] truncate text-sm font-medium text-slate-600 sm:inline sm:max-w-[200px]">
             {user.name}
           </span>
           <button
             type="button"
             onClick={handleLogout}
-            className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-800 shadow-sm transition hover:bg-slate-50"
+            className="btn-touch shrink-0 rounded-xl border border-slate-300 bg-white px-4 text-slate-800 shadow-sm transition hover:bg-slate-50"
           >
             Sign out
           </button>
