@@ -1,0 +1,59 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-plate text-ink font-body antialiased;
+    background-image:
+      radial-gradient(circle at 12% 0%, rgba(232, 163, 61, 0.06), transparent 40%),
+      radial-gradient(circle at 88% 4%, rgba(31, 94, 58, 0.05), transparent 42%);
+  }
+  ::selection {
+    @apply bg-issued/30;
+  }
+}
+
+@layer components {
+  /* Eyebrow label — encodes a real fact (state, step), never decoration. */
+  .eyebrow {
+    @apply inline-flex items-center gap-2 font-display text-[11px] font-600 uppercase tracking-[0.22em] text-slate;
+  }
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-full bg-ink px-7 py-3.5 font-display
+           font-600 text-plate transition-all duration-200 hover:shadow-lift hover:-translate-y-0.5
+           focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-issued
+           disabled:opacity-50 disabled:pointer-events-none;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-full border border-ink/15 px-6 py-3
+           font-display font-500 text-ink transition-colors hover:border-ink/40;
+  }
+  .field {
+    @apply w-full rounded-xl border border-ink/12 bg-white px-4 py-3 font-body text-ink
+           placeholder:text-slate-light transition-shadow focus:outline-none focus:ring-2 focus:ring-issued/50;
+  }
+  .label {
+    @apply mb-1.5 block font-display text-[12px] font-600 uppercase tracking-[0.12em] text-slate;
+  }
+  .card {
+    @apply rounded-2xl border border-ink/8 bg-white/80 backdrop-blur-sm shadow-lift;
+  }
+}
+
+/* Honour reduced-motion: strip the signature animations. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
