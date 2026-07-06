@@ -4,10 +4,10 @@ A 4-part system sharing one Supabase database:
 
 | # | App | Host | Status |
 |---|-----|------|--------|
-| 1 | `apps/tag-site` | Vercel | **Phase 1 ✅** — buy a temp tag (Stripe) |
+| 1 | `apps/tag-site` | Vercel | **Phase 1 ✅** — buy a temp tag (Stripe), "NJ Temporary Tag" |
 | 2 | `apps/dispatch-bot` | Render | **Phase 1 ✅** — Telegram dispatch to supervisors + drivers |
-| 3 | `apps/insurance-site` | Vercel | Phase 2 (port of `../v2/b_H821T7ehlpo`) |
-| 4 | `apps/central-bot` | Render | Phase 2 — dashboard + renewals + transactions |
+| 3 | `apps/insurance-site` | Vercel | **Phase 2 ✅** — "NJ Coverage" portal (Next.js), unified Supabase + transactions ledger |
+| 4 | `apps/central-bot` | Render | Phase 2 (remaining) — dashboard + 28-day renewals + driver mgmt |
 
 Shared code lives in `packages/shared` (PDF generation, Supabase, SendGrid, OpenAI, plate allocation, types).
 
@@ -93,11 +93,26 @@ cd apps/tag-site && vercel dev
 6. Upload a receipt photo as a driver → `deliveries.receipt_path` set, delivered.
 7. Every paid purchase wrote a `transactions` row.
 
+## Insurance site (Phase 2, `apps/insurance-site`)
+
+"NJ Coverage" — a Next.js 16 portal (ported from `../v2/b_H821T7ehlpo`,
+rebranded). It shares the **same Supabase project** as the tag system: its
+tables (`profiles`, `policies`, `invoices`, `vehicles`, `coverage`,
+`app_feature_flags`) live alongside the tag/dispatch tables, so run **all**
+migrations in `supabase/migrations/` (the `0001_*` tag schema plus the
+`202604*` insurance schema — they don't collide). Every insurance payment is
+written to the shared `transactions` ledger (`source='insurance'`) so the
+future central dashboard sees tag + insurance payments in one place.
+
+Deploy as a second Vercel project with Root Directory `apps/insurance-site`.
+It has its own env (`apps/insurance-site/.env.example`) but reuses the shared
+`SUPABASE_*`, `STRIPE_*`, and `OPENAI_*` values. Verified: `tsc --noEmit` clean.
+
 ## Notes / open items
 
 - **Document authenticity**: this mints temporary plates + insurance cards from
   user data. Confirm it runs under an authorized dealer/DMV workflow before
   production.
 - Agent-mode draft state is per-process; fine for a single Render instance.
-- Phase 2 brings the insurance portal into the monorepo and adds the central
-  bot/dashboard (renewals via SendGrid, unified transactions view, driver mgmt).
+- Remaining Phase 2: the central bot/dashboard (SendGrid 28-day renewals,
+  unified transactions view, driver/supervisor management UI).

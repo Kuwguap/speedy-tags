@@ -1,0 +1,33 @@
+﻿Warning: UnknownErrorException: Ensure that the `standardFontDataUrl` API parameter is provided.
+Warning: UnknownErrorException: Ensure that the `standardFontDataUrl` API parameter is provided.
+stroke     bbox=(3.60,523.44)ΓåÆ(565.20,777.60)  pts=4
+stroke     bbox=(7.20,651.60)ΓåÆ(7.20,669.60)  pts=3
+stroke     bbox=(7.20,669.60)ΓåÆ(54.00,669.60)  pts=3
+stroke     bbox=(7.20,604.80)ΓåÆ(7.20,622.80)  pts=3
+stroke     bbox=(7.20,604.80)ΓåÆ(54.00,604.80)  pts=3
+stroke     bbox=(162.00,669.60)ΓåÆ(219.60,669.60)  pts=3
+stroke     bbox=(219.60,651.60)ΓåÆ(219.60,669.60)  pts=3
+stroke     bbox=(162.00,604.80)ΓåÆ(219.60,604.80)  pts=3
+stroke     bbox=(219.60,604.80)ΓåÆ(219.60,622.80)  pts=3
+stroke     bbox=(255.60,742.32)ΓåÆ(388.80,742.32)  pts=3
+stroke     bbox=(255.60,714.96)ΓåÆ(298.80,714.96)  pts=3
+stroke     bbox=(327.60,714.96)ΓåÆ(370.80,714.96)  pts=3
+stroke     bbox=(255.60,658.80)ΓåÆ(291.60,658.80)  pts=3
+stroke     bbox=(314.64,658.80)ΓåÆ(370.80,658.80)  pts=3
+stroke     bbox=(255.60,637.20)ΓåÆ(370.80,637.20)  pts=3
+stroke     bbox=(3.60,259.20)ΓåÆ(565.20,513.36)  pts=4
+stroke     bbox=(7.20,387.36)ΓåÆ(7.20,405.36)  pts=3
+stroke     bbox=(7.20,405.36)ΓåÆ(54.00,405.36)  pts=3
+stroke     bbox=(7.20,340.56)ΓåÆ(7.20,358.56)  pts=3
+stroke     bbox=(7.20,340.56)ΓåÆ(54.00,340.56)  pts=3
+stroke     bbox=(162.00,405.36)ΓåÆ(219.60,405.36)  pts=3
+stroke     bbox=(219.60,387.36)ΓåÆ(219.60,405.36)  pts=3
+stroke     bbox=(162.00,340.56)ΓåÆ(219.60,340.56)  pts=3
+stroke     bbox=(219.60,340.56)ΓåÆ(219.60,358.56)  pts=3
+stroke     bbox=(255.60,478.08)ΓåÆ(388.80,478.08)  pts=3
+stroke     bbox=(255.60,450.72)ΓåÆ(298.80,450.72)  pts=3
+stroke     bbox=(327.60,450.72)ΓåÆ(370.80,450.72)  pts=3
+stroke     bbox=(255.60,394.56)ΓåÆ(291.60,394.56)  pts=3
+stroke     bbox=(314.64,394.56)ΓåÆ(370.80,394.56)  pts=3
+stroke     bbox=(255.60,372.96)ΓåÆ(370.80,372.96)  pts=3
+stroke     bbox=(0.00,518.40)ΓåÆ(612.00,518.40)  pts=3

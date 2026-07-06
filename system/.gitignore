@@ -12,3 +12,4 @@ dist/
 # Bundled proprietary fonts are dropped in locally, never committed
 packages/shared/pdf/fonts/*.TTF
 packages/shared/pdf/fonts/*.ttf
+*.tsbuildinfo

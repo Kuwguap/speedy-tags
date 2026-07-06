@@ -1,0 +1,144 @@
+﻿pages: 1
+
+=== PAGE 1  size: 612.0 x 792.0 pts ===
+x=  28.8 y= 640.7 w= 87.3 h=  8.6 size= 8.64 font=g_d0_f1  | ROBOTHAM-BABB,N
+x=  28.8 y= 630.6 w= 85.4 h=  8.6 size= 8.64 font=g_d0_f1  | 26 GRANDVIEW TER
+x=  28.8 y= 620.5 w= 79.2 h=  8.6 size= 8.64 font=g_d0_f1  | ALBANY NY 12202
+x= 255.6 y= 639.2 w= 84.1 h=  7.9 size= 7.92 font=g_d0_f1  | 3N1AB8CV2MY298179
+x= 262.8 y= 661.6 w= 19.2 h=  8.6 size= 8.64 font=g_d0_f1  | 2021
+x= 282.0 y= 661.6 w=  5.7 h=  0.0 size= 8.64 font=g_d0_f1  |  
+x= 331.2 y= 661.6 w= 26.4 h=  8.6 size= 8.64 font=g_d0_f1  | NISSA
+x= 255.6 y= 716.3 w= 43.2 h=  8.6 size= 8.64 font=g_d0_f1  | 05/05/2026
+x= 298.8 y= 716.3 w=  3.3 h=  0.0 size= 8.64 font=g_d0_f1  |  
+x= 327.6 y= 716.3 w= 43.2 h=  8.6 size= 8.64 font=g_d0_f1  | 11/05/2026
+x= 255.6 y= 743.6 w= 48.0 h=  8.6 size= 8.64 font=g_d0_f1  | 2035252790
+x=  97.2 y= 729.2 w=117.4 h=  8.6 size= 8.64 font=g_d0_f1  | COYNE INSURANCE AGENCY
+x=  97.2 y= 719.2 w=103.0 h=  8.6 size= 8.64 font=g_d0_f1  | 146 COLUMBIA TURNPIKE
+x=  97.2 y= 709.1 w= 94.8 h=  8.6 size= 8.64 font=g_d0_f1  | RENSSELAER NY 12144
+x=  10.8 y= 748.0 w= 14.4 h=  8.6 size= 8.64 font=g_d0_f1  | 484
+x=  25.2 y= 748.0 w=  0.8 h=  0.0 size= 8.64 font=g_d0_f1  |  
+x=  32.4 y= 748.0 w= 87.4 h=  8.6 size= 8.64 font=g_d0_f1  | NEW SOUTH INS.CO.
+x=   7.2 y= 719.8 w= 36.4 h=  7.2 size= 7.20 font=g_d0_f1  | 5184772174
+x= 255.6 y= 697.0 w=  0.0 h=  0.0 size= 7.20 font=g_d0_f2  | 
+x= 255.6 y= 697.0 w=117.7 h=  7.2 size= 7.20 font=g_d0_f2  | (Not acceptable to obtain registration
+x= 255.6 y= 689.8 w=107.3 h=  7.2 size= 7.20 font=g_d0_f2  | after 45 days from effective date.)
+x= 255.6 y= 680.5 w=123.7 h=  7.2 size= 7.20 font=g_d0_f2  | Applicable with respect to the following
+x= 255.6 y= 673.3 w= 46.0 h=  7.2 size= 7.20 font=g_d0_f2  | Motor Vehicle:
+x= 255.6 y= 754.0 w= 56.2 h=  8.6 size= 8.64 font=g_d0_f2  | Policy Number
+x= 255.6 y= 728.8 w= 53.8 h=  8.6 size= 8.64 font=g_d0_f2  | Effective Date
+x= 309.4 y= 728.8 w=  2.1 h=  0.0 size= 8.64 font=g_d0_f2  |  
+x= 327.6 y= 728.8 w= 59.1 h=  8.6 size= 8.64 font=g_d0_f2  | Expiration Date
+x=  61.9 y= 766.1 w=  0.0 h=  0.0 size=10.80 font=g_d0_f1  | 
+x=  61.9 y= 766.1 w=288.6 h= 10.8 size=10.80 font=g_d0_f1  | NEW YORK STATE INSURANCE IDENTIFICATION CARD
+x=   7.2 y= 690.5 w=  0.0 h=  0.0 size= 7.20 font=g_d0_f2  | 
+x=   7.2 y= 690.5 w=213.5 h=  7.2 size= 7.20 font=g_d0_f2  | An authorized NEW YORK insurer has issued an Owner's Policy of
+x=   7.2 y= 682.6 w=214.1 h=  7.2 size= 7.20 font=g_d0_f2  | Liability Insurance complying with Article 6 (Motor Vehicle Financial
+x=   7.2 y= 674.7 w=188.9 h=  7.2 size= 7.20 font=g_d0_f2  | Security Act) of the NEW YORK Vehicle and Traffic Law to:
+x= 266.4 y= 650.9 w= 15.2 h=  7.2 size= 7.20 font=g_d0_f2  | Year
+x= 281.6 y= 650.9 w=  7.5 h=  0.0 size= 7.20 font=g_d0_f2  |  
+x= 335.5 y= 650.9 w= 17.6 h=  7.2 size= 7.20 font=g_d0_f2  | Make
+x= 266.4 y= 628.6 w= 93.6 h=  7.2 size= 7.20 font=g_d0_f2  | Vehicle Identification Number
+x= 255.6 y= 706.4 w= 34.0 h=  7.2 size= 7.20 font=g_d0_f2  | 12:01 a.m.
+x= 289.6 y= 706.4 w=  5.3 h=  0.0 size= 7.20 font=g_d0_f2  |  
+x= 327.6 y= 706.4 w= 34.0 h=  7.2 size= 7.20 font=g_d0_f2  | 12:01 a.m.
+x=   7.2 y= 730.9 w= 84.0 h=  7.2 size= 7.20 font=g_d0_f2  | Name & Address of Issuer
+x= 414.0 y= 763.3 w=118.8 h=  7.9 size= 7.92 font=g_d0_f2  | THIS ID CARD MUST BE CARRIED
+x= 414.0 y= 754.7 w=110.1 h=  7.9 size= 7.92 font=g_d0_f2  | IN THE INSURED VEHICLE FOR
+x= 414.0 y= 746.0 w=105.8 h=  7.9 size= 7.92 font=g_d0_f2  | PRODUCTION UPON DEMAND
+x= 414.0 y= 728.8 w=116.3 h=  7.9 size= 7.92 font=g_d0_f2  | WARNING: Any person who issues
+x= 414.0 y= 720.1 w=121.0 h=  7.9 size= 7.92 font=g_d0_f2  | or produces an ID card knowing that
+x= 414.0 y= 711.5 w=130.4 h=  7.9 size= 7.92 font=g_d0_f2  | an Owner's Policy of insurance is not in
+x= 414.0 y= 702.8 w=141.1 h=  7.9 size= 7.92 font=g_d0_f2  | effect may be committing a misdemeanor.
+x= 414.0 y= 694.2 w=116.3 h=  7.9 size= 7.92 font=g_d0_f2  | In addition, a person who presents
+x= 414.0 y= 685.6 w=103.0 h=  7.9 size= 7.92 font=g_d0_f2  | an ID card if insurance is not in
+x= 414.0 y= 676.9 w= 91.5 h=  7.9 size= 7.92 font=g_d0_f2  | effect may be committing a
+x= 414.0 y= 668.3 w= 47.5 h=  7.9 size= 7.92 font=g_d0_f2  | misdemeanor.
+x= 414.0 y= 651.0 w=117.4 h=  7.9 size= 7.92 font=g_d0_f2  | The name of the registrant and the
+x= 414.0 y= 642.4 w=118.1 h=  7.9 size= 7.92 font=g_d0_f2  | name of the insured must coincide.
+x= 414.0 y= 625.1 w=129.6 h=  7.9 size= 7.92 font=g_d0_f2  | REPLACEMENT VEHICLE NOTATION:
+x= 414.0 y= 616.4 w=136.3 h=  7.9 size= 7.92 font=g_d0_f2  | DMV WILL ONLY PROCESS A VEHICLE
+x= 414.0 y= 607.8 w=129.3 h=  7.9 size= 7.92 font=g_d0_f2  | CHANGE (RE-REGISTRATION) USING
+x= 414.0 y= 599.2 w=133.7 h=  7.9 size= 7.92 font=g_d0_f2  | THE REPLACED VEHICLE'S CURRENT
+x= 414.0 y= 590.5 w= 56.2 h=  7.9 size= 7.92 font=g_d0_f2  | REGISTRATION.
+x= 316.8 y= 144.1 w=114.5 h=  7.9 size= 7.92 font=g_d0_f2  | 1. The entire page must be faxed.
+x= 316.8 y= 126.8 w=199.5 h=  7.9 size= 7.92 font=g_d0_f2  | 2. If submitted to DMV, either the entire page or the second
+x= 323.3 y= 118.2 w=173.6 h=  7.9 size= 7.92 font=g_d0_f2  | ID card and large scanable bar code will be retained
+x= 316.8 y= 100.9 w=174.3 h=  7.9 size= 7.92 font=g_d0_f2  | 3. A faxed ID card must be replaced with a scanable
+x= 323.3 y=  92.3 w=144.8 h=  7.9 size= 7.92 font=g_d0_f2  | ID card within 14 days of the effective date.
+x= 316.8 y=  75.0 w=159.9 h=  7.9 size= 7.92 font=g_d0_f2  | 4. DMV will not accept a faxed ID card without a
+x= 323.3 y=  66.4 w= 59.8 h=  7.9 size= 7.92 font=g_d0_f2  | scanable barcode
+x= 331.2 y= 160.1 w=100.8 h= 10.1 size=10.08 font=g_d0_f2  | FAX INSTRUCTIONS:
+x=  14.4 y= 170.5 w=144.8 h= 13.0 size=12.96 font=g_d0_f2  | FAX: Scanable Bar Code
+x= 532.8 y= 526.8 w=  0.0 h=  0.0 size= 7.20 font=g_d0_f1  | 
+x= 532.8 y= 526.8 w= 19.6 h=  7.2 size= 7.20 font=g_d0_f1  | FS-20
+x=  28.8 y= 376.4 w=  0.0 h=  0.0 size= 8.64 font=g_d0_f1  | 
+x=  28.8 y= 376.4 w= 87.3 h=  8.6 size= 8.64 font=g_d0_f1  | ROBOTHAM-BABB,N
+x=  28.8 y= 366.4 w= 85.4 h=  8.6 size= 8.64 font=g_d0_f1  | 26 GRANDVIEW TER
+x=  28.8 y= 356.3 w= 79.2 h=  8.6 size= 8.64 font=g_d0_f1  | ALBANY NY 12202
+x= 255.6 y= 375.0 w= 84.1 h=  7.9 size= 7.92 font=g_d0_f1  | 3N1AB8CV2MY298179
+x= 262.8 y= 397.3 w= 19.2 h=  8.6 size= 8.64 font=g_d0_f1  | 2021
+x= 282.0 y= 397.3 w=  5.7 h=  0.0 size= 8.64 font=g_d0_f1  |  
+x= 331.2 y= 397.3 w= 26.4 h=  8.6 size= 8.64 font=g_d0_f1  | NISSA
+x= 255.6 y= 452.0 w= 43.2 h=  8.6 size= 8.64 font=g_d0_f1  | 05/05/2026
+x= 298.8 y= 452.0 w=  3.3 h=  0.0 size= 8.64 font=g_d0_f1  |  
+x= 327.6 y= 452.0 w= 43.2 h=  8.6 size= 8.64 font=g_d0_f1  | 11/05/2026
+x= 255.6 y= 479.4 w= 48.0 h=  8.6 size= 8.64 font=g_d0_f1  | 2035252790
+x=  97.2 y= 465.0 w=117.4 h=  8.6 size= 8.64 font=g_d0_f1  | COYNE INSURANCE AGENCY
+x=  97.2 y= 454.9 w=103.0 h=  8.6 size= 8.64 font=g_d0_f1  | 146 COLUMBIA TURNPIKE
+x=  97.2 y= 444.8 w= 94.8 h=  8.6 size= 8.64 font=g_d0_f1  | RENSSELAER NY 12144
+x=  10.8 y= 483.7 w= 14.4 h=  8.6 size= 8.64 font=g_d0_f1  | 484
+x=  25.2 y= 483.7 w=  0.8 h=  0.0 size= 8.64 font=g_d0_f1  |  
+x=  32.4 y= 483.7 w= 87.4 h=  8.6 size= 8.64 font=g_d0_f1  | NEW SOUTH INS.CO.
+x=   7.2 y= 455.5 w= 36.4 h=  7.2 size= 7.20 font=g_d0_f1  | 5184772174
+x= 255.6 y= 432.8 w=  0.0 h=  0.0 size= 7.20 font=g_d0_f2  | 
+x= 255.6 y= 432.8 w=117.7 h=  7.2 size= 7.20 font=g_d0_f2  | (Not acceptable to obtain registration
+x= 255.6 y= 425.6 w=107.3 h=  7.2 size= 7.20 font=g_d0_f2  | after 45 days from effective date.)
+x= 255.6 y= 416.2 w=123.7 h=  7.2 size= 7.20 font=g_d0_f2  | Applicable with respect to the following
+x= 255.6 y= 409.0 w= 46.0 h=  7.2 size= 7.20 font=g_d0_f2  | Motor Vehicle:
+x= 255.6 y= 489.8 w= 56.2 h=  8.6 size= 8.64 font=g_d0_f2  | Policy Number
+x= 255.6 y= 464.6 w= 53.8 h=  8.6 size= 8.64 font=g_d0_f2  | Effective Date
+x= 309.4 y= 464.6 w=  2.1 h=  0.0 size= 8.64 font=g_d0_f2  |  
+x= 327.6 y= 464.6 w= 59.1 h=  8.6 size= 8.64 font=g_d0_f2  | Expiration Date
+x=  61.9 y= 501.9 w=  0.0 h=  0.0 size=10.80 font=g_d0_f1  | 
+x=  61.9 y= 501.9 w=288.6 h= 10.8 size=10.80 font=g_d0_f1  | NEW YORK STATE INSURANCE IDENTIFICATION CARD
+x=   7.2 y= 426.3 w=  0.0 h=  0.0 size= 7.20 font=g_d0_f2  | 
+x=   7.2 y= 426.3 w=213.5 h=  7.2 size= 7.20 font=g_d0_f2  | An authorized NEW YORK insurer has issued an Owner's Policy of
+x=   7.2 y= 418.4 w=214.1 h=  7.2 size= 7.20 font=g_d0_f2  | Liability Insurance complying with Article 6 (Motor Vehicle Financial
+x=   7.2 y= 410.5 w=188.9 h=  7.2 size= 7.20 font=g_d0_f2  | Security Act) of the NEW YORK Vehicle and Traffic Law to:
+x= 266.4 y= 386.7 w= 15.2 h=  7.2 size= 7.20 font=g_d0_f2  | Year
+x= 281.6 y= 386.7 w=  7.5 h=  0.0 size= 7.20 font=g_d0_f2  |  
+x= 335.5 y= 386.7 w= 17.6 h=  7.2 size= 7.20 font=g_d0_f2  | Make
+x= 266.4 y= 364.4 w= 93.6 h=  7.2 size= 7.20 font=g_d0_f2  | Vehicle Identification Number
+x= 255.6 y= 442.1 w= 34.0 h=  7.2 size= 7.20 font=g_d0_f2  | 12:01 a.m.
+x= 289.6 y= 442.1 w=  5.3 h=  0.0 size= 7.20 font=g_d0_f2  |  
+x= 327.6 y= 442.1 w= 34.0 h=  7.2 size= 7.20 font=g_d0_f2  | 12:01 a.m.
+x=   7.2 y= 466.6 w= 84.0 h=  7.2 size= 7.20 font=g_d0_f2  | Name & Address of Issuer
+x= 414.0 y= 499.1 w=118.8 h=  7.9 size= 7.92 font=g_d0_f2  | THIS ID CARD MUST BE CARRIED
+x= 414.0 y= 490.4 w=110.1 h=  7.9 size= 7.92 font=g_d0_f2  | IN THE INSURED VEHICLE FOR
+x= 414.0 y= 481.8 w=105.8 h=  7.9 size= 7.92 font=g_d0_f2  | PRODUCTION UPON DEMAND
+x= 414.0 y= 464.5 w=116.3 h=  7.9 size= 7.92 font=g_d0_f2  | WARNING: Any person who issues
+x= 414.0 y= 455.9 w=121.0 h=  7.9 size= 7.92 font=g_d0_f2  | or produces an ID card knowing that
+x= 414.0 y= 447.2 w=130.4 h=  7.9 size= 7.92 font=g_d0_f2  | an Owner's Policy of insurance is not in
+x= 414.0 y= 438.6 w=141.1 h=  7.9 size= 7.92 font=g_d0_f2  | effect may be committing a misdemeanor.
+x= 414.0 y= 430.0 w=116.3 h=  7.9 size= 7.92 font=g_d0_f2  | In addition, a person who presents
+x= 414.0 y= 421.3 w=103.0 h=  7.9 size= 7.92 font=g_d0_f2  | an ID card if insurance is not in
+x= 414.0 y= 412.7 w= 91.5 h=  7.9 size= 7.92 font=g_d0_f2  | effect may be committing a
+x= 414.0 y= 404.0 w= 47.5 h=  7.9 size= 7.92 font=g_d0_f2  | misdemeanor.
+x= 414.0 y= 386.8 w=117.4 h=  7.9 size= 7.92 font=g_d0_f2  | The name of the registrant and the
+x= 414.0 y= 378.1 w=118.1 h=  7.9 size= 7.92 font=g_d0_f2  | name of the insured must coincide.
+x= 414.0 y= 360.8 w=129.6 h=  7.9 size= 7.92 font=g_d0_f2  | REPLACEMENT VEHICLE NOTATION:
+x= 414.0 y= 352.2 w=136.3 h=  7.9 size= 7.92 font=g_d0_f2  | DMV WILL ONLY PROCESS A VEHICLE
+x= 414.0 y= 343.6 w=129.3 h=  7.9 size= 7.92 font=g_d0_f2  | CHANGE (RE-REGISTRATION) USING
+x= 414.0 y= 334.9 w=133.7 h=  7.9 size= 7.92 font=g_d0_f2  | THE REPLACED VEHICLE'S CURRENT
+x= 414.0 y= 326.3 w= 56.2 h=  7.9 size= 7.92 font=g_d0_f2  | REGISTRATION.
+x= 316.8 y= 144.1 w=114.5 h=  7.9 size= 7.92 font=g_d0_f2  | 1. The entire page must be faxed.
+x= 316.8 y= 126.8 w=199.5 h=  7.9 size= 7.92 font=g_d0_f2  | 2. If submitted to DMV, either the entire page or the second
+x= 323.3 y= 118.2 w=173.6 h=  7.9 size= 7.92 font=g_d0_f2  | ID card and large scanable bar code will be retained
+x= 316.8 y= 100.9 w=174.3 h=  7.9 size= 7.92 font=g_d0_f2  | 3. A faxed ID card must be replaced with a scanable
+x= 323.3 y=  92.3 w=144.8 h=  7.9 size= 7.92 font=g_d0_f2  | ID card within 14 days of the effective date.
+x= 316.8 y=  75.0 w=159.9 h=  7.9 size= 7.92 font=g_d0_f2  | 4. DMV will not accept a faxed ID card without a
+x= 323.3 y=  66.4 w= 59.8 h=  7.9 size= 7.92 font=g_d0_f2  | scanable barcode
+x= 331.2 y= 160.1 w=100.8 h= 10.1 size=10.08 font=g_d0_f2  | FAX INSTRUCTIONS:
+x=  14.4 y= 170.5 w=144.8 h= 13.0 size=12.96 font=g_d0_f2  | FAX: Scanable Bar Code
+x= 532.8 y= 262.6 w=  0.0 h=  0.0 size= 7.20 font=g_d0_f1  | 
+x= 532.8 y= 262.6 w= 19.6 h=  7.2 size= 7.20 font=g_d0_f1  | FS-20
