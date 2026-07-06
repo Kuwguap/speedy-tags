@@ -1,0 +1,18 @@
+{
+  "name": "@speedy/central-bot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Central bot + admin dashboard (Render): unified transactions, drivers/supervisors, deliveries, 28-day SendGrid renewals, and a Telegram control bot.",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "renewals": "node src/run-renewals.js"
+  },
+  "dependencies": {
+    "@speedy/shared": "workspace:*",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2"
+  }
+}

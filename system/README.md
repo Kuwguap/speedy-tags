@@ -7,7 +7,7 @@ A 4-part system sharing one Supabase database:
 | 1 | `apps/tag-site` | Vercel | **Phase 1 ✅** — buy a temp tag (Stripe), "NJ Temporary Tag" |
 | 2 | `apps/dispatch-bot` | Render | **Phase 1 ✅** — Telegram dispatch to supervisors + drivers |
 | 3 | `apps/insurance-site` | Vercel | **Phase 2 ✅** — "NJ Coverage" portal (Next.js), unified Supabase + transactions ledger |
-| 4 | `apps/central-bot` | Render | Phase 2 (remaining) — dashboard + 28-day renewals + driver mgmt |
+| 4 | `apps/central-bot` | Render | **✅** — admin dashboard + 28-day SendGrid renewals + unified transactions + driver/supervisor mgmt + Telegram control bot |
 
 Shared code lives in `packages/shared` (PDF generation, Supabase, SendGrid, OpenAI, plate allocation, types).
 
@@ -108,11 +108,36 @@ Deploy as a second Vercel project with Root Directory `apps/insurance-site`.
 It has its own env (`apps/insurance-site/.env.example`) but reuses the shared
 `SUPABASE_*`, `STRIPE_*`, and `OPENAI_*` values. Verified: `tsc --noEmit` clean.
 
+## Central bot + dashboard (`apps/central-bot`)
+
+The operations hub (Render). An admin-password-gated web **dashboard** (server-
+rendered, NJ-branded) with:
+- **Overview** — total revenue and counts split by source (tag vs insurance),
+  users, open/delivered deliveries, renewals due.
+- **Transactions** — the unified ledger from both sites.
+- **Deliveries** — every dispatched order, its driver, status, and signed
+  receipt links.
+- **Renewals** — paid tag orders and their 28-day renewal state; a "Run sweep
+  now" button.
+- **Drivers / Supervisors** — add, activate/deactivate, remove (name, email,
+  Telegram id) — the same records the dispatch bot reads.
+
+It also runs the **28-day renewal sweep** (SendGrid): finds paid tag orders past
+`renewal_due_at` that haven't been reminded, emails a renew link, and marks
+them — idempotent. Runs on an in-process interval (`RENEWAL_SWEEP_MINUTES`) and
+is also exposed at `POST /cron/renewals` (guarded by `ADMIN_PASSWORD`) for a
+Render Cron Job. Needs migration `0002_renewals_central.sql`.
+
+Optional **Telegram control bot** (`TELEGRAM_CENTRAL_BOT_TOKEN`): `/stats` for a
+live snapshot, `/renewals` to trigger the sweep.
+
+Deploy on Render with Root Directory `apps/central-bot` (see its `render.yaml`).
+
 ## Notes / open items
 
 - **Document authenticity**: this mints temporary plates + insurance cards from
   user data. Confirm it runs under an authorized dealer/DMV workflow before
   production.
 - Agent-mode draft state is per-process; fine for a single Render instance.
-- Remaining Phase 2: the central bot/dashboard (SendGrid 28-day renewals,
-  unified transactions view, driver/supervisor management UI).
+- All four parts are now in place. Next steps are wiring live env/secrets,
+  running the migrations, and deploying (2× Vercel, 2× Render).
