@@ -6,8 +6,8 @@ import Success from "./pages/Success";
 function Header() {
   return (
     <header className="mx-auto flex max-w-6xl items-center justify-between px-5 py-5">
-      <Link to="/" className="font-display text-lg font-700 tracking-tight text-ink">
-        TriState<span className="text-issued">Tags</span>
+      <Link to="/" className="font-display text-xl font-700 uppercase tracking-[0.06em] text-ink">
+        <span className="text-issued-deep">NJ</span> Temporary Tag
       </Link>
       <nav className="flex items-center gap-3">
         <a href="#how" className="hidden font-display text-sm font-500 text-slate hover:text-ink sm:block">
@@ -25,7 +25,7 @@ function Footer() {
   return (
     <footer className="mx-auto max-w-6xl px-5 py-10 text-sm text-slate">
       <div className="flex flex-col items-start justify-between gap-3 border-t border-ink/10 pt-6 sm:flex-row sm:items-center">
-        <span>© {new Date().getFullYear()} TriState Tags</span>
+        <span>© {new Date().getFullYear()} NJ Temporary Tag</span>
         <span className="text-slate-light">Temporary registration document service.</span>
       </div>
     </footer>

@@ -9,8 +9,8 @@
 import sgMail from "@sendgrid/mail";
 
 const API_KEY = process.env.SENDGRID_API_KEY || "";
-const FROM = process.env.SENDGRID_FROM || "no-reply@tristatetag.com";
-const FROM_NAME = process.env.APP_NAME || "TriState Tags";
+const FROM = process.env.SENDGRID_FROM || "no-reply@njtemporarytag.com";
+const FROM_NAME = process.env.APP_NAME || "NJ Temporary Tag";
 
 if (API_KEY) sgMail.setApiKey(API_KEY);
 

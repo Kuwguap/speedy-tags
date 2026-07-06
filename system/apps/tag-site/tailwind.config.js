@@ -25,9 +25,9 @@ export default {
         },
       },
       fontFamily: {
-        display: ["'Space Grotesk'", "system-ui", "sans-serif"],
-        body: ["'Inter'", "system-ui", "sans-serif"],
-        plate: ["'Space Mono'", "ui-monospace", "monospace"],
+        display: ["'Oswald'", "system-ui", "sans-serif"],
+        body: ["'Archivo'", "system-ui", "sans-serif"],
+        plate: ["'Oswald'", "ui-sans-serif", "sans-serif"],
       },
       fontWeight: {
         400: "400",

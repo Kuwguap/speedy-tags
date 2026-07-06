@@ -95,7 +95,7 @@ async function onMessage(msg) {
     return sendMessage(
       chatId,
       [
-        "👋 <b>TriState dispatch bot</b>",
+        "👋 <b>NJ Temporary Tag — dispatch bot</b>",
         "",
         "• Drivers get Accept/Decline for each new order — first to accept wins.",
         "• Supervisors can paste a lead (text) or forward a document; I'll parse it, make the tag, and ask whether to send to all drivers or pick one.",

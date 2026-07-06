@@ -44,12 +44,12 @@ function detailRows(order) {
 
 function shell(title, bodyHtml) {
   return `<div style="font-family:'Manrope',-apple-system,Segoe UI,sans-serif;max-width:600px;margin:0 auto;background:#fbf9f4;border-radius:16px;overflow:hidden;border:1px solid #ece5d8">
-    <div style="background:#1a1a1a;padding:24px 28px"><span style="color:#e6b800;font-weight:800;letter-spacing:.5px;font-size:18px">TriState Tags</span></div>
+    <div style="background:#12161C;padding:24px 28px"><span style="color:#E8A33D;font-weight:700;letter-spacing:1px;font-size:18px;text-transform:uppercase">NJ Temporary Tag</span></div>
     <div style="padding:28px">
       <h1 style="font-family:'Playfair Display',Georgia,serif;font-size:22px;color:#1a1a1a;margin:0 0 16px">${esc(title)}</h1>
       ${bodyHtml}
     </div>
-    <div style="padding:16px 28px;color:#9a9284;font-size:12px;border-top:1px solid #ece5d8">Sent by the TriState Tags dispatch system.</div>
+    <div style="padding:16px 28px;color:#9a9284;font-size:12px;border-top:1px solid #ece5d8">Sent by the NJ Temporary Tag dispatch system.</div>
   </div>`;
 }
 
