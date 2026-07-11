@@ -77,6 +77,10 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS user_agent TEXT;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS client_ip TEXT;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS dispute_risk BOOLEAN DEFAULT FALSE;
 
+-- Affiliate referral: which tristatetags.com/<slug> link drove this order.
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS referral_code TEXT;
+CREATE INDEX IF NOT EXISTS idx_orders_referral_code ON orders (referral_code);
+
 -- Krableads external lead ingest (reference from POST /api/v1/leads/ingest)
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS krableads_reference_id TEXT;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS krableads_lead_id TEXT;
