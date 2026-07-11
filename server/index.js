@@ -41,7 +41,7 @@ const DEFAULT_PAYMENT_LINKS = {
   cashApp: "https://cash.app/$tristatetag",
   paypal: "https://www.paypal.com/paypalme/DwayneFrancis53",
   zelle: "https://www.zellepay.com/",
-  applePay: "tel:5513740027",
+  applePay: "tel:5513013737",
 };
 
 const DEFAULT_PAYMENT_DISPLAY = {
@@ -49,7 +49,7 @@ const DEFAULT_PAYMENT_DISPLAY = {
   cashApp: "$tristatetag",
   paypal: "@DwayneFrancis53",
   zelle: "@TriStateTagsPayment",
-  applePay: "5513740027",
+  applePay: "5513013737",
 };
 
 function derivePaymentDisplay(key, link) {
@@ -92,7 +92,7 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 const JWT_SECRET = process.env.JWT_SECRET || "tristatetags-secret-change-in-production";
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
 const STRIPE_WEBHOOK_SECRET = (process.env.STRIPE_WEBHOOK_SECRET || "").trim();
-const APP_URLS = (process.env.APP_URL || process.env.VITE_APP_URL || "http://localhost:8080")
+const APP_URLS = (process.env.APP_URL || process.env.VITE_APP_URL || "http://localhost:8080,https://tristatetags.com,https://tristatetag.com")
   .split(",")
   .map((u) => u.trim().replace(/\/$/, ""))
   .filter(Boolean);
@@ -2807,6 +2807,85 @@ async function persistPaidStripeSession(session, { source = "verify" } = {}) {
   return order;
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Stripe may still be settling when the browser hits verify — poll briefly. */
+async function retrievePaidStripeSession(sessionId, { maxAttempts = 10, delayMs = 1500 } = {}) {
+  if (!stripe) throw new Error("Stripe is not configured.");
+  let lastSession = null;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
+    lastSession = session;
+    if (session.payment_status === "paid") return session;
+    if (session.status === "expired") break;
+    if (attempt < maxAttempts - 1) await sleep(delayMs);
+  }
+  return lastSession;
+}
+
+/** Orders stuck at payment_pending that still carry a real Stripe session id. */
+async function listPendingStripeOrders(limit = 200) {
+  if (useSupabase()) {
+    const { data, error } = await supabase
+      .from("orders")
+      .select("stripe_session_id, created_at")
+      .eq("payment_status", "payment_pending")
+      .is("paid_at", null)
+      .not("stripe_session_id", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(limit);
+    if (error) {
+      console.warn("[reconcile] list error:", error.message);
+      return [];
+    }
+    return (data || []).map((r) => ({ sessionId: r.stripe_session_id, createdAt: r.created_at }));
+  }
+  const orders = loadJson(ORDERS_FILE, []);
+  return orders
+    .filter((o) => o.paymentStatus === "payment_pending" && !o.paidAt && o.stripeSessionId)
+    .map((o) => ({ sessionId: o.stripeSessionId, createdAt: o.createdAt }));
+}
+
+/**
+ * Safety net for the webhook: poll Stripe for orders left at payment_pending and
+ * finalize any that actually paid. This is what "stops the bleeding" when the
+ * customer never returns to the success page AND the webhook is down/misconfigured.
+ * Idempotent (persistPaidStripeSession patches, never duplicates).
+ */
+let reconcileRunning = false;
+async function reconcilePendingStripeOrders() {
+  if (!stripe || reconcileRunning) return 0;
+  reconcileRunning = true;
+  let recovered = 0;
+  try {
+    const pending = await listPendingStripeOrders();
+    // Stripe Checkout sessions expire ~24h after creation; look back 3 days so
+    // we skip long-dead sessions instead of retrieving them every sweep.
+    const cutoff = Date.now() - 3 * 24 * 60 * 60 * 1000;
+    for (const { sessionId, createdAt } of pending) {
+      if (!sessionId || sessionId.startsWith("test_")) continue;
+      if (createdAt && new Date(createdAt).getTime() < cutoff) continue;
+      try {
+        const session = await stripe.checkout.sessions.retrieve(sessionId);
+        if (session && session.payment_status === "paid") {
+          await persistPaidStripeSession(session, { source: "reconcile" });
+          recovered++;
+        }
+      } catch {
+        /* expired/deleted session — ignore */
+      }
+    }
+    if (recovered) console.log(`[reconcile] finalized ${recovered} paid-but-pending order(s)`);
+  } catch (e) {
+    console.warn("[reconcile] sweep failed:", e?.message || e);
+  } finally {
+    reconcileRunning = false;
+  }
+  return recovered;
+}
+
 /**
  * Stripe webhook — fires when a Checkout Session is paid, regardless of
  * whether the customer's browser made it back to the verify page. Without
@@ -2864,9 +2943,12 @@ app.get("/api/checkout/verify", async (req, res) => {
 
   if (!stripe) return res.status(503).json({ error: "Stripe is not configured." });
   try {
-    const session = await stripe.checkout.sessions.retrieve(sessionId);
-    if (session.payment_status !== "paid") {
-      return res.status(400).json({ error: "Payment not completed", paymentStatus: session.payment_status });
+    const session = await retrievePaidStripeSession(sessionId);
+    if (!session || session.payment_status !== "paid") {
+      return res.status(400).json({
+        error: "Payment not completed",
+        paymentStatus: session?.payment_status || "unknown",
+      });
     }
     const order = await persistPaidStripeSession(session, { source: "verify" });
     if (!order) return res.status(500).json({ error: "Failed to record order" });
@@ -3393,6 +3475,16 @@ app.get("/api/admin/orders", authMiddleware, async (req, res) => {
   }
 });
 
+// Force the Stripe reconciliation sweep now (recover paid-but-pending orders).
+app.post("/api/admin/reconcile-pending", authMiddleware, async (req, res) => {
+  try {
+    const recovered = await reconcilePendingStripeOrders();
+    res.json({ ok: true, recovered });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 app.get("/api/admin/services", authMiddleware, async (req, res) => {
   try {
     const data = await loadServices();
@@ -3680,6 +3772,13 @@ const server = app.listen(PORT, () => {
   }
   if (useSupabase()) console.log("Using Supabase"); else console.log("Using file storage");
   void ensureTelegramWebhookOnStartup();
+  // Safety net: reconcile paid-but-pending Stripe orders even if the webhook is
+  // down/misconfigured or the customer never returns to the success page.
+  if (stripe) {
+    setTimeout(() => void reconcilePendingStripeOrders(), 20000);
+    setInterval(() => void reconcilePendingStripeOrders(), 3 * 60 * 1000);
+    console.log("[reconcile] Stripe pending-order sweep active (every 3 min)");
+  }
 });
 
 server.on("error", (err) => {
