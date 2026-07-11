@@ -509,6 +509,7 @@ async function saveOrder(order) {
     if (order.leadToken) row.lead_token = order.leadToken;
     if (order.userAgent) row.user_agent = order.userAgent;
     if (order.clientIp) row.client_ip = order.clientIp;
+    if (order.referralCode) row.referral_code = order.referralCode;
     await supabaseInsertResilient("orders", row);
     return;
   }
@@ -626,6 +627,62 @@ async function saveSettings(updates) {
   saveJson(SETTINGS_FILE, s);
 }
 
+// ─── Affiliates (admin-managed referral links: tristatetags.com/<slug>) ───────
+// Stored under the settings key "affiliates" (same pattern as telegram_dispatchers),
+// so no extra table/migration is needed and it works in both Supabase and file mode.
+function slugifyAffiliate(v) {
+  return String(v || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^\/+/, "")
+    .replace(/[^a-z0-9_-]/g, "")
+    .slice(0, 40);
+}
+function normalizeAffiliates(val) {
+  let arr = val;
+  if (typeof arr === "string") {
+    try {
+      arr = JSON.parse(arr);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(arr)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const a of arr) {
+    const slug = slugifyAffiliate(a?.slug ?? a?.name);
+    if (!slug || seen.has(slug)) continue;
+    seen.add(slug);
+    out.push({
+      slug,
+      label: String(a?.label ?? a?.name ?? slug).trim() || slug,
+      telegramId: canonicalChatId(a?.telegramId ?? a?.telegram_id ?? ""),
+      active: a?.active !== false,
+      createdAt: a?.createdAt || a?.created_at || null,
+    });
+  }
+  return out;
+}
+async function loadAffiliates() {
+  if (useSupabase()) {
+    const { data } = await supabase.from("settings").select("value").eq("key", "affiliates").maybeSingle();
+    return normalizeAffiliates(data?.value);
+  }
+  const s = loadJson(SETTINGS_FILE, defaultSettings);
+  return normalizeAffiliates(s.affiliates);
+}
+async function saveAffiliates(list) {
+  const clean = normalizeAffiliates(list);
+  await saveSettings({ affiliates: clean });
+  return clean;
+}
+async function findAffiliate(slug) {
+  const s = slugifyAffiliate(slug);
+  if (!s) return null;
+  return (await loadAffiliates()).find((a) => a.slug === s) || null;
+}
+
 async function findOrderById(id) {
   if (useSupabase()) {
     const { data, error } = await supabase.from("orders").select("*").eq("id", id).single();
@@ -680,6 +737,7 @@ async function updateOrder(id, updates) {
     if (updates.deliveryEmail != null) row.delivery_email = updates.deliveryEmail;
     if (updates.deliveryPhone != null) row.delivery_phone = updates.deliveryPhone;
     if (updates.productChoice != null) row.product_choice = updates.productChoice;
+    if (updates.referralCode != null) row.referral_code = updates.referralCode;
     if (updates.paymentStatus != null) row.payment_status = updates.paymentStatus;
     if (updates.stripeSessionId != null) row.stripe_session_id = updates.stripeSessionId;
     if (updates.checkoutStatus != null) row.checkout_status = updates.checkoutStatus;
@@ -743,6 +801,7 @@ async function updateOrder(id, updates) {
     deliveryEmail: updates.deliveryEmail ?? orders[idx].deliveryEmail,
     deliveryPhone: updates.deliveryPhone ?? orders[idx].deliveryPhone,
     productChoice: updates.productChoice ?? orders[idx].productChoice,
+    referralCode: updates.referralCode ?? orders[idx].referralCode,
     paymentStatus: updates.paymentStatus ?? orders[idx].paymentStatus,
     stripeSessionId: updates.stripeSessionId ?? orders[idx].stripeSessionId,
     checkoutStatus: updates.checkoutStatus ?? orders[idx].checkoutStatus,
@@ -849,6 +908,7 @@ function orderRowToApi(row) {
     deliveryScheduledAt: row.delivery_scheduled_at,
     deliveryPhone: row.delivery_phone,
     productChoice: row.product_choice,
+    referralCode: row.referral_code || null,
     vehicleInfo: row.vehicle_info,
     insuranceCompany: row.insurance_company,
     policyNumber: row.policy_number,
@@ -2410,6 +2470,7 @@ app.post("/api/checkout/lead", async (req, res) => {
     const nowIso = new Date().toISOString();
 
     const safeStr = (v, max) => (typeof v === "string" ? v.slice(0, max) : null);
+    const refCode = slugifyAffiliate(body.referralCode) || null;
     const fieldUpdates = {
       deliveryMethod: safeStr(body.deliveryMethod, 20),
       deliveryEmail: safeStr(body.deliveryEmail, 200),
@@ -2437,6 +2498,8 @@ app.post("/api/checkout/lead", async (req, res) => {
 
     if (existing) {
       const id = existing.id;
+      // First-touch attribution: only set the referral if this lead has none yet.
+      if (refCode && !(existing.referral_code || existing.referralCode)) fieldUpdates.referralCode = refCode;
       await updateOrder(id, fieldUpdates);
       const refreshed = await findOrderById(id);
       const apiShape = useSupabase() ? orderRowToApi(refreshed) : refreshed;
@@ -2471,6 +2534,7 @@ app.post("/api/checkout/lead", async (req, res) => {
       leadStartedAt: nowIso,
       lastActivityAt: nowIso,
       leadToken: safeToken,
+      referralCode: refCode,
       userAgent,
       clientIp,
       telegramSent: false,
@@ -2512,6 +2576,7 @@ app.post("/api/checkout/create-session", async (req, res) => {
   const checkoutLineItemName = pricing.lineItemName;
   const resolvedServiceTitle = pricing.serviceTitle || body.serviceTitle || null;
   const leadToken = String(body.leadToken || "").trim() || null;
+  const refCode = slugifyAffiliate(body.referralCode) || null;
   let baseUrl = "";
   if (body.successOrigin && typeof body.successOrigin === "string") {
     const origin = body.successOrigin.trim().replace(/\/$/, "");
@@ -2633,6 +2698,7 @@ app.post("/api/checkout/create-session", async (req, res) => {
         serviceTitle: String(resolvedServiceTitle || checkoutLineItemName).slice(0, 100),
         amount: String(amount),
         leadToken: leadToken || "",
+        referralCode: refCode || "",
       },
     });
     // Mark the existing lead as "payment_pending" so we can reach customers who
@@ -2654,6 +2720,8 @@ app.post("/api/checkout/create-session", async (req, res) => {
         deliveryAddress: body.deliveryAddress || null,
         deliveryPhone: body.deliveryPhone || null,
         productChoice: body.productChoice || null,
+        // First-touch attribution: keep an earlier referral if one is already set.
+        ...(refCode && !(existingLead.referral_code || existingLead.referralCode) ? { referralCode: refCode } : {}),
       });
     }
     res.json({ url: session.url });
@@ -2664,6 +2732,36 @@ app.post("/api/checkout/create-session", async (req, res) => {
 });
 
 // Verify Stripe payment and create order (server-side verification)
+/**
+ * Ping the affiliate whose link drove this sale (in addition to everyone's
+ * normal notifications). Called once, at the moment an order first becomes paid.
+ * Best-effort: never throws.
+ */
+async function notifyAffiliateOfSale(order) {
+  try {
+    const code = order?.referralCode || order?.referral_code;
+    if (!code) return;
+    const aff = await findAffiliate(code);
+    if (!aff || !aff.active || !aff.telegramId) return;
+    const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const who = `${order.firstName || order.first_name || ""} ${order.lastName || order.last_name || ""}`.trim();
+    const amt = normalizeOrderPrice(order.price);
+    const text = [
+      "💰 <b>Sale from your link!</b>",
+      `Link: <b>tristatetags.com/${esc(aff.slug)}</b>`,
+      amt > 0 ? `Amount: <b>$${amt.toFixed(2)}</b>` : null,
+      who ? `Customer: ${esc(who)}` : null,
+      (order.productChoice || order.product_choice) ? `Product: ${esc(order.productChoice || order.product_choice)}` : null,
+    ]
+      .filter(Boolean)
+      .join("\n");
+    await sendToTelegram(text, [aff.telegramId]);
+    console.log(`[affiliate] notified ${aff.slug} of a sale`);
+  } catch (e) {
+    console.warn("[affiliate] notify failed:", e?.message || e);
+  }
+}
+
 /**
  * Finalize a paid Stripe Checkout session into an admin order row. Shared by
  * the customer-side /api/checkout/verify (when the browser comes back) and
@@ -2685,7 +2783,8 @@ async function persistPaidStripeSession(session, { source = "verify" } = {}) {
       patch.price = resolvedPrice;
       apiShape = { ...apiShape, price: resolvedPrice };
     }
-    if (!apiShape.paidAt) {
+    const becamePaid = !apiShape.paidAt;
+    if (becamePaid) {
       patch.paidAt = nowIso;
       patch.checkoutStatus =
         apiShape.checkoutStatus === "tag_info_submitted" ||
@@ -2697,6 +2796,7 @@ async function persistPaidStripeSession(session, { source = "verify" } = {}) {
     if (Object.keys(patch).length > 1) {
       await updateOrder(apiShape.id, patch);
     }
+    if (becamePaid) await notifyAffiliateOfSale(apiShape);
     return apiShape;
   }
 
@@ -2752,7 +2852,9 @@ async function persistPaidStripeSession(session, { source = "verify" } = {}) {
       source,
     });
     const refreshed = await findOrderById(orderId);
-    return useSupabase() ? orderRowToApi(refreshed) : refreshed;
+    const finalOrder = useSupabase() ? orderRowToApi(refreshed) : refreshed;
+    await notifyAffiliateOfSale(finalOrder);
+    return finalOrder;
   }
 
   const order = {
@@ -2783,6 +2885,7 @@ async function persistPaidStripeSession(session, { source = "verify" } = {}) {
     paidAt: nowIso,
     lastActivityAt: nowIso,
     leadToken: leadToken || null,
+    referralCode: slugifyAffiliate(meta.referralCode) || null,
     telegramSent: false,
     telegramRecipients: [],
     telegramErrors: [],
@@ -2804,6 +2907,7 @@ async function persistPaidStripeSession(session, { source = "verify" } = {}) {
     source,
   });
   await saveOrder(order);
+  await notifyAffiliateOfSale(order);
   return order;
 }
 
@@ -3482,6 +3586,48 @@ app.post("/api/admin/reconcile-pending", authMiddleware, async (req, res) => {
     res.json({ ok: true, recovered });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ─── Affiliate referral links (admin-managed) ────────────────────────────────
+// Public: does this slug map to a real affiliate? (lets the landing show a badge)
+app.get("/api/affiliate/:slug", async (req, res) => {
+  const aff = await findAffiliate(req.params.slug);
+  res.json({ slug: slugifyAffiliate(req.params.slug), exists: !!(aff && aff.active), label: aff?.label || null });
+});
+// Admin: list / upsert / delete affiliates.
+app.get("/api/admin/affiliates", authMiddleware, async (_req, res) => {
+  res.json(await loadAffiliates());
+});
+app.post("/api/admin/affiliates", authMiddleware, async (req, res) => {
+  const slug = slugifyAffiliate(req.body?.slug ?? req.body?.name);
+  if (!slug) return res.status(400).json({ error: "A link name is required (letters, numbers, dashes)." });
+  const list = await loadAffiliates();
+  const idx = list.findIndex((a) => a.slug === slug);
+  const entry = {
+    slug,
+    label: String(req.body?.label ?? req.body?.name ?? slug).trim() || slug,
+    telegramId: canonicalChatId(req.body?.telegramId ?? req.body?.telegram_id ?? ""),
+    active: req.body?.active !== false,
+    createdAt: idx >= 0 ? list[idx].createdAt : new Date().toISOString(),
+  };
+  if (idx >= 0) list[idx] = entry;
+  else list.push(entry);
+  try {
+    const saved = await saveAffiliates(list);
+    res.json({ ok: true, affiliates: saved });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+app.delete("/api/admin/affiliates/:slug", authMiddleware, async (req, res) => {
+  const slug = slugifyAffiliate(req.params.slug);
+  const list = (await loadAffiliates()).filter((a) => a.slug !== slug);
+  try {
+    const saved = await saveAffiliates(list);
+    res.json({ ok: true, affiliates: saved });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 

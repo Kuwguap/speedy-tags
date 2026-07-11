@@ -1,3 +1,5 @@
+import { getReferralCode } from "./referral";
+
 const API_BASE = import.meta.env.VITE_API_URL
   ? `${import.meta.env.VITE_API_URL.replace(/\/$/, "")}/api`
   : "/api";
@@ -14,13 +16,23 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
       ...options.headers,
     },
   });
-  const data = await res.json().catch(() => ({}));
+  const text = await res.text();
+  let data: Record<string, unknown> = {};
+  if (text) {
+    try {
+      data = JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      if (text.trim().startsWith("<!")) {
+        throw new Error(res.ok ? "Invalid server response" : "Server unavailable — please retry");
+      }
+    }
+  }
   if (!res.ok) {
-    const msg = data.error || res.statusText;
+    const msg = (typeof data.error === "string" && data.error) || res.statusText;
     if (res.status === 401) throw new Error("Unauthorized");
     throw new Error(msg);
   }
-  return data;
+  return data as T;
 }
 
 export const api = {
@@ -48,6 +60,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify({
         ...data,
+        referralCode: getReferralCode(),
         successOrigin: typeof window !== "undefined" ? window.location.origin : undefined,
       }),
     }),
@@ -63,7 +76,11 @@ export const api = {
   }) =>
     request<{ leadToken: string; orderId: string; order: OrderRecord }>(
       "/checkout/lead",
-      { method: "POST", body: JSON.stringify(data) },
+      { method: "POST", body: JSON.stringify({ ...data, referralCode: getReferralCode() }) },
+    ),
+  checkAffiliate: (slug: string) =>
+    request<{ slug: string; exists: boolean; label: string | null }>(
+      "/affiliate/" + encodeURIComponent(slug),
     ),
   verifyCheckoutSession: (sessionId: string, isTest?: boolean) =>
     request<OrderRecord>("/checkout/verify?session_id=" + encodeURIComponent(sessionId) + (isTest ? "&test=1" : "")),
@@ -138,6 +155,16 @@ export const api = {
     paymentDisplay?: { venmo: string; cashApp: string; paypal: string; zelle: string; applePay: string };
   }) =>
     request<{ tagPrice: number; insuranceMonthlyPrice: number; insuranceYearlyPrice: number; overnightFedexFee: number; testMode: boolean; telegramDispatchers: TelegramDispatcher[]; fallbackClaimTimeoutMs: number; paymentLinks: { venmo: string; cashApp: string; paypal: string; zelle: string; applePay: string }; paymentDisplay: { venmo: string; cashApp: string; paypal: string; zelle: string; applePay: string } }>("/admin/settings", { method: "PATCH", body: JSON.stringify(s) }),
+  getAffiliates: () => request<Affiliate[]>("/admin/affiliates"),
+  saveAffiliate: (a: { slug: string; label?: string; telegramId?: string; active?: boolean }) =>
+    request<{ ok: boolean; affiliates: Affiliate[] }>("/admin/affiliates", {
+      method: "POST",
+      body: JSON.stringify(a),
+    }),
+  deleteAffiliate: (slug: string) =>
+    request<{ ok: boolean; affiliates: Affiliate[] }>(`/admin/affiliates/${encodeURIComponent(slug)}`, {
+      method: "DELETE",
+    }),
   getTelegramWebhook: () =>
     request<{ info: TelegramWebhookInfo; expectedUrl: string }>("/admin/telegram/webhook"),
   setTelegramWebhook: (url?: string) =>
@@ -167,6 +194,14 @@ export interface TelegramDispatcher {
   dispatcherId: string;
   groupId: string;
   groupName: string;
+}
+
+export interface Affiliate {
+  slug: string;
+  label: string;
+  telegramId: string;
+  active: boolean;
+  createdAt: string | null;
 }
 
 export interface TelegramWebhookInfo {
@@ -205,6 +240,7 @@ export interface OrderRecord {
   deliverySlot?: string;
   deliveryScheduledAt?: string;
   productChoice?: string;
+  referralCode?: string | null;
   vin: string;
   carMakeModel: string;
   color: string;

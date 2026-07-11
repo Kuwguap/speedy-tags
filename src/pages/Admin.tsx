@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { api, type ServiceRecord, type OrderRecord, type AdminStats, type TelegramDispatcher, type TelegramWebhookInfo } from "@/lib/api";
+import { api, type ServiceRecord, type OrderRecord, type AdminStats, type TelegramDispatcher, type TelegramWebhookInfo, type Affiliate } from "@/lib/api";
 import { deliveryMethodLabel, productChoiceLabel } from "@/lib/checkout-pricing";
 
 const CHECKOUT_STATUS_FILTERS = [
@@ -197,6 +197,16 @@ function OrderDetailBlock({
           />
         ) : null}
         <Field label="Product choice" value={productChoiceLabel(order.productChoice)} />
+        {order.referralCode ? (
+          <Field
+            label="Referral source"
+            value={
+              <Badge variant="secondary" className="bg-primary/10 text-primary text-xs">
+                /{order.referralCode}
+              </Badge>
+            }
+          />
+        ) : null}
         <Field
           label="Stripe session"
           value={
@@ -423,6 +433,31 @@ export default function Admin() {
   const [webhookCustomUrl, setWebhookCustomUrl] = useState("");
   const [orderDetail, setOrderDetail] = useState<OrderRecord | null>(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [affiliates, setAffiliates] = useState<Affiliate[]>([]);
+  const [affForm, setAffForm] = useState({ slug: "", label: "", telegramId: "" });
+  const [affBusy, setAffBusy] = useState(false);
+
+  const saveAffiliate = async (a: { slug: string; label?: string; telegramId?: string; active?: boolean }) => {
+    setAffBusy(true);
+    try {
+      const res = await api.saveAffiliate(a);
+      setAffiliates(res.affiliates);
+      setAffForm({ slug: "", label: "", telegramId: "" });
+      toast({ title: "Affiliate link saved" });
+    } catch (err) {
+      toast({ title: "Could not save", description: err instanceof Error ? err.message : "", variant: "destructive" });
+    } finally {
+      setAffBusy(false);
+    }
+  };
+  const removeAffiliate = async (slug: string) => {
+    try {
+      const res = await api.deleteAffiliate(slug);
+      setAffiliates(res.affiliates);
+    } catch (err) {
+      toast({ title: "Could not remove", description: err instanceof Error ? err.message : "", variant: "destructive" });
+    }
+  };
 
   async function refreshWebhookInfo() {
     setWebhookLoading(true);
@@ -456,16 +491,18 @@ export default function Admin() {
     if (!t) return;
     setLoading(true);
     try {
-      const [svc, ord, st, sett] = await Promise.all([
+      const [svc, ord, st, sett, affs] = await Promise.all([
         api.getServicesAdmin(),
         api.getOrders(),
         api.getStats(),
         api.getSettings(),
+        api.getAffiliates().catch(() => [] as Affiliate[]),
       ]);
       setServices(svc);
       setOrders(ord);
       setStats(st);
       setSettings(sett);
+      setAffiliates(affs);
       setIsAuthenticated(true);
     } catch (err) {
       if (err instanceof Error && (err.message.includes("401") || err.message.includes("Unauthorized"))) {
@@ -1126,7 +1163,7 @@ export default function Admin() {
                         key === "cashApp" ? "https://cash.app/$tristatetag" :
                         key === "paypal" ? "https://www.paypal.com/paypalme/..." :
                         key === "zelle" ? "https://www.zellepay.com/" :
-                        "tel:5513740027"
+                        "tel:5513013737"
                       }
                       value={settings?.paymentLinks?.[key as keyof typeof settings.paymentLinks] ?? ""}
                       onChange={(e) =>
@@ -1147,7 +1184,7 @@ export default function Admin() {
                     <div>
                       <Label className="text-xs text-muted-foreground">Display under button (e.g. @handle, $tag, or email)</Label>
                       <Input
-                        placeholder={key === "venmo" ? "@TriStateTags" : key === "cashApp" ? "$tristatetag" : key === "zelle" ? "@TriStateTagsPayment" : key === "applePay" ? "5513740027" : ""}
+                        placeholder={key === "venmo" ? "@TriStateTags" : key === "cashApp" ? "$tristatetag" : key === "zelle" ? "@TriStateTagsPayment" : key === "applePay" ? "5513013737" : ""}
                         value={settings?.paymentDisplay?.[key as keyof typeof settings.paymentDisplay] ?? ""}
                         onChange={(e) =>
                           setSettings((s) =>
@@ -1230,6 +1267,113 @@ export default function Admin() {
                     Save Settings above to persist dispatchers. When any dispatchers are configured, new orders use first-to-accept flow instead of TELEGRAM_CHAT_IDS.
                   </p>
                 )}
+              </CardContent>
+            </Card>
+
+            <Card className="shadow-card border-border/50">
+              <CardHeader>
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <Send className="h-4 w-4" /> Affiliate links
+                </CardTitle>
+                <p className="text-sm text-muted-foreground">
+                  Give each driver/dispatcher a link like <code>tristatetags.com/name</code>. When someone buys through it, the sale is tagged with that name and their Telegram gets pinged (in addition to everyone else). Saves instantly.
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {affiliates.map((a) => {
+                  const link = `${typeof window !== "undefined" ? window.location.origin : "https://tristatetags.com"}/${a.slug}`;
+                  return (
+                    <div key={a.slug} className="flex flex-wrap gap-3 items-end p-4 rounded-lg bg-muted/40 border border-border/50">
+                      <div className="flex-1 min-w-[180px]">
+                        <Label className="text-xs">Link</Label>
+                        <div className="flex items-center gap-2">
+                          <code className="text-xs break-all">{link}</code>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-7 px-2 text-xs shrink-0"
+                            onClick={() => {
+                              navigator.clipboard?.writeText(link).then(() => toast({ title: "Link copied" })).catch(() => {});
+                            }}
+                          >
+                            Copy
+                          </Button>
+                        </div>
+                        <div className="text-xs text-muted-foreground mt-1">{a.label}</div>
+                      </div>
+                      <div className="flex-1 min-w-[150px]">
+                        <Label className="text-xs">Their Telegram chat ID</Label>
+                        <Input
+                          placeholder="123456789"
+                          defaultValue={a.telegramId}
+                          className="font-mono text-sm"
+                          onBlur={(e) => {
+                            const v = e.target.value.trim();
+                            if (v !== (a.telegramId || "")) saveAffiliate({ slug: a.slug, label: a.label, telegramId: v, active: a.active });
+                          }}
+                        />
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => saveAffiliate({ slug: a.slug, label: a.label, telegramId: a.telegramId, active: !a.active })}
+                        className="shrink-0"
+                      >
+                        {a.active ? "Active" : "Off"}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => removeAffiliate(a.slug)}
+                        className="text-destructive hover:text-destructive shrink-0"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  );
+                })}
+                <div className="flex flex-wrap gap-3 items-end p-4 rounded-lg border border-dashed border-border/60">
+                  <div className="flex-1 min-w-[120px]">
+                    <Label className="text-xs">Link name (the /slug)</Label>
+                    <Input
+                      placeholder="pavle"
+                      value={affForm.slug}
+                      onChange={(e) => setAffForm((f) => ({ ...f, slug: e.target.value }))}
+                    />
+                  </div>
+                  <div className="flex-1 min-w-[120px]">
+                    <Label className="text-xs">Person's name (label)</Label>
+                    <Input
+                      placeholder="Pavle"
+                      value={affForm.label}
+                      onChange={(e) => setAffForm((f) => ({ ...f, label: e.target.value }))}
+                    />
+                  </div>
+                  <div className="flex-1 min-w-[140px]">
+                    <Label className="text-xs">Their Telegram chat ID</Label>
+                    <Input
+                      placeholder="123456789"
+                      className="font-mono text-sm"
+                      value={affForm.telegramId}
+                      onChange={(e) => setAffForm((f) => ({ ...f, telegramId: e.target.value }))}
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={affBusy || !affForm.slug.trim()}
+                    onClick={() => saveAffiliate({ slug: affForm.slug, label: affForm.label || affForm.slug, telegramId: affForm.telegramId })}
+                    className="gap-2"
+                  >
+                    <Plus className="h-4 w-4" /> Add link
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  The person messages your Telegram bot once so it can DM them — paste their numeric chat ID here. Leave it blank to just track the source without pinging anyone.
+                </p>
               </CardContent>
             </Card>
 
@@ -1453,6 +1597,11 @@ export default function Admin() {
                                 )}
                               </div>
                               <div className="text-xs text-muted-foreground">{contactLine}</div>
+                              {o.referralCode && (
+                                <Badge variant="secondary" className="bg-primary/10 text-primary text-[10px] mt-1">
+                                  /{o.referralCode}
+                                </Badge>
+                              )}
                             </TableCell>
                             <TableCell className="text-xs">
                               <div>{deliveryMethodLabel(o.deliveryMethod)}</div>

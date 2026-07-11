@@ -18,6 +18,7 @@ import Privacy from "./pages/Privacy";
 import Payments from "./pages/Payments";
 import SecurePhone from "./pages/SecurePhone";
 import NotFound from "./pages/NotFound";
+import ReferralLanding from "./pages/ReferralLanding";
 import InterviewLanding from "./pages/interview/InterviewLanding";
 import InterviewRequirements from "./pages/interview/InterviewRequirements";
 import InterviewApply from "./pages/interview/InterviewApply";
@@ -54,6 +55,8 @@ const App = () => (
             <Route path="/interview/apply" element={<InterviewApply />} />
             <Route path="/interview/telegram" element={<InterviewTelegram />} />
             <Route path="/interview/*" element={<InterviewLanding />} />
+            {/* Affiliate links: tristatetags.com/<slug>. Must stay last before the catch-all. */}
+            <Route path="/:refCode" element={<ReferralLanding />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </CheckoutProvider>
