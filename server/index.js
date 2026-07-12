@@ -1933,6 +1933,37 @@ async function sweepAbandonedCarts() {
     }
   }
   if (sent > 0) console.log(`[AbandonedCart] sweep sent ${sent} reminder email(s)`);
+  return sent;
+}
+
+// Send a follow-up reminder to a single order right now (admin-triggered).
+// `force` bypasses the 1h/1wk timing gates but still respects unsubscribe and
+// only targets genuinely unfinished orders. Returns { ok, sent, reason, stage }.
+async function sendFollowupForOrder(order, { force = true } = {}) {
+  if (!resend) return { ok: false, reason: "email_not_configured" };
+  if (!order || !order.id) return { ok: false, reason: "not_found" };
+  if (order.marketingUnsubscribedAt) return { ok: false, reason: "unsubscribed" };
+  if (!isUnfinishedOrder(order)) return { ok: false, reason: "already_completed" };
+  if (!String(order.deliveryEmail || "").trim()) return { ok: false, reason: "no_email" };
+  const stage = order.abandonedReminder1SentAt ? 2 : 1;
+  const key = `${order.id}:${stage}`;
+  if (!force) {
+    if (stage === 1 && order.abandonedReminder1SentAt) return { ok: false, reason: "already_sent" };
+    if (stage === 2 && order.abandonedReminder2SentAt) return { ok: false, reason: "already_sent" };
+  }
+  _abandonedSentKeys.add(key);
+  const okSent = await sendAbandonedCartEmail(order, stage);
+  if (!okSent) {
+    _abandonedSentKeys.delete(key);
+    return { ok: false, reason: "send_failed", stage };
+  }
+  const field = stage === 2 ? "abandonedReminder2SentAt" : "abandonedReminder1SentAt";
+  try {
+    await updateOrder(order.id, { [field]: new Date().toISOString() });
+  } catch (e) {
+    console.warn("[AbandonedCart] manual flag persist failed:", e?.message || e);
+  }
+  return { ok: true, sent: 1, stage };
 }
 
 function formatOrderMessage(order) {
@@ -3885,6 +3916,30 @@ app.post("/api/admin/reconcile-pending", authMiddleware, async (req, res) => {
   try {
     const recovered = await reconcilePendingStripeOrders();
     res.json({ ok: true, recovered });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// Run the abandoned-cart follow-up email sweep now (1h + weekly nudges),
+// instead of waiting for the 15-min timer. Returns how many emails were sent.
+app.post("/api/admin/abandoned/run", authMiddleware, async (req, res) => {
+  try {
+    if (!resend) return res.json({ ok: false, error: "RESEND_API_KEY not configured", sent: 0 });
+    const sent = await sweepAbandonedCarts();
+    res.json({ ok: true, sent: sent || 0 });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// Send a follow-up reminder to one specific order now (admin "Send follow-up").
+app.post("/api/admin/orders/:id/send-followup", authMiddleware, async (req, res) => {
+  try {
+    const order = orderRowToApi(await findOrderById(req.params.id));
+    if (!order || !order.id) return res.status(404).json({ ok: false, reason: "not_found" });
+    const result = await sendFollowupForOrder(order, { force: true });
+    res.json(result);
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }
