@@ -172,6 +172,15 @@ export const api = {
       method: "POST",
       body: JSON.stringify(url ? { url } : {}),
     }),
+  runAbandonedSweep: () =>
+    request<{ ok: boolean; sent: number; error?: string }>("/admin/abandoned/run", {
+      method: "POST",
+    }),
+  sendOrderFollowup: (id: string) =>
+    request<{ ok: boolean; sent?: number; stage?: number; reason?: string; error?: string }>(
+      `/admin/orders/${encodeURIComponent(id)}/send-followup`,
+      { method: "POST" },
+    ),
 };
 
 export interface TagInfoFields {
@@ -278,6 +287,10 @@ export interface OrderRecord {
   krableadsLeadId?: string | null;
   krableadsIngestedAt?: string | null;
   krableadsIngestError?: string | null;
+  supervisorNotifiedAt?: string | null;
+  abandonedReminder1SentAt?: string | null;
+  abandonedReminder2SentAt?: string | null;
+  marketingUnsubscribedAt?: string | null;
 }
 
 export interface AdminStats {

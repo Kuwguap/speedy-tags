@@ -459,6 +459,75 @@ export default function Admin() {
     }
   };
 
+  const [followupBusy, setFollowupBusy] = useState(false);
+  const [followupOrderId, setFollowupOrderId] = useState<string | null>(null);
+
+  const runFollowupSweep = async () => {
+    setFollowupBusy(true);
+    try {
+      const res = await api.runAbandonedSweep();
+      if (res.ok) {
+        toast({
+          title: res.sent > 0 ? `Sent ${res.sent} follow-up email${res.sent === 1 ? "" : "s"}` : "No follow-ups due",
+          description:
+            res.sent > 0
+              ? "Reminders went out to shoppers who haven't finished checkout."
+              : "Nobody is due for a 1-hour or weekly reminder right now.",
+        });
+        try {
+          setOrders(await api.getOrders());
+        } catch {
+          /* non-fatal refresh */
+        }
+      } else {
+        toast({ title: "Could not run follow-ups", description: res.error || "", variant: "destructive" });
+      }
+    } catch (err) {
+      toast({ title: "Could not run follow-ups", description: err instanceof Error ? err.message : "", variant: "destructive" });
+    } finally {
+      setFollowupBusy(false);
+    }
+  };
+
+  const REASON_LABELS: Record<string, string> = {
+    unsubscribed: "This customer unsubscribed from reminders.",
+    already_completed: "This order is already paid/complete — no reminder needed.",
+    no_email: "No delivery email on file to send to.",
+    email_not_configured: "Email isn't configured on the server (RESEND_API_KEY).",
+    send_failed: "The email provider rejected the send.",
+    not_found: "Order not found.",
+  };
+
+  const sendOrderFollowup = async (order: OrderRecord) => {
+    setFollowupOrderId(order.id);
+    try {
+      const res = await api.sendOrderFollowup(order.id);
+      if (res.ok) {
+        toast({
+          title: `Follow-up sent (${res.stage === 2 ? "weekly" : "1-hour"} reminder)`,
+          description: order.deliveryEmail ? `Emailed ${order.deliveryEmail}` : undefined,
+        });
+        try {
+          const fresh = await api.getOrders();
+          setOrders(fresh);
+          setOrderDetail((prev) => (prev && prev.id === order.id ? fresh.find((o) => o.id === order.id) || prev : prev));
+        } catch {
+          /* non-fatal refresh */
+        }
+      } else {
+        toast({
+          title: "Not sent",
+          description: REASON_LABELS[res.reason || ""] || res.error || res.reason || "",
+          variant: "destructive",
+        });
+      }
+    } catch (err) {
+      toast({ title: "Not sent", description: err instanceof Error ? err.message : "", variant: "destructive" });
+    } finally {
+      setFollowupOrderId(null);
+    }
+  };
+
   async function refreshWebhookInfo() {
     setWebhookLoading(true);
     try {
@@ -1469,6 +1538,23 @@ export default function Admin() {
               if they never finish. Use the &quot;Paid but unfinished&quot; filter to find
               clients who could dispute their charge.
             </p>
+            <Card className="shadow-card border-border/50 p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-foreground">Abandoned-cart follow-ups</p>
+                <p className="text-xs text-muted-foreground">
+                  Emails shoppers who started but didn&apos;t finish checkout — a nudge after 1 hour and again after a week.
+                  This runs automatically; tap to send any that are due right now.
+                </p>
+              </div>
+              <Button
+                onClick={runFollowupSweep}
+                disabled={followupBusy}
+                className="cursor-pointer shrink-0 h-11 sm:h-9"
+              >
+                <Send className="h-4 w-4 mr-2" />
+                {followupBusy ? "Sending…" : "Send follow-up emails"}
+              </Button>
+            </Card>
             <div className="space-y-2">
               <Input
                 placeholder="Search name, email, phone, Stripe ID…"
@@ -1797,10 +1883,47 @@ export default function Admin() {
               </DialogTitle>
             </DialogHeader>
             {orderDetail && (
-              <OrderDetailBlock
-                order={orderDetail}
-                dispatchers={settings?.telegramDispatchers ?? []}
-              />
+              <>
+                <OrderDetailBlock
+                  order={orderDetail}
+                  dispatchers={settings?.telegramDispatchers ?? []}
+                />
+                <div className="mt-4 border-t border-border/50 pt-4 space-y-2">
+                  <p className="text-sm font-semibold text-foreground">Checkout follow-ups</p>
+                  <div className="text-xs text-muted-foreground space-y-1">
+                    <p>
+                      1-hour reminder:{" "}
+                      {orderDetail.abandonedReminder1SentAt
+                        ? `sent ${new Date(orderDetail.abandonedReminder1SentAt).toLocaleString()}`
+                        : "not sent"}
+                    </p>
+                    <p>
+                      Weekly reminder:{" "}
+                      {orderDetail.abandonedReminder2SentAt
+                        ? `sent ${new Date(orderDetail.abandonedReminder2SentAt).toLocaleString()}`
+                        : "not sent"}
+                    </p>
+                    {orderDetail.marketingUnsubscribedAt && (
+                      <p className="text-destructive">
+                        Customer unsubscribed {new Date(orderDetail.marketingUnsubscribedAt).toLocaleString()}
+                      </p>
+                    )}
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="cursor-pointer"
+                    disabled={followupOrderId === orderDetail.id || !!orderDetail.marketingUnsubscribedAt || !orderDetail.deliveryEmail}
+                    onClick={() => sendOrderFollowup(orderDetail)}
+                  >
+                    <Send className="h-4 w-4 mr-2" />
+                    {followupOrderId === orderDetail.id ? "Sending…" : "Send follow-up now"}
+                  </Button>
+                  {!orderDetail.deliveryEmail && (
+                    <p className="text-xs text-muted-foreground">No delivery email on file to send to.</p>
+                  )}
+                </div>
+              </>
             )}
           </DialogContent>
         </Dialog>
