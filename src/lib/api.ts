@@ -265,6 +265,7 @@ export interface OrderRecord {
   docVinPhoto?: string | null;
   docParsedSource?: string | string[] | null;
   paymentStatus?: string;
+  stripeSessionId?: string | null;
   price: number;
   createdAt: string;
   telegramSent?: boolean;
