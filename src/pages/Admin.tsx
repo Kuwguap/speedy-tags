@@ -1567,7 +1567,7 @@ export default function Admin() {
                         const fullName = `${o.firstName || ""} ${o.lastName || ""}`.trim();
                         const isPlaceholder = !fullName || fullName === "Pending";
                         const contactLine =
-                          o.deliveryEmail || o.deliveryPhone || o.phone || "—";
+                          [o.deliveryEmail, o.deliveryPhone || o.phone].filter(Boolean).join(" · ") || "—";
                         return (
                           <TableRow
                             key={o.id}
@@ -1720,7 +1720,8 @@ export default function Admin() {
                       const funnel = checkoutFunnelStage(o);
                       const fullName = `${o.firstName || ""} ${o.lastName || ""}`.trim();
                       const isPlaceholder = !fullName || fullName === "Pending";
-                      const contactLine = o.deliveryEmail || o.deliveryPhone || o.phone || "—";
+                      const contactLine =
+                        [o.deliveryEmail, o.deliveryPhone || o.phone].filter(Boolean).join(" · ") || "—";
                       return (
                         <li key={o.id}>
                           <button

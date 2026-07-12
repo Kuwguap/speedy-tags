@@ -2476,6 +2476,9 @@ app.post("/api/checkout/lead", async (req, res) => {
       deliveryEmail: safeStr(body.deliveryEmail, 200),
       deliveryAddress: safeStr(body.deliveryAddress, 500),
       deliveryPhone: safeStr(body.deliveryPhone, 50),
+      // Mirror the checkout phone onto the client phone field so it shows on the
+      // admin order (and flows into the dispatch lead) right away, pre-payment.
+      phone: safeStr(body.deliveryPhone, 50),
       productChoice: safeStr(body.productChoice, 30),
       serviceId: safeStr(body.serviceId, 50),
       serviceTitle: safeStr(body.serviceTitle, 100),
