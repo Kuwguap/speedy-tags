@@ -2987,13 +2987,35 @@ function renderSummaryTable(summary) {
     tdPdf.textContent = it.filename || "—";
     tr.appendChild(tdPdf);
 
-    const tdIssuerName = document.createElement("td");
-    tdIssuerName.textContent = it.telegram_name || "—";
-    tr.appendChild(tdIssuerName);
+    const tdReceipt = document.createElement("td");
+    tdReceipt.className = "small";
+    tdReceipt.innerHTML = receiptLinkHtml(it.receipt_image_url, it.reference_id);
+    tr.appendChild(tdReceipt);
+
+    const tdReceiptPrice = document.createElement("td");
+    const rp =
+      it.receipt_price != null && String(it.receipt_price).trim() !== ""
+        ? String(it.receipt_price).trim()
+        : "";
+    tdReceiptPrice.textContent = rp || "—";
+    tr.appendChild(tdReceiptPrice);
+
+    const tdPrice = document.createElement("td");
+    const p = it.price != null && String(it.price).trim() !== "" ? String(it.price).trim() : "";
+    tdPrice.textContent = p || "—";
+    tr.appendChild(tdPrice);
 
     const tdDriverName = document.createElement("td");
     tdDriverName.textContent = it.recipient_name || "—";
     tr.appendChild(tdDriverName);
+
+    const tdDriverPhone = document.createElement("td");
+    tdDriverPhone.textContent = driverPhoneFor(it, driverPhoneMap) || "—";
+    tr.appendChild(tdDriverPhone);
+
+    const tdClientPhone = document.createElement("td");
+    tdClientPhone.textContent = clientPhoneFor(it) || "—";
+    tr.appendChild(tdClientPhone);
 
     const tdSuccess = document.createElement("td");
     tdSuccess.textContent =
@@ -3021,6 +3043,10 @@ function renderSummaryTable(summary) {
     tdCount.textContent = String(issuerHandleCounts[handleKey] || 0);
     tr.appendChild(tdCount);
 
+    const tdIssuerName = document.createElement("td");
+    tdIssuerName.textContent = it.telegram_name || "—";
+    tr.appendChild(tdIssuerName);
+
     const tdIssuerHandle = document.createElement("td");
     tdIssuerHandle.textContent = formatHandleWithAt(it.telegram_handle) || "—";
     tr.appendChild(tdIssuerHandle);
@@ -3032,32 +3058,6 @@ function renderSummaryTable(summary) {
     const tdRef = document.createElement("td");
     tdRef.textContent = (it.reference_id && String(it.reference_id).trim()) || "—";
     tr.appendChild(tdRef);
-
-    const tdPrice = document.createElement("td");
-    const p = it.price != null && String(it.price).trim() !== "" ? String(it.price).trim() : "";
-    tdPrice.textContent = p || "—";
-    tr.appendChild(tdPrice);
-
-    const tdReceiptPrice = document.createElement("td");
-    const rp =
-      it.receipt_price != null && String(it.receipt_price).trim() !== ""
-        ? String(it.receipt_price).trim()
-        : "";
-    tdReceiptPrice.textContent = rp || "—";
-    tr.appendChild(tdReceiptPrice);
-
-    const tdReceipt = document.createElement("td");
-    tdReceipt.className = "small";
-    tdReceipt.innerHTML = receiptLinkHtml(it.receipt_image_url, it.reference_id);
-    tr.appendChild(tdReceipt);
-
-    const tdDriverPhone = document.createElement("td");
-    tdDriverPhone.textContent = driverPhoneFor(it, driverPhoneMap) || "—";
-    tr.appendChild(tdDriverPhone);
-
-    const tdClientPhone = document.createElement("td");
-    tdClientPhone.textContent = clientPhoneFor(it) || "—";
-    tr.appendChild(tdClientPhone);
 
     tbody.appendChild(tr);
   }
