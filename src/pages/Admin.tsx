@@ -528,6 +528,45 @@ export default function Admin() {
     }
   };
 
+  // Per-order follow-up status badge (+ optional action button on desktop rows).
+  const renderFollowup = (o: OrderRecord, withButton: boolean) => {
+    const stage = checkoutFunnelStage(o).stage;
+    const unfinished = stage === "lead" || stage === "payment_pending";
+    const unsub = !!o.marketingUnsubscribedAt;
+    const r1 = !!o.abandonedReminder1SentAt;
+    const r2 = !!o.abandonedReminder2SentAt;
+    let badge: JSX.Element;
+    if (unsub) {
+      badge = <Badge variant="secondary" className="bg-muted text-muted-foreground text-[10px]">Unsubscribed</Badge>;
+    } else if (r2 || r1) {
+      badge = <Badge variant="secondary" className="bg-primary/10 text-primary text-[10px]">{r2 ? "Weekly sent" : "1h sent"}</Badge>;
+    } else if (unfinished) {
+      badge = <Badge variant="secondary" className="bg-amber-500/10 text-amber-600 text-[10px]">Not sent</Badge>;
+    } else {
+      badge = <span className="text-muted-foreground text-xs">—</span>;
+    }
+    const canSend = unfinished && !unsub && !!o.deliveryEmail;
+    return (
+      <div className="flex flex-col items-start gap-1" onClick={(e) => e.stopPropagation()}>
+        {badge}
+        {withButton && canSend && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-6 px-2 text-[11px] cursor-pointer"
+            disabled={followupOrderId === o.id}
+            onClick={(e) => {
+              e.stopPropagation();
+              sendOrderFollowup(o);
+            }}
+          >
+            {followupOrderId === o.id ? "Sending…" : r1 ? "Send weekly" : "Follow up"}
+          </Button>
+        )}
+      </div>
+    );
+  };
+
   async function refreshWebhookInfo() {
     setWebhookLoading(true);
     try {
@@ -1592,6 +1631,7 @@ export default function Admin() {
                         <TableHead>Status</TableHead>
                         <TableHead>Name / Contact</TableHead>
                         <TableHead>Delivery</TableHead>
+                        <TableHead>Follow-up</TableHead>
                         <TableHead>Vehicle</TableHead>
                         <TableHead className="text-right">Price</TableHead>
                         <TableHead>Krableads</TableHead>
@@ -1697,6 +1737,7 @@ export default function Admin() {
                                 </div>
                               )}
                             </TableCell>
+                            <TableCell>{renderFollowup(o, true)}</TableCell>
                             <TableCell className="text-xs">
                               {o.carMakeModel || (
                                 <span className="text-muted-foreground">
@@ -1855,6 +1896,9 @@ export default function Admin() {
                                     </Badge>
                                   </div>
                                 ) : null}
+                                {(funnel.stage === "lead" || funnel.stage === "payment_pending" || o.abandonedReminder1SentAt || o.marketingUnsubscribedAt) && (
+                                  <div className="mt-1.5">{renderFollowup(o, false)}</div>
+                                )}
                               </div>
                               <div className="text-right shrink-0">
                                 <div className="text-base font-semibold">${formatUsd(o.price)}</div>
