@@ -284,7 +284,9 @@ function receiptViewHref(url, ref) {
 
 function receiptLinkHtml(url, ref) {
   const u = String(url || "").trim();
-  if (!u && !String(ref || "").trim()) return "—";
+  // Only show a "View" link when a receipt image was actually uploaded.
+  // A reference id alone must not produce a link (nothing to view yet).
+  if (!u) return '<span class="muted">—</span>';
   const href = receiptViewHref(u, ref);
   if (!href) return '<span class="muted">—</span>';
   return `<a href="${escapeHtmlAttr(href)}" target="_blank" rel="noopener noreferrer">View</a>`;
