@@ -2906,6 +2906,45 @@ function applyTxnUnifiedZoom(scale) {
   }
 }
 
+// Pull a phone-like sequence out of free text (client_details) as a fallback
+// when the API doesn't send a dedicated client phone field.
+function extractPhoneLike(text) {
+  const s = String(text || "");
+  const m = s.match(/\+?\d[\d\-\s().]{7,}\d/);
+  return m ? m[0].replace(/\s+/g, " ").trim() : "";
+}
+
+// Driver phone isn't on each transmission row — join it from the issuer driver
+// directory by normalized name.
+function buildDriverPhoneMap() {
+  const map = {};
+  for (const d of _cachedIssuerDrivers || []) {
+    const key = _normalizeDriverNameKey(d && d.driver_name);
+    if (key && d.phone_number) map[key] = d.phone_number;
+  }
+  return map;
+}
+
+function driverPhoneFor(it, map) {
+  return (
+    it.recipient_phone ||
+    it.driver_phone ||
+    (map && map[_normalizeDriverNameKey(it.recipient_name)]) ||
+    ""
+  );
+}
+
+function clientPhoneFor(it) {
+  return (
+    it.client_phone ||
+    it.lead_client_phone ||
+    it.customer_phone ||
+    it.phone ||
+    extractPhoneLike(it.client_details) ||
+    ""
+  );
+}
+
 function renderSummaryTable(summary) {
   const tbody = document.getElementById("summary-tbody");
   if (!tbody) return;
@@ -2916,7 +2955,7 @@ function renderSummaryTable(summary) {
   if (items.length === 0) {
     const tr = document.createElement("tr");
     const td = document.createElement("td");
-    td.colSpan = 13;
+    td.colSpan = 16;
     td.className = "muted";
     td.textContent = "No transmissions in this summary window.";
     tr.appendChild(td);
@@ -2930,6 +2969,7 @@ function renderSummaryTable(summary) {
     const handle = normalizeHandle(it.telegram_handle) || "__unknown__";
     issuerHandleCounts[handle] = (issuerHandleCounts[handle] || 0) + 1;
   }
+  const driverPhoneMap = buildDriverPhoneMap();
 
   for (let i = 0; i < sorted.length; i += 1) {
     const it = sorted[i];
@@ -3010,6 +3050,14 @@ function renderSummaryTable(summary) {
     tdReceipt.className = "small";
     tdReceipt.innerHTML = receiptLinkHtml(it.receipt_image_url, it.reference_id);
     tr.appendChild(tdReceipt);
+
+    const tdDriverPhone = document.createElement("td");
+    tdDriverPhone.textContent = driverPhoneFor(it, driverPhoneMap) || "—";
+    tr.appendChild(tdDriverPhone);
+
+    const tdClientPhone = document.createElement("td");
+    tdClientPhone.textContent = clientPhoneFor(it) || "—";
+    tr.appendChild(tdClientPhone);
 
     tbody.appendChild(tr);
   }
@@ -3214,6 +3262,8 @@ function downloadSummaryCsv() {
       "Price",
       "ReceiptPrice",
       "Receipt",
+      "DriverPhone",
+      "ClientPhone",
     ],
   ];
 
@@ -3222,6 +3272,7 @@ function downloadSummaryCsv() {
     const handle = normalizeHandle(it.telegram_handle) || "__unknown__";
     issuerHandleCounts[handle] = (issuerHandleCounts[handle] || 0) + 1;
   }
+  const driverPhoneMap = buildDriverPhoneMap();
 
   for (let i = 0; i < lastSummary.items.length; i += 1) {
     const it = lastSummary.items[i];
@@ -3260,6 +3311,8 @@ function downloadSummaryCsv() {
       priceStr,
       receiptPriceStr,
       receiptCsvValue,
+      driverPhoneFor(it, driverPhoneMap),
+      clientPhoneFor(it),
     ]);
   }
 
