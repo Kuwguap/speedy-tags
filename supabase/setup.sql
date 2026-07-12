@@ -81,6 +81,17 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS dispute_risk BOOLEAN DEFAULT FALSE;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS referral_code TEXT;
 CREATE INDEX IF NOT EXISTS idx_orders_referral_code ON orders (referral_code);
 
+-- Supervisor Telegram notify (fires once per order when it first has real content)
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS supervisor_notified_at TIMESTAMPTZ;
+
+-- Abandoned-cart follow-up emails (1h + weekly) and marketing unsubscribe.
+-- IMPORTANT: these must exist, otherwise the resilient writer drops the columns
+-- and the "already reminded / unsubscribed" flags silently no-op — causing repeat
+-- emails to the same customer on every sweep.
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS abandoned_reminder1_sent_at TIMESTAMPTZ;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS abandoned_reminder2_sent_at TIMESTAMPTZ;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS marketing_unsubscribed_at TIMESTAMPTZ;
+
 -- Krableads external lead ingest (reference from POST /api/v1/leads/ingest)
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS krableads_reference_id TEXT;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS krableads_lead_id TEXT;

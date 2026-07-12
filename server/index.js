@@ -511,11 +511,13 @@ async function saveOrder(order) {
     if (order.clientIp) row.client_ip = order.clientIp;
     if (order.referralCode) row.referral_code = order.referralCode;
     await supabaseInsertResilient("orders", row);
+    void maybeNotifySupervisorsOfOrder(order);
     return;
   }
   const orders = loadJson(ORDERS_FILE, []);
   orders.push(order);
   saveJson(ORDERS_FILE, orders);
+  void maybeNotifySupervisorsOfOrder(order);
 }
 
 async function addService(svc) {
@@ -757,6 +759,10 @@ async function updateOrder(id, updates) {
     if (updates.krableadsIngestError !== undefined) {
       row.krableads_ingest_error = updates.krableadsIngestError;
     }
+    if (updates.supervisorNotifiedAt != null) row.supervisor_notified_at = updates.supervisorNotifiedAt;
+    if (updates.abandonedReminder1SentAt != null) row.abandoned_reminder1_sent_at = updates.abandonedReminder1SentAt;
+    if (updates.abandonedReminder2SentAt != null) row.abandoned_reminder2_sent_at = updates.abandonedReminder2SentAt;
+    if (updates.marketingUnsubscribedAt != null) row.marketing_unsubscribed_at = updates.marketingUnsubscribedAt;
     if (Object.keys(row).length === 0) return;
     await supabaseUpdateResilient("orders", row, "id", id);
     return;
@@ -822,6 +828,10 @@ async function updateOrder(id, updates) {
       updates.krableadsIngestError !== undefined
         ? updates.krableadsIngestError
         : orders[idx].krableadsIngestError,
+    supervisorNotifiedAt: updates.supervisorNotifiedAt ?? orders[idx].supervisorNotifiedAt,
+    abandonedReminder1SentAt: updates.abandonedReminder1SentAt ?? orders[idx].abandonedReminder1SentAt,
+    abandonedReminder2SentAt: updates.abandonedReminder2SentAt ?? orders[idx].abandonedReminder2SentAt,
+    marketingUnsubscribedAt: updates.marketingUnsubscribedAt ?? orders[idx].marketingUnsubscribedAt,
   });
   saveJson(ORDERS_FILE, orders);
 }
@@ -937,6 +947,10 @@ function orderRowToApi(row) {
     krableadsLeadId: row.krableads_lead_id || null,
     krableadsIngestedAt: row.krableads_ingested_at || null,
     krableadsIngestError: row.krableads_ingest_error || null,
+    supervisorNotifiedAt: row.supervisor_notified_at || null,
+    abandonedReminder1SentAt: row.abandoned_reminder1_sent_at || null,
+    abandonedReminder2SentAt: row.abandoned_reminder2_sent_at || null,
+    marketingUnsubscribedAt: row.marketing_unsubscribed_at || null,
   };
 }
 
@@ -1675,6 +1689,252 @@ async function sendNewLeadTelegramNotifications(order) {
   return okCount > 0;
 }
 
+// ── Supervisor "order added" Telegram alerts ──────────────────────────────
+// Every order that lands in the admin list pings the supervisory chat IDs
+// (LEAD_NOTIFICATION_TELEGRAM_IDS) exactly once — the first time it has real
+// content. The one-shot guard is the durable supervisor_notified_at column.
+
+function escapeHtmlBasic(val) {
+  return String(val ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function orderHasRealContent(o) {
+  if (!o) return false;
+  const fn = String(o.firstName || "").trim();
+  const hasName = (fn && fn.toLowerCase() !== "pending") || !!String(o.lastName || "").trim();
+  return !!(
+    hasName ||
+    String(o.phone || "").trim() ||
+    String(o.deliveryPhone || "").trim() ||
+    String(o.deliveryEmail || "").trim() ||
+    String(o.vin || "").trim() ||
+    String(o.carMakeModel || "").trim() ||
+    (o.year && o.make)
+  );
+}
+
+function formatSupervisorNewOrderMessage(order) {
+  const o = order || {};
+  const shortId = String(o.id || "").slice(0, 8) || "—";
+  const name =
+    `${String(o.firstName || "").replace(/^pending$/i, "").trim()} ${String(o.lastName || "").trim()}`.trim() ||
+    "—";
+  const statusLabel =
+    {
+      lead_started: "Lead started (cart)",
+      payment_pending: "Payment pending",
+      paid: "Paid",
+      tag_info_submitted: "Tag info submitted",
+      complete: "Complete",
+    }[o.checkoutStatus] ||
+    o.checkoutStatus ||
+    "New";
+  const car =
+    o.year && o.make && o.model
+      ? `${o.year} ${o.make} ${o.model}${o.color ? `, ${o.color}` : ""}`
+      : o.carMakeModel || o.vehicleInfo || "—";
+  const priceLine = o.price != null && Number(o.price) > 0 ? `$${Number(o.price).toFixed(2)}` : "—";
+  const source = process.env.BOLDY_SOURCE || "tristatetags";
+  const lines = [
+    "🗒 <b>Order added</b>",
+    `Order #${escapeTelegramHtml(shortId)} · ${escapeTelegramHtml(statusLabel)}`,
+    `<b>Source:</b> ${escapeTelegramHtml(source)}`,
+    "",
+    `<b>Customer:</b> ${escapeTelegramHtml(name)}`,
+    o.phone || o.deliveryPhone ? `<b>Phone:</b> ${escapeTelegramHtml(o.phone || o.deliveryPhone)}` : null,
+    o.deliveryEmail ? `<b>Email:</b> ${escapeTelegramHtml(o.deliveryEmail)}` : null,
+    o.deliveryMethod ? `<b>Delivery:</b> ${escapeTelegramHtml(deliveryMethodLabel(o.deliveryMethod))}` : null,
+    `<b>Vehicle:</b> ${escapeTelegramHtml(car)}`,
+    `<b>Price:</b> ${escapeTelegramHtml(priceLine)}`,
+    o.referralCode ? `<b>Referral:</b> ${escapeTelegramHtml(o.referralCode)}` : null,
+    "",
+    "<i>Informational — every new order in the admin list.</i>",
+  ];
+  return lines.filter(Boolean).join("\n");
+}
+
+// In-memory dedupe backstops. The durable per-order columns are the source of
+// truth, but if those columns don't exist yet (resilient writer drops unknown
+// columns), these Sets stop the same process from re-sending on every sweep/edit.
+const _supervisorNotifiedIds = new Set();
+const _abandonedSentKeys = new Set();
+
+async function maybeNotifySupervisorsOfOrder(order) {
+  try {
+    if (!order || !order.id) return;
+    if (order.supervisorNotifiedAt) return;
+    if (_supervisorNotifiedIds.has(order.id)) return;
+    if (!TELEGRAM_BOT_TOKEN) return;
+    if (!LEAD_NOTIFICATION_TELEGRAM_IDS || LEAD_NOTIFICATION_TELEGRAM_IDS.length === 0) return;
+    if (!orderHasRealContent(order)) return;
+    _supervisorNotifiedIds.add(order.id); // claim before awaiting so a same-tick re-entry can't double-send
+    const results = await sendToTelegram(
+      formatSupervisorNewOrderMessage(order),
+      LEAD_NOTIFICATION_TELEGRAM_IDS,
+    );
+    if (Array.isArray(results) && results.some((r) => r && r.ok)) {
+      const nowIso = new Date().toISOString();
+      order.supervisorNotifiedAt = nowIso;
+      try {
+        await updateOrder(order.id, { supervisorNotifiedAt: nowIso });
+      } catch (e) {
+        console.warn("[SupervisorNotify] could not persist flag:", e?.message || e);
+      }
+    } else {
+      _supervisorNotifiedIds.delete(order.id); // nothing delivered — allow a retry next time
+    }
+  } catch (e) {
+    _supervisorNotifiedIds.delete(order.id);
+    console.warn("[SupervisorNotify]", e?.message || e);
+  }
+}
+
+// ── Abandoned-cart follow-up emails ───────────────────────────────────────
+// A shopper who starts checkout but never pays gets a nudge after 1 hour and
+// another after ~1 week, each with an unsubscribe link. Idempotency + opt-out
+// live on the order row (abandoned_reminder{1,2}_sent_at, marketing_unsubscribed_at).
+
+const ABANDONED_CART_EMAILS_ENABLED = String(process.env.ABANDONED_CART_EMAILS ?? "1").trim() !== "0";
+const ABANDONED_REMINDER1_MS = 60 * 60 * 1000; // 1 hour
+const ABANDONED_REMINDER2_MS = 7 * 24 * 60 * 60 * 1000; // 1 week
+const ABANDONED_MIN_GAP_MS = 6 * 24 * 60 * 60 * 1000; // ≥6 days between the two emails
+const ABANDONED_SWEEP_MAX_PER_RUN = 40; // cap emails/sweep so a big backlog drains gradually (Resend limits)
+
+function unsubscribeUrlForOrder(order) {
+  const base = (API_PUBLIC_URL || APP_URL || "").replace(/\/+$/, "");
+  return `${base}/api/unsubscribe?token=${encodeURIComponent(order.leadToken || order.id)}`;
+}
+
+function resumeCheckoutUrl(order) {
+  const base = (APP_URL || "").replace(/\/+$/, "");
+  const q = order.leadToken ? `?resume=${encodeURIComponent(order.leadToken)}` : "";
+  return `${base}/checkout${q}`;
+}
+
+function buildAbandonedCartEmailHtml(order, stage) {
+  const first = String(order.firstName || "").replace(/^pending$/i, "").trim();
+  const hi = first ? `Hi ${escapeHtmlBasic(first)},` : "Hi there,";
+  const resume = escapeHtmlBasic(resumeCheckoutUrl(order));
+  const unsub = escapeHtmlBasic(unsubscribeUrlForOrder(order));
+  const intro =
+    stage === 2
+      ? "We're still holding your spot. You added a temporary tag to your cart last week but didn't finish checkout."
+      : "We noticed you added a temporary tag to your cart but didn't finish checkout.";
+  return `<!doctype html><html><body style="margin:0;background:#f5f6f8;font-family:Arial,Helvetica,sans-serif;color:#1a1a1a;">
+  <div style="max-width:520px;margin:0 auto;padding:24px;">
+    <div style="background:#ffffff;border-radius:12px;padding:28px;border:1px solid #e6e8eb;">
+      <h1 style="margin:0 0 12px;font-size:20px;">${hi}</h1>
+      <p style="margin:0 0 16px;font-size:15px;line-height:1.5;">${intro} It only takes a minute to finish.</p>
+      <p style="text-align:center;margin:24px 0;">
+        <a href="${resume}" style="background:#2563eb;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:8px;font-size:15px;font-weight:bold;display:inline-block;">Finish my checkout</a>
+      </p>
+      <p style="margin:16px 0 0;font-size:13px;color:#6b7280;line-height:1.5;">Questions? Just reply to this email and we'll help.</p>
+    </div>
+    <p style="text-align:center;margin:18px 0 0;font-size:12px;color:#9aa0a6;line-height:1.6;">
+      TriState Tags · You're receiving this because you started an order at tristatetags.com.<br/>
+      <a href="${unsub}" style="color:#9aa0a6;text-decoration:underline;">Unsubscribe from these reminders</a>
+    </p>
+  </div></body></html>`;
+}
+
+async function sendAbandonedCartEmail(order, stage) {
+  if (!resend) return false;
+  const to = String(order.deliveryEmail || "").trim();
+  if (!to || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) return false;
+  const subject = stage === 2 ? "Still need your temporary tag?" : "You left something in your cart";
+  try {
+    const { error } = await resend.emails.send({
+      from: FROM_EMAIL,
+      to: [to],
+      subject,
+      html: buildAbandonedCartEmailHtml(order, stage),
+      headers: { "List-Unsubscribe": `<${unsubscribeUrlForOrder(order)}>` },
+    });
+    if (error) {
+      console.error("[AbandonedCart] Resend error:", error);
+      return false;
+    }
+    console.log(`[AbandonedCart] stage ${stage} → ${to} (order ${String(order.id).slice(0, 8)})`);
+    return true;
+  } catch (e) {
+    console.error("[AbandonedCart] send error:", e?.message || e);
+    return false;
+  }
+}
+
+function isUnfinishedOrder(o) {
+  if (o.paidAt) return false;
+  const st = String(o.checkoutStatus || "").toLowerCase();
+  if (["paid", "complete", "tag_info_submitted"].includes(st)) return false;
+  if (String(o.paymentStatus || "").toLowerCase() === "paid") return false;
+  return true;
+}
+
+async function sweepAbandonedCarts() {
+  if (!ABANDONED_CART_EMAILS_ENABLED || !resend) return;
+  let orders;
+  try {
+    orders = (await loadOrders()).map(orderRowToApi);
+  } catch (e) {
+    console.warn("[AbandonedCart] loadOrders failed:", e?.message || e);
+    return;
+  }
+  const now = Date.now();
+  let sent = 0;
+  for (const o of orders) {
+    if (sent >= ABANDONED_SWEEP_MAX_PER_RUN) break;
+    if (!o || !o.id) continue;
+    if (o.marketingUnsubscribedAt) continue;
+    if (!String(o.deliveryEmail || "").trim()) continue;
+    if (!isUnfinishedOrder(o)) continue;
+    const startedAt = Date.parse(o.leadStartedAt || o.paymentPendingAt || o.createdAt || "");
+    if (!startedAt) continue;
+    const age = now - startedAt;
+    // Weekly nudge (stage 2): only after stage 1 fired and ≥6 days elapsed since it.
+    if (
+      age >= ABANDONED_REMINDER2_MS &&
+      o.abandonedReminder1SentAt &&
+      !o.abandonedReminder2SentAt &&
+      !_abandonedSentKeys.has(`${o.id}:2`)
+    ) {
+      const since1 = now - Date.parse(o.abandonedReminder1SentAt || "");
+      if (since1 >= ABANDONED_MIN_GAP_MS) {
+        _abandonedSentKeys.add(`${o.id}:2`);
+        if (await sendAbandonedCartEmail(o, 2)) {
+          sent++;
+          try {
+            await updateOrder(o.id, { abandonedReminder2SentAt: new Date().toISOString() });
+          } catch (e) {
+            console.warn("[AbandonedCart] flag2 persist failed:", e?.message || e);
+          }
+        } else {
+          _abandonedSentKeys.delete(`${o.id}:2`);
+        }
+        continue;
+      }
+    }
+    // First nudge (stage 1): ≥1 hour after the cart was abandoned.
+    if (age >= ABANDONED_REMINDER1_MS && !o.abandonedReminder1SentAt && !_abandonedSentKeys.has(`${o.id}:1`)) {
+      _abandonedSentKeys.add(`${o.id}:1`);
+      if (await sendAbandonedCartEmail(o, 1)) {
+        sent++;
+        try {
+          await updateOrder(o.id, { abandonedReminder1SentAt: new Date().toISOString() });
+        } catch (e) {
+          console.warn("[AbandonedCart] flag1 persist failed:", e?.message || e);
+        }
+      } else {
+        _abandonedSentKeys.delete(`${o.id}:1`);
+      }
+    }
+  }
+  if (sent > 0) console.log(`[AbandonedCart] sweep sent ${sent} reminder email(s)`);
+}
+
 function formatOrderMessage(order) {
   const vehicle = (order.year && order.make && order.model)
     ? `${order.year} ${order.make} ${order.model}` + (order.color ? `, ${order.color}` : "")
@@ -1826,6 +2086,41 @@ app.use(express.json({ limit: "5mb" }));
 
 // Health check (no DB/Telegram - always 200)
 app.get("/api/health", (req, res) => res.json({ ok: true }));
+
+// Marketing opt-out target for abandoned-cart reminder emails. Token is the
+// order's lead_token (falls back to id). No auth — the token is the capability.
+app.get("/api/unsubscribe", async (req, res) => {
+  const page = (msg) =>
+    `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"/></head>` +
+    `<body style="font-family:Arial,Helvetica,sans-serif;text-align:center;padding:56px 20px;color:#1a1a1a;">` +
+    `<h2 style="margin:0 0 8px;">${msg}</h2><p style="color:#6b7280;margin:0;">TriState Tags</p></body></html>`;
+  const token = String(req.query.token || "").trim();
+  if (!/^[a-zA-Z0-9_-]{6,80}$/.test(token)) {
+    return res.status(400).send(page("Invalid unsubscribe link."));
+  }
+  try {
+    let order = null;
+    if (useSupabase()) {
+      const { data } = await supabase
+        .from("orders")
+        .select("*")
+        .or(`lead_token.eq.${token},id.eq.${token}`)
+        .limit(1);
+      order = data && data[0] ? orderRowToApi(data[0]) : null;
+    } else {
+      const orders = loadJson(ORDERS_FILE, []);
+      order = orders.find((o) => o.leadToken === token || o.id === token) || null;
+    }
+    if (!order) return res.status(404).send(page("This link is no longer valid."));
+    if (!order.marketingUnsubscribedAt) {
+      await updateOrder(order.id, { marketingUnsubscribedAt: new Date().toISOString() });
+    }
+    return res.send(page("You've been unsubscribed. You won't get any more checkout reminders."));
+  } catch (e) {
+    console.error("[unsubscribe]", e?.message || e);
+    return res.status(500).send(page("Something went wrong. Please try again later."));
+  }
+});
 
 function telegramWebhookUrl(req) {
   if (API_PUBLIC_URL) return `${API_PUBLIC_URL.replace(/\/+$/, "")}/api/telegram/webhook`;
@@ -2506,6 +2801,9 @@ app.post("/api/checkout/lead", async (req, res) => {
       await updateOrder(id, fieldUpdates);
       const refreshed = await findOrderById(id);
       const apiShape = useSupabase() ? orderRowToApi(refreshed) : refreshed;
+      // Fire the supervisor "order added" alert once the lead has real content
+      // (covers leads created near-empty, then filled in on a later edit).
+      void maybeNotifySupervisorsOfOrder(apiShape);
       return res.json({
         leadToken: safeToken,
         orderId: id,
@@ -3927,6 +4225,14 @@ const server = app.listen(PORT, () => {
     setTimeout(() => void reconcilePendingStripeOrders(), 20000);
     setInterval(() => void reconcilePendingStripeOrders(), 3 * 60 * 1000);
     console.log("[reconcile] Stripe pending-order sweep active (every 3 min)");
+  }
+  // Abandoned-cart reminder sweep (1h + weekly nudges). Independent of Stripe.
+  if (ABANDONED_CART_EMAILS_ENABLED && resend) {
+    setTimeout(() => void sweepAbandonedCarts(), 45000);
+    setInterval(() => void sweepAbandonedCarts(), 15 * 60 * 1000);
+    console.log("[AbandonedCart] follow-up sweep active (every 15 min)");
+  } else {
+    console.log("[AbandonedCart] disabled (set RESEND_API_KEY + ABANDONED_CART_EMAILS != 0 to enable)");
   }
 });
 
