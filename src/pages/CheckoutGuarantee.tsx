@@ -74,42 +74,39 @@ export default function CheckoutGuarantee() {
     state.deliveryMethod === "mail";
 
   const handleContinue = async () => {
-    setErrors({});
+    const nextErrors: Record<string, string> = {};
     let nextEmail = state.deliveryEmail;
     let nextAddress = state.deliveryAddress;
-    let nextPhone = state.deliveryPhone;
+    const nextPhone = phone.trim();
+
     if (state.deliveryMethod === "email") {
-      if (!email || !email.includes("@")) {
-        setErrors({ email: "Enter a valid email address" });
-        return;
-      }
-      nextEmail = email;
-      update({ deliveryEmail: email });
+      if (!email || !email.includes("@")) nextErrors.email = "Enter a valid email address";
+      else nextEmail = email;
     } else if (needsShippingAddress) {
-      if (!address?.trim()) {
-        setErrors({ address: "Delivery address is required" });
-        return;
-      }
-      if (!phone?.trim()) {
-        setErrors({
-          phone:
-            state.deliveryMethod === "mail"
-              ? "Phone is required for shipping"
-              : "Phone is required for driver to contact you",
-        });
-        return;
-      }
-      const fullAddress = address2?.trim() ? `${address}, ${address2}` : address;
-      nextAddress = fullAddress;
-      nextPhone = phone;
+      if (!address?.trim()) nextErrors.address = "Delivery address is required";
+      else nextAddress = address2?.trim() ? `${address}, ${address2}` : address;
       if (email?.includes("@")) nextEmail = email;
-      update({
-        deliveryAddress: fullAddress,
-        deliveryPhone: phone,
-        deliveryScheduledAt: "",
-        ...(email?.includes("@") && { deliveryEmail: email }),
-      });
     }
+    // Phone is now collected for EVERY delivery method so every checkout captures
+    // a client phone that lands on the order the moment they continue.
+    if (!nextPhone) nextErrors.phone = "Phone number is required";
+
+    if (Object.keys(nextErrors).length) {
+      setErrors(nextErrors);
+      return;
+    }
+    setErrors({});
+    update({
+      deliveryPhone: nextPhone,
+      ...(state.deliveryMethod === "email" ? { deliveryEmail: nextEmail } : {}),
+      ...(needsShippingAddress
+        ? {
+            deliveryAddress: nextAddress,
+            deliveryScheduledAt: "",
+            ...(email?.includes("@") && { deliveryEmail: nextEmail }),
+          }
+        : {}),
+    });
     // Capture this customer in the admin dashboard immediately, BEFORE Stripe.
     // If they bail out at any point - close tab, network drops, payment fails -
     // the partial lead row is recoverable (delivery email/phone/address all
@@ -285,21 +282,25 @@ export default function CheckoutGuarantee() {
                     onChange={(e) => setAddress2(e.target.value)}
                   />
                 </div>
-                <div>
-                  <Label htmlFor="delivery-phone">Phone</Label>
-                  <Input
-                    id="delivery-phone"
-                    placeholder="(555) 123-4567"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    className={errors.phone ? "border-destructive" : ""}
-                  />
-                  {errors.phone && (
-                    <p className="text-destructive text-xs mt-1">{errors.phone}</p>
-                  )}
-                </div>
               </div>
             )}
+
+            {/* Phone is collected for every delivery method and saved to the
+                order immediately, so we always have a way to reach the customer. */}
+            <div>
+              <Label htmlFor="delivery-phone">Phone</Label>
+              <Input
+                id="delivery-phone"
+                type="tel"
+                placeholder="(555) 123-4567"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                className={errors.phone ? "border-destructive" : ""}
+              />
+              {errors.phone && (
+                <p className="text-destructive text-xs mt-1">{errors.phone}</p>
+              )}
+            </div>
 
             {state.deliveryMethod === "driver" && fullAddressPreview.trim() !== "" && (
               <div
