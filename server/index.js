@@ -662,6 +662,7 @@ function normalizeAffiliates(val) {
       telegramId: canonicalChatId(a?.telegramId ?? a?.telegram_id ?? ""),
       active: a?.active !== false,
       createdAt: a?.createdAt || a?.created_at || null,
+      welcomedAt: a?.welcomedAt || a?.welcomed_at || null,
     });
   }
   return out;
@@ -683,6 +684,30 @@ async function findAffiliate(slug) {
   const s = slugifyAffiliate(slug);
   if (!s) return null;
   return (await loadAffiliates()).find((a) => a.slug === s) || null;
+}
+
+// One-time welcome DM sent when an affiliate is set up (or gets a new Telegram id).
+async function sendAffiliateWelcome(aff) {
+  try {
+    if (!aff || !aff.telegramId) return false;
+    const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const text = [
+      "🎉 <b>Welcome to the TriState Tags affiliate program!</b>",
+      "",
+      `Your link: <b>tristatetags.com/${esc(aff.slug)}</b>`,
+      "Share it — every customer who checks out through your link is tracked to you.",
+      "",
+      "You'll get a message here for:",
+      "• 🆕 New lead (with phone) the moment someone starts checkout",
+      "• 💰 Sale when they pay",
+      "• ✅ Completed order with full details when they finish",
+    ].join("\n");
+    const results = await sendToTelegram(text, [aff.telegramId]);
+    return Array.isArray(results) && results.some((r) => r && r.ok);
+  } catch (e) {
+    console.warn("[affiliate] welcome failed:", e?.message || e);
+    return false;
+  }
 }
 
 async function findOrderById(id) {
@@ -4089,15 +4114,23 @@ app.post("/api/admin/affiliates", authMiddleware, async (req, res) => {
   if (!slug) return res.status(400).json({ error: "A link name is required (letters, numbers, dashes)." });
   const list = await loadAffiliates();
   const idx = list.findIndex((a) => a.slug === slug);
+  const prev = idx >= 0 ? list[idx] : null;
   const entry = {
     slug,
     label: String(req.body?.label ?? req.body?.name ?? slug).trim() || slug,
     telegramId: canonicalChatId(req.body?.telegramId ?? req.body?.telegram_id ?? ""),
     active: req.body?.active !== false,
     createdAt: idx >= 0 ? list[idx].createdAt : new Date().toISOString(),
+    welcomedAt: prev?.welcomedAt || null,
   };
   if (idx >= 0) list[idx] = entry;
   else list.push(entry);
+  // Welcome the affiliate once — on first setup with a Telegram id, or if the id changed.
+  const shouldWelcome =
+    entry.active && entry.telegramId && (!entry.welcomedAt || prev?.telegramId !== entry.telegramId);
+  if (shouldWelcome && (await sendAffiliateWelcome(entry))) {
+    entry.welcomedAt = new Date().toISOString();
+  }
   try {
     const saved = await saveAffiliates(list);
     res.json({ ok: true, affiliates: saved });
