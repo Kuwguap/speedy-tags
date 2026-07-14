@@ -1753,6 +1753,9 @@ function formatSupervisorNewOrderMessage(order) {
     o.phone || o.deliveryPhone ? `<b>Phone:</b> ${escapeTelegramHtml(o.phone || o.deliveryPhone)}` : null,
     o.deliveryEmail ? `<b>Email:</b> ${escapeTelegramHtml(o.deliveryEmail)}` : null,
     o.deliveryMethod ? `<b>Delivery:</b> ${escapeTelegramHtml(deliveryMethodLabel(o.deliveryMethod))}` : null,
+    (o.deliveryAddress || o.delivery_address)
+      ? `<b>Delivery address:</b> ${escapeTelegramHtml(o.deliveryAddress || o.delivery_address)}`
+      : null,
     `<b>Vehicle:</b> ${escapeTelegramHtml(car)}`,
     `<b>Price:</b> ${escapeTelegramHtml(priceLine)}`,
     o.referralCode ? `<b>Referral:</b> ${escapeTelegramHtml(o.referralCode)}` : null,
@@ -1825,6 +1828,9 @@ async function maybeNotifyAffiliateOfLead(order) {
       who ? `Customer: ${esc(who)}` : null,
       order.deliveryEmail ? `Email: ${esc(order.deliveryEmail)}` : null,
       order.deliveryMethod ? `Delivery: ${esc(deliveryMethodLabel(order.deliveryMethod))}` : null,
+      (order.deliveryAddress || order.delivery_address)
+        ? `Delivery address: ${esc(order.deliveryAddress || order.delivery_address)}`
+        : null,
       "",
       "<i>They started checkout. You'll get the sale + full order if they finish.</i>",
     ].filter(Boolean).join("\n");
