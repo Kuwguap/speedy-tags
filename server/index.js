@@ -1333,14 +1333,16 @@ async function sendClaimMessageToDispatcher(dispatcherChatId, orderId, order, op
   if (!TELEGRAM_BOT_TOKEN) return { ok: false, messageId: null };
   const headerLine = opts.header || "🆕 <b>New Order – Accept to Claim</b>";
   const footerLine = opts.footer || "Tap <b>Accept</b> to receive full details in your group.";
+  const refCode = order?.referralCode || order?.referral_code;
   const summary = [
     headerLine,
     `Order #${(orderId || "").slice(0, 8)}`,
     `• ${(order?.firstName || "")} ${(order?.lastName || "")}`.trim() || "—",
     `• ${order?.vin || "—"} | ${order?.carMakeModel || order?.vehicleInfo || "—"}`,
+    refCode ? `🔗 Affiliate link: <b>tristatetags.com/${escapeTelegramHtml(refCode)}</b>` : null,
     "",
     footerLine,
-  ].join("\n");
+  ].filter(Boolean).join("\n");
   const payload = {
     chat_id: dispatcherChatId,
     text: summary,
@@ -3069,21 +3071,40 @@ app.post("/api/checkout/create-session", async (req, res) => {
  * normal notifications). Called once, at the moment an order first becomes paid.
  * Best-effort: never throws.
  */
+const _affEsc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+function affiliateVehicle(order) {
+  return order.year && order.make && order.model
+    ? `${order.year} ${order.make} ${order.model}${order.color ? `, ${order.color}` : ""}`
+    : order.carMakeModel || order.car_make_model || order.vehicleInfo || "";
+}
+
 async function notifyAffiliateOfSale(order) {
   try {
     const code = order?.referralCode || order?.referral_code;
     if (!code) return;
     const aff = await findAffiliate(code);
     if (!aff || !aff.active || !aff.telegramId) return;
-    const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const esc = _affEsc;
     const who = `${order.firstName || order.first_name || ""} ${order.lastName || order.last_name || ""}`.trim();
     const amt = normalizeOrderPrice(order.price);
+    const phone = order.phone || order.deliveryPhone || order.delivery_phone;
+    const email = order.deliveryEmail || order.delivery_email;
+    const deliv = order.deliveryMethod || order.delivery_method;
+    const car = affiliateVehicle(order);
     const text = [
       "💰 <b>Sale from your link!</b>",
       `Link: <b>tristatetags.com/${esc(aff.slug)}</b>`,
+      `Order #${esc((order.id || "").slice(0, 8))}`,
       amt > 0 ? `Amount: <b>$${amt.toFixed(2)}</b>` : null,
-      who ? `Customer: ${esc(who)}` : null,
+      `Customer: ${who ? esc(who) : "Pending"}`,
+      phone ? `Phone: ${esc(phone)}` : null,
+      email ? `Email: ${esc(email)}` : null,
+      deliv ? `Delivery: ${esc(deliveryMethodLabel(deliv))}` : null,
+      car ? `Vehicle: ${esc(car)}` : null,
       (order.productChoice || order.product_choice) ? `Product: ${esc(order.productChoice || order.product_choice)}` : null,
+      "",
+      "<i>⏳ Full order details will follow once the customer finishes their tag info.</i>",
     ]
       .filter(Boolean)
       .join("\n");
@@ -3091,6 +3112,52 @@ async function notifyAffiliateOfSale(order) {
     console.log(`[affiliate] notified ${aff.slug} of a sale`);
   } catch (e) {
     console.warn("[affiliate] notify failed:", e?.message || e);
+  }
+}
+
+/**
+ * Ping the affiliate again once the customer FINISHES (tag info submitted) with
+ * the full order breakdown. Fired once, on the first transition to completed.
+ * Best-effort: never throws.
+ */
+async function notifyAffiliateOfCompletedOrder(order) {
+  try {
+    const code = order?.referralCode || order?.referral_code;
+    if (!code) return;
+    const aff = await findAffiliate(code);
+    if (!aff || !aff.active || !aff.telegramId) return;
+    const esc = _affEsc;
+    const who = `${order.firstName || order.first_name || ""} ${order.lastName || order.last_name || ""}`.trim();
+    const amt = normalizeOrderPrice(order.price);
+    const phone = order.phone || order.deliveryPhone || order.delivery_phone;
+    const email = order.deliveryEmail || order.delivery_email;
+    const car = affiliateVehicle(order);
+    const regAddr = order.address;
+    const delivAddr = order.deliveryAddress || order.delivery_address;
+    const text = [
+      "✅ <b>Completed order from your link!</b>",
+      `Link: <b>tristatetags.com/${esc(aff.slug)}</b>`,
+      `Order #${esc((order.id || "").slice(0, 8))}`,
+      "",
+      `Customer: ${who ? esc(who) : "—"}`,
+      phone ? `Phone: ${esc(phone)}` : null,
+      email ? `Email: ${esc(email)}` : null,
+      order.deliveryMethod ? `Delivery: ${esc(deliveryMethodLabel(order.deliveryMethod))}` : null,
+      regAddr ? `Registration address: ${esc(regAddr)}` : null,
+      delivAddr ? `Delivery address: ${esc(delivAddr)}` : null,
+      order.vin ? `VIN: ${esc(order.vin)}` : null,
+      car ? `Vehicle: ${esc(car)}` : null,
+      order.insuranceCompany ? `Insurance: ${esc(order.insuranceCompany)}` : null,
+      order.policyNumber ? `Policy #: ${esc(order.policyNumber)}` : null,
+      amt > 0 ? `Amount: <b>$${amt.toFixed(2)}</b>` : null,
+      order.krableadsReferenceId ? `Reference: <code>${esc(order.krableadsReferenceId)}</code>` : null,
+    ]
+      .filter(Boolean)
+      .join("\n");
+    await sendToTelegram(text, [aff.telegramId]);
+    console.log(`[affiliate] notified ${aff.slug} of a completed order`);
+  } catch (e) {
+    console.warn("[affiliate] completed notify failed:", e?.message || e);
   }
 }
 
@@ -3694,6 +3761,12 @@ app.patch("/api/orders/:id/tag-info", async (req, res) => {
       }
     } catch (notifyErr) {
       console.error("[LeadNotify] Unexpected error in lead-notify block:", notifyErr);
+    }
+
+    // Affiliate full-order ping — fire once, on the first transition to completed
+    // (o holds the pre-update status). full carries referralCode + krableads ref.
+    if (o.checkoutStatus !== "tag_info_submitted" && o.checkoutStatus !== "complete") {
+      await notifyAffiliateOfCompletedOrder(full);
     }
 
     if (useSupabase()) {
