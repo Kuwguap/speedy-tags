@@ -1260,6 +1260,9 @@ function formatDispatchMessage(order, phoneLink) {
     "<b>Insurance company:</b> " + escapeTelegramHtml(o.insuranceCompany || "—"),
     "<b>Insurance policy number:</b> " + escapeTelegramHtml(o.policyNumber || "—"),
     "<b>Extra info:</b> " + escapeTelegramHtml(o.notes || "—"),
+    (o.referralCode || o.referral_code)
+      ? "🔗 <b>Affiliate link:</b> tristatetags.com/" + escapeTelegramHtml(o.referralCode || o.referral_code)
+      : null,
   ];
   if (phoneLink) lines.push("", "🔗 <b>Encrypted Link:</b> " + escapeTelegramHtml(phoneLink));
   return lines.filter(Boolean).join("\n");
