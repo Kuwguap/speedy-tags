@@ -1668,6 +1668,7 @@ function formatNewLeadTelegramMessage(order) {
   const deliveryLabel = deliveryMethodLabel(o.deliveryMethod);
   const priceLine = o.price != null ? `$${Number(o.price).toFixed(2)}` : "—";
   const lines = [
+    "🛡️ <b>SUPERVISORY MESSAGE</b>",
     "🆕 <b>New Lead</b>",
     `Order #${escapeTelegramHtml(shortId)}`,
     "",
@@ -1770,6 +1771,7 @@ function formatSupervisorNewOrderMessage(order) {
   const priceLine = o.price != null && Number(o.price) > 0 ? `$${Number(o.price).toFixed(2)}` : "—";
   const source = process.env.BOLDY_SOURCE || "tristatetags";
   const lines = [
+    "🛡️ <b>SUPERVISORY MESSAGE</b>",
     "🗒 <b>Order added</b>",
     `Order #${escapeTelegramHtml(shortId)} · ${escapeTelegramHtml(statusLabel)}`,
     `<b>Source:</b> ${escapeTelegramHtml(source)}`,
