@@ -686,6 +686,31 @@ async function findAffiliate(slug) {
   return (await loadAffiliates()).find((a) => a.slug === s) || null;
 }
 
+// Referral header lines (LINK + REFERRAL name) shown near the top of order
+// messages when the order came from an affiliate link. Sync: relies on
+// order.referralLabel being populated first (see attachReferralLabel).
+function referralLines(order) {
+  const code = order?.referralCode || order?.referral_code;
+  if (!code) return [];
+  const label = String(order?.referralLabel || order?.referral_label || "").trim();
+  return [
+    `<b>LINK:</b> https://tristatetags.com/${escapeTelegramHtml(code)}`,
+    `<b>REFERRAL</b> ${escapeTelegramHtml((label || code).toUpperCase())}`,
+  ];
+}
+
+// Resolve the affiliate's display name for the referral header. Returns a shallow
+// copy of the order with referralLabel set (or the original if no referral).
+async function attachReferralLabel(order) {
+  const code = order?.referralCode || order?.referral_code;
+  if (!code || order?.referralLabel) return order;
+  try {
+    const aff = await findAffiliate(code);
+    if (aff && aff.label) return { ...order, referralLabel: aff.label };
+  } catch { /* best-effort */ }
+  return order;
+}
+
 // One-time welcome DM sent when an affiliate is set up (or gets a new Telegram id).
 async function sendAffiliateWelcome(aff) {
   try {
@@ -1264,6 +1289,8 @@ function formatDispatchMessage(order, phoneLink) {
   const acceptedAtIso = o.telegramAcceptedAt || o.telegram_accepted_at || "";
   const acceptedAtLabel = acceptedAtIso ? new Date(acceptedAtIso).toLocaleString() : "";
   const lines = [
+    ...referralLines(o),
+    referralLines(o).length ? "" : null,
     acceptedByName
       ? `✅ <b>Accepted by:</b> ${escapeTelegramHtml(acceptedByName)}${acceptedAtLabel ? ` <i>at ${escapeTelegramHtml(acceptedAtLabel)}</i>` : ""}`
       : null,
@@ -1285,9 +1312,6 @@ function formatDispatchMessage(order, phoneLink) {
     "<b>Insurance company:</b> " + escapeTelegramHtml(o.insuranceCompany || "—"),
     "<b>Insurance policy number:</b> " + escapeTelegramHtml(o.policyNumber || "—"),
     "<b>Extra info:</b> " + escapeTelegramHtml(o.notes || "—"),
-    (o.referralCode || o.referral_code)
-      ? "🔗 <b>Affiliate link:</b> tristatetags.com/" + escapeTelegramHtml(o.referralCode || o.referral_code)
-      : null,
   ];
   if (phoneLink) lines.push("", "🔗 <b>Encrypted Link:</b> " + escapeTelegramHtml(phoneLink));
   return lines.filter(Boolean).join("\n");
@@ -1361,13 +1385,13 @@ async function sendClaimMessageToDispatcher(dispatcherChatId, orderId, order, op
   if (!TELEGRAM_BOT_TOKEN) return { ok: false, messageId: null };
   const headerLine = opts.header || "🆕 <b>New Order – Accept to Claim</b>";
   const footerLine = opts.footer || "Tap <b>Accept</b> to receive full details in your group.";
-  const refCode = order?.referralCode || order?.referral_code;
+  const orderWithRef = await attachReferralLabel(order);
   const summary = [
     headerLine,
+    ...referralLines(orderWithRef),
     `Order #${(orderId || "").slice(0, 8)}`,
     `• ${(order?.firstName || "")} ${(order?.lastName || "")}`.trim() || "—",
     `• ${order?.vin || "—"} | ${order?.carMakeModel || order?.vehicleInfo || "—"}`,
-    refCode ? `🔗 Affiliate link: <b>tristatetags.com/${escapeTelegramHtml(refCode)}</b>` : null,
     "",
     footerLine,
   ].filter(Boolean).join("\n");
@@ -1670,6 +1694,7 @@ function formatNewLeadTelegramMessage(order) {
   const lines = [
     "🛡️ <b>SUPERVISORY MESSAGE</b>",
     "🆕 <b>New Lead</b>",
+    ...referralLines(o),
     `Order #${escapeTelegramHtml(shortId)}`,
     "",
     `<b>Customer:</b> ${escapeTelegramHtml(name)}`,
@@ -1689,6 +1714,7 @@ function formatNewLeadTelegramMessage(order) {
     o.notes ? `<b>Notes:</b> ${escapeTelegramHtml(o.notes)}` : null,
     "",
     "<i>Informational copy — not claimable from this message.</i>",
+    "Move Fast & Serve Client !",
   ];
   return lines.filter(Boolean).join("\n");
 }
@@ -1703,6 +1729,7 @@ async function sendNewLeadTelegramNotifications(order) {
     return false;
   }
   const shortId = (order?.id || "").slice(0, 8) || "—";
+  order = await attachReferralLabel(order);
   const text = formatNewLeadTelegramMessage(order);
   const results = await sendToTelegram(text, LEAD_NOTIFICATION_TELEGRAM_IDS);
   const okCount = results.filter((r) => r.ok).length;
@@ -1773,6 +1800,7 @@ function formatSupervisorNewOrderMessage(order) {
   const lines = [
     "🛡️ <b>SUPERVISORY MESSAGE</b>",
     "🗒 <b>Order added</b>",
+    ...referralLines(o),
     `Order #${escapeTelegramHtml(shortId)} · ${escapeTelegramHtml(statusLabel)}`,
     `<b>Source:</b> ${escapeTelegramHtml(source)}`,
     "",
@@ -1807,8 +1835,9 @@ async function maybeNotifySupervisorsOfOrder(order) {
     if (!LEAD_NOTIFICATION_TELEGRAM_IDS || LEAD_NOTIFICATION_TELEGRAM_IDS.length === 0) return;
     if (!orderHasRealContent(order)) return;
     _supervisorNotifiedIds.add(order.id); // claim before awaiting so a same-tick re-entry can't double-send
+    const enriched = await attachReferralLabel(order);
     const results = await sendToTelegram(
-      formatSupervisorNewOrderMessage(order),
+      formatSupervisorNewOrderMessage(enriched),
       LEAD_NOTIFICATION_TELEGRAM_IDS,
     );
     if (Array.isArray(results) && results.some((r) => r && r.ok)) {
@@ -2585,7 +2614,7 @@ async function completeOrderDispatch(orderId, groupChatId, claimIds, dispatchers
   const orderRow = await findOrderById(orderId);
   if (!orderRow) return;
   const order = useSupabase() ? orderRowToApi(orderRow) : orderRow;
-  const fullOrder = { ...order, deliveryAddress: order.deliveryAddress || order.delivery_address || "" };
+  const fullOrder = await attachReferralLabel({ ...order, deliveryAddress: order.deliveryAddress || order.delivery_address || "" });
   const phoneLink = await ensurePersistentPhoneLink(orderId, orderRow);
   const dispatchText = formatDispatchMessage(fullOrder, phoneLink);
   const sendResults = await sendToTelegram(dispatchText, [groupChatId]);
