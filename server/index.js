@@ -1795,6 +1795,48 @@ async function maybeNotifySupervisorsOfOrder(order) {
   }
 }
 
+// One-shot (per process) ping to the affiliate the moment a lead from their link
+// has a phone — BEFORE checkout, so they hear about it even if the client never pays.
+const _affiliateLeadNotifiedIds = new Set();
+
+async function maybeNotifyAffiliateOfLead(order) {
+  try {
+    if (!order || !order.id) return;
+    if (_affiliateLeadNotifiedIds.has(order.id)) return;
+    if (!TELEGRAM_BOT_TOKEN) return;
+    const code = order.referralCode || order.referral_code;
+    if (!code) return;
+    const phone = order.phone || order.deliveryPhone || order.delivery_phone;
+    if (!phone) return; // wait until we actually have a phone to send
+    const aff = await findAffiliate(code);
+    if (!aff || !aff.active || !aff.telegramId) return;
+    _affiliateLeadNotifiedIds.add(order.id); // claim before awaiting so a same-tick re-entry can't double-send
+    const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const who = `${order.firstName || order.first_name || ""} ${order.lastName || order.last_name || ""}`
+      .replace(/^pending$/i, "").trim();
+    const text = [
+      "🆕 <b>New lead from your link!</b>",
+      `Link: <b>tristatetags.com/${esc(aff.slug)}</b>`,
+      `Order #${esc((order.id || "").slice(0, 8))}`,
+      `📞 Phone: <b>${esc(phone)}</b>`,
+      who ? `Customer: ${esc(who)}` : null,
+      order.deliveryEmail ? `Email: ${esc(order.deliveryEmail)}` : null,
+      order.deliveryMethod ? `Delivery: ${esc(deliveryMethodLabel(order.deliveryMethod))}` : null,
+      "",
+      "<i>They started checkout. You'll get the sale + full order if they finish.</i>",
+    ].filter(Boolean).join("\n");
+    const results = await sendToTelegram(text, [aff.telegramId]);
+    if (Array.isArray(results) && results.some((r) => r && r.ok)) {
+      console.log(`[affiliate] notified ${aff.slug} of a new lead`);
+    } else {
+      _affiliateLeadNotifiedIds.delete(order.id); // nothing delivered — allow a retry
+    }
+  } catch (e) {
+    _affiliateLeadNotifiedIds.delete(order.id);
+    console.warn("[affiliate] lead notify failed:", e?.message || e);
+  }
+}
+
 // ── Abandoned-cart follow-up emails ───────────────────────────────────────
 // A shopper who starts checkout but never pays gets a nudge after 1 hour and
 // another after ~1 week, each with an unsubscribe link. Idempotency + opt-out
@@ -2837,6 +2879,7 @@ app.post("/api/checkout/lead", async (req, res) => {
       // Fire the supervisor "order added" alert once the lead has real content
       // (covers leads created near-empty, then filled in on a later edit).
       void maybeNotifySupervisorsOfOrder(apiShape);
+      void maybeNotifyAffiliateOfLead(apiShape);
       return res.json({
         leadToken: safeToken,
         orderId: id,
@@ -2876,6 +2919,10 @@ app.post("/api/checkout/lead", async (req, res) => {
       telegramErrors: [],
     };
     await saveOrder(newOrder);
+    // Fire once, right at capture (pre-checkout): supervisors always, affiliate
+    // when the lead came from their link. Both are one-shot + best-effort.
+    void maybeNotifySupervisorsOfOrder(newOrder);
+    void maybeNotifyAffiliateOfLead(newOrder);
     return res.json({ leadToken: safeToken, orderId: newId, order: newOrder });
   } catch (e) {
     console.error("[lead-capture]", e);
