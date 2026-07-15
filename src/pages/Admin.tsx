@@ -1928,11 +1928,7 @@ export default function Admin() {
             </DialogHeader>
             {orderDetail && (
               <>
-                <OrderDetailBlock
-                  order={orderDetail}
-                  dispatchers={settings?.telegramDispatchers ?? []}
-                />
-                <div className="mt-4 border-t border-border/50 pt-4 space-y-2">
+                <div className="mb-4 border-b border-border/50 pb-4 space-y-2">
                   <p className="text-sm font-semibold text-foreground">Checkout follow-ups</p>
                   <div className="text-xs text-muted-foreground space-y-1">
                     <p>
@@ -1967,6 +1963,10 @@ export default function Admin() {
                     <p className="text-xs text-muted-foreground">No delivery email on file to send to.</p>
                   )}
                 </div>
+                <OrderDetailBlock
+                  order={orderDetail}
+                  dispatchers={settings?.telegramDispatchers ?? []}
+                />
               </>
             )}
           </DialogContent>
