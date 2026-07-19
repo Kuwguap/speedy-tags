@@ -136,6 +136,12 @@ function setupAdminTabs() {
   }
   const tabs = strip.querySelectorAll(".tab[data-tab]");
 
+  // Per-tab staleness: skip re-fetch when the tab loaded <60s ago. Tab
+  // switches within a minute become instant; explicit refresh buttons and
+  // post-mutation reloads bypass this via their force flags.
+  const TAB_STALE_MS = 60_000;
+  const _tabLastLoad = { transactions: 0, issuer: 0, dispatch: 0 };
+
   const activate = (id) => {
     tabs.forEach((btn) => {
       const on = btn.getAttribute("data-tab") === id;
@@ -147,6 +153,9 @@ function setupAdminTabs() {
     }
     dispatchPanel.classList.toggle("tab-panel-active", id === "dispatch");
     issuerPanel.classList.toggle("tab-panel-active", id === "issuer");
+    const fresh = Date.now() - (_tabLastLoad[id] || 0) < TAB_STALE_MS;
+    if (fresh) return;
+    _tabLastLoad[id] = Date.now();
     if (id === "issuer") {
       refreshIssuerAdmin();
     } else if (id === "transactions") {
@@ -155,6 +164,10 @@ function setupAdminTabs() {
     } else if (id === "dispatch") {
       adminApi.refreshRecipients?.();
       refreshIssuerAdmin();
+      // Dispatch panel data (moved off the unlock path): load on first visit.
+      try {
+        adminApi.refreshDispatchData?.();
+      } catch {}
     }
   };
 
@@ -474,6 +487,8 @@ let _txnRows = [];
 let _cachedIssuerDrivers = [];
 let _cachedDispatchRecipients = [];
 let _txnLoading = false;
+let _txnInflight = null;
+let _txnLastFetch = 0;
 const KRAB_TXN_PERIOD_KEY = "krab_txn_period";
 let txnUnifiedZoomScale = 1;
 
@@ -1053,21 +1068,56 @@ function _wpRenderCurrentWeek(weekRows, receiptUploads) {
   _wpRenderUnpaidTable(weekRows);
 }
 
+const WP_CHART_CACHE_KEY = "krab_wp_chart_rows_v1";
+const WP_CHART_CACHE_TTL_MS = 10 * 60 * 1000;
+
+function _wpLoadChartCache() {
+  try {
+    const raw = sessionStorage.getItem(WP_CHART_CACHE_KEY);
+    if (!raw) return null;
+    const { ts, rows } = JSON.parse(raw);
+    if (!Array.isArray(rows) || Date.now() - ts > WP_CHART_CACHE_TTL_MS) return null;
+    return rows;
+  } catch (_) {
+    return null;
+  }
+}
+
+function _wpSaveChartCache(rows) {
+  try {
+    sessionStorage.setItem(WP_CHART_CACHE_KEY, JSON.stringify({ ts: Date.now(), rows }));
+  } catch (_) {
+    /* quota — the crawl just reruns next load */
+  }
+}
+
 async function _wpFetchAllTransactions() {
-  const all = [];
+  // History crawl for the chart: pages are fetched in parallel batches of 5
+  // (~30 serial round trips become ~3 waves). Stops at the first short page.
   const pageSize = 500;
-  let offset = 0;
   const maxItems = 15000;
-  while (all.length < maxItems) {
-    const res = await requestWithAdminJson(
-      `/transactions/full?limit=${pageSize}&offset=${offset}&period=all`
+  const batchSize = 5;
+  const all = [];
+  let offset = 0;
+  for (;;) {
+    const offsets = Array.from({ length: batchSize }, (_, i) => offset + i * pageSize);
+    const pages = await Promise.all(
+      offsets.map((o) =>
+        requestWithAdminJson(`/transactions/full?limit=${pageSize}&offset=${o}&period=all`)
+      )
     );
-    if (!res.ok) throw new Error(res.error || "FETCH_FAILED");
-    const page = Array.isArray(res.data) ? res.data : [];
-    if (page.length === 0) break;
-    all.push(...page);
-    if (page.length < pageSize) break;
-    offset += pageSize;
+    let sawShortPage = false;
+    for (const res of pages) {
+      if (!res.ok) throw new Error(res.error || "FETCH_FAILED");
+      const page = Array.isArray(res.data) ? res.data : [];
+      all.push(...page);
+      if (page.length < pageSize) {
+        sawShortPage = true;
+        break;
+      }
+    }
+    offset += batchSize * pageSize;
+    if (sawShortPage || all.length >= maxItems) break;
   }
   return all;
 }
@@ -1086,14 +1136,6 @@ async function refreshWeeklyPerformance() {
     ]);
     if (!hasAdminPassword()) return;
 
-    let chartRows = _wpChartRows;
-    if (chartRows.length === 0) {
-      if (statusEl) statusEl.textContent = "Loading history for chart (may take a moment)…";
-      chartRows = await _wpFetchAllTransactions();
-      if (!hasAdminPassword()) return;
-      _wpChartRows = chartRows;
-    }
-
     const weekRows = weekRes.ok && Array.isArray(weekRes.data) ? weekRes.data : [];
     _wpWeekReceipts =
       receiptsRes.ok && Array.isArray(receiptsRes.data) ? receiptsRes.data : [];
@@ -1106,13 +1148,39 @@ async function refreshWeeklyPerformance() {
       const v = String(rangeEl.value || "104");
       maxWeeks = v === "all" ? null : parseInt(v, 10) || 104;
     }
-    const buckets = _wpBuildWeeklyBuckets(chartRows, maxWeeks);
-    _wpDrawChart(document.getElementById("wp-chart"), buckets);
 
-    if (statusEl) {
-      const wkNote = weekRes.ok ? "" : " (current-week API partial — check password)";
-      statusEl.textContent =
-        `Chart: ${buckets.length} week(s) from ${chartRows.length} transactions.${wkNote}`;
+    const drawFrom = (rows, note) => {
+      const buckets = _wpBuildWeeklyBuckets(rows, maxWeeks);
+      _wpDrawChart(document.getElementById("wp-chart"), buckets);
+      if (statusEl) {
+        const wkNote = weekRes.ok ? "" : " (current-week API partial — check password)";
+        statusEl.textContent =
+          `Chart: ${buckets.length} week(s) from ${rows.length} transactions.${note || ""}${wkNote}`;
+      }
+    };
+
+    if (_wpChartRows.length === 0) {
+      const cached = _wpLoadChartCache();
+      if (cached) _wpChartRows = cached;
+    }
+
+    if (_wpChartRows.length > 0) {
+      drawFrom(_wpChartRows, "");
+    } else {
+      // Paint the chart NOW from this week's rows, then upgrade to full
+      // history in the background — the page never blocks on the crawl.
+      drawFrom(weekRows, " · loading full history…");
+      _wpFetchAllTransactions()
+        .then((rows) => {
+          if (!hasAdminPassword()) return;
+          _wpChartRows = rows;
+          _wpSaveChartCache(rows);
+          drawFrom(rows, "");
+        })
+        .catch((e) => {
+          console.error("wp history crawl:", e);
+          if (statusEl) statusEl.textContent = "Chart shows current week only (history fetch failed).";
+        });
     }
   } catch (e) {
     console.error(e);
@@ -1132,6 +1200,7 @@ function setupWeeklyPerformanceEvents() {
   if (refreshBtn) {
     refreshBtn.addEventListener("click", () => {
       _wpChartRows = [];
+      try { sessionStorage.removeItem(WP_CHART_CACHE_KEY); } catch (_) {}
       refreshWeeklyPerformance();
     });
   }
@@ -1364,6 +1433,18 @@ function updateTxnAuthGate() {
 }
 
 async function refreshUnifiedTransactions() {
+  // In-flight dedupe + 30s freshness window: the boot path historically fired
+  // this 4x (tab activate, applyLoggedInUI x2, explicit boot call) — collapse
+  // duplicates onto the single pending request / recent result.
+  if (_txnInflight) return _txnInflight;
+  if (!arguments[0] && Date.now() - _txnLastFetch < 30_000 && _txnRows.length > 0) return;
+  _txnInflight = _refreshUnifiedTransactionsInner().finally(() => {
+    _txnInflight = null;
+  });
+  return _txnInflight;
+}
+
+async function _refreshUnifiedTransactionsInner() {
   setTxnBanner("");
   if (updateTxnAuthGate()) {
     setTxnStatus("");
@@ -1425,8 +1506,8 @@ async function refreshUnifiedTransactions() {
         }.`
       : ""
   );
+  _txnLastFetch = Date.now();
   renderUnifiedTransactions();
-  refreshWeeklyPerformance();
   renderUnifiedDriversTable();
 }
 
@@ -1436,6 +1517,8 @@ function doAdminLogout() {
   clearAdminAuthErrorDisplays();
   _issuerAiSnapshot = null;
   _txnLoading = false;
+  _txnInflight = null;
+  _txnLastFetch = 0;
   _txnRows = [];
   _wpChartRows = [];
   _wpWeekReceipts = [];
@@ -1473,16 +1556,21 @@ function setupTxnEvents() {
       try {
         localStorage.setItem(KRAB_TXN_PERIOD_KEY, periodSel.value);
       } catch (_) {}
-      refreshUnifiedTransactions();
+      refreshUnifiedTransactions(true);
     });
   }
   const refresh = document.getElementById("txn-refresh-btn");
   if (refresh) {
-    refresh.addEventListener("click", () => refreshUnifiedTransactions());
+    refresh.addEventListener("click", () => refreshUnifiedTransactions(true));
   }
   const search = document.getElementById("txn-search-input");
   if (search) {
-    search.addEventListener("input", () => renderUnifiedTransactions());
+    // Debounced: the 2000-row table rebuild is too heavy for per-keystroke.
+    let t = null;
+    search.addEventListener("input", () => {
+      if (t) clearTimeout(t);
+      t = setTimeout(() => renderUnifiedTransactions(), 180);
+    });
   }
 }
 
@@ -2108,9 +2196,25 @@ function applyIssuerSettingsUi(settings) {
   }
 }
 
-async function refreshIssuerAdmin() {
+let _issuerInflight = null;
+let _issuerLastFetch = 0;
+
+async function refreshIssuerAdmin(force) {
+  // This is a 10+N request suite — dedupe concurrent calls and skip repeats
+  // within 60s. Mutation handlers pass force=true so post-edit reloads always run.
+  if (_issuerInflight) return _issuerInflight;
+  if (!force && Date.now() - _issuerLastFetch < 60_000) return;
+  _issuerLastFetch = Date.now();
+  _issuerInflight = _refreshIssuerAdminInner().finally(() => {
+    _issuerInflight = null;
+  });
+  return _issuerInflight;
+}
+
+async function _refreshIssuerAdminInner() {
   setIssuerBanner("");
   if (updateIssuerAuthGate()) {
+    _issuerLastFetch = 0; // locked — don't count this as a fetch
     return;
   }
   const dtb = document.getElementById("issuer-drivers-tbody");
@@ -2655,7 +2759,9 @@ function renderTransactions(items) {
 async function refreshTransactions() {
   const body = document.getElementById("tx-body");
   try {
-    const data = await fetchWithAdmin("/transactions");
+    // Bounded: the Dispatch panel this feeds shows recent activity; the
+    // unbounded fetch was the heaviest single request on the unlock path.
+    const data = await fetchWithAdmin("/transactions?limit=300");
     if (!hasAdminPassword()) {
       return;
     }
@@ -3489,6 +3595,28 @@ function buildClientWindowSummary(allTx, windowKey) {
   };
 }
 
+// The summary table's Driver Phone column joins on the issuer drivers
+// directory. Historically that cache only filled when the issuer tab was
+// opened, so the column rendered blank on first load — fetch it on demand.
+let _issuerDriversInflight = null;
+async function ensureIssuerDriversLoaded() {
+  if (Array.isArray(_cachedIssuerDrivers) && _cachedIssuerDrivers.length > 0) return;
+  if (_issuerDriversInflight) return _issuerDriversInflight;
+  _issuerDriversInflight = (async () => {
+    try {
+      const res = await issuerApiJson("/issuer-admin/drivers");
+      if (res.ok && Array.isArray(res.data)) {
+        _cachedIssuerDrivers = res.data;
+      }
+    } catch (_) {
+      /* summary still renders; phone cells fall back to em-dash */
+    } finally {
+      _issuerDriversInflight = null;
+    }
+  })();
+  return _issuerDriversInflight;
+}
+
 async function refreshSummary() {
   const windowEl = document.getElementById("summary-window");
   const periodEl = document.getElementById("summary-period");
@@ -3530,6 +3658,8 @@ async function refreshSummary() {
     if (!hasAdminPassword()) {
       return;
     }
+    // Load the drivers directory before rendering so Driver Phone resolves.
+    await ensureIssuerDriversLoaded();
     lastSummary = data;
     periodEl.textContent =
       data.period_start_ny && data.period_end_ny
@@ -3663,12 +3793,13 @@ async function tryInitialLogin() {
   const genAtStart = _adminAuthSuccessGeneration;
   if (!hasAdminPassword()) return;
   try {
-    await refreshTransactions();
+    // Validate the password with ONE cheap request, unlock the UI
+    // immediately, and load the rest in parallel without blocking paint.
     await refreshLatest();
-    await refreshSummary();
     bumpAdminAuthSuccessGeneration();
     applyLoggedInUI(true);
-    refreshWeeklyPerformance();
+    // Dispatch-panel data (transactions list, rolling summary) loads lazily
+    // on first visit to the Dispatch tab — not on the unlock path.
   } catch {
     if (_adminAuthSuccessGeneration !== genAtStart) {
       return;
@@ -3751,13 +3882,11 @@ function setupEvents() {
     syncAdminPasswordInputs(pw);
     clearAdminAuthErrorDisplays();
     try {
-      await refreshTransactions();
+      // One cheap validating request, then unlock and load the rest async.
       await refreshLatest();
-      await refreshSummary();
       bumpAdminAuthSuccessGeneration();
       applyLoggedInUI(true);
-      refreshWeeklyPerformance();
-      // Recipients will be refreshed by the modified applyLoggedInUI
+      // Dispatch-panel data loads lazily on first Dispatch-tab visit.
     } catch (e) {
       console.error(e);
       storePassword("");
@@ -4350,9 +4479,17 @@ function setupEvents() {
     originalApplyLoggedInUI(loggedIn);
     if (loggedIn) {
       updateIssuerAuthGate();
-      refreshRecipients();
-      refreshIssuerAdmin();
-      maybeRefreshTxnTab();
+      // Lazy per-tab: only load data for the tab the user is looking at.
+      // Other tabs load on first activation (see setupAdminTabs.activate).
+      if (transactionsTabActive()) {
+        maybeRefreshTxnTab();
+        refreshWeeklyPerformance();
+      } else if (document.getElementById("panel-issuer")?.classList.contains("tab-panel-active")) {
+        refreshIssuerAdmin();
+      } else {
+        refreshRecipients();
+        adminApi.refreshDispatchData?.();
+      }
     } else {
       updateIssuerAuthGate();
       updateTxnAuthGate();
@@ -4378,6 +4515,9 @@ function setupEvents() {
   // etc.) can reach them. Must happen before applyLoggedInUI() so any
   // ordering between setupEvents() and tab activation is safe.
   adminApi.refreshRecipients = refreshRecipients;
+  adminApi.refreshDispatchData = () => {
+    void Promise.allSettled([refreshTransactions(), refreshLatest(), refreshSummary()]);
+  };
 
   // Initial lock layout: without this, first paint shows tables before any login attempt.
   applyLoggedInUI(!!String(getStoredPassword() || "").trim());
@@ -4394,13 +4534,8 @@ window.addEventListener("DOMContentLoaded", async () => {
   // through applyLoggedInUI() at the end of setupEvents(); calling it here
   // would reference an undefined name in this scope (TDZ ReferenceError).
   await tryInitialLogin();
-  // If the Transactions tab is active on first load and we already have a
-  // stored password, kick off the joined fetch immediately so the spreadsheet
-  // is populated without the user switching tabs.
-  if (transactionsTabActive() && getStoredPassword()) {
-    refreshUnifiedTransactions();
-    refreshWeeklyPerformance();
-  }
+  // applyLoggedInUI (called inside tryInitialLogin) loads the visible tab's
+  // data; the old explicit re-kick here caused duplicate joined fetches.
 });
 
 
