@@ -3357,6 +3357,69 @@ async function askSummaryWithGpt(question, options = {}) {
   return (res.data && res.data.answer) || "No answer returned.";
 }
 
+// ── Curated client list (Client PDF Name + client phone) ──────────────────
+function buildClientListRows() {
+  const items = (lastSummary && lastSummary.items) || [];
+  const out = [];
+  const seen = new Set();
+  for (const it of items) {
+    const pdf = String((it && it.filename) || "").trim();
+    const phone = String(clientPhoneFor(it) || "").trim();
+    if (!pdf && !phone) continue;
+    const key = pdf.toLowerCase() + "|" + phone;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ pdf: pdf || "—", phone: phone || "—" });
+  }
+  return out;
+}
+
+async function openClientListModal() {
+  // Need a summary window loaded; generate one on demand.
+  if (!lastSummary || !lastSummary.items || lastSummary.items.length === 0) {
+    await refreshSummary();
+  }
+  const rows = buildClientListRows();
+  const modal = document.getElementById("client-list-modal");
+  const tbody = document.getElementById("client-list-tbody");
+  const count = document.getElementById("client-list-count");
+  if (!modal || !tbody) return;
+  if (rows.length === 0) {
+    alert("No client rows in the current summary window. Generate a summary first.");
+    return;
+  }
+  tbody.innerHTML = rows
+    .map(
+      (r, i) =>
+        `<tr>` +
+        `<td style="padding:0.35rem 0.5rem; border-bottom:1px solid rgba(255,255,255,0.06); opacity:0.6;">${i + 1}</td>` +
+        `<td style="padding:0.35rem 0.5rem; border-bottom:1px solid rgba(255,255,255,0.06);">${escapeIssuerText(r.pdf)}</td>` +
+        `<td style="padding:0.35rem 0.5rem; border-bottom:1px solid rgba(255,255,255,0.06); font-variant-numeric:tabular-nums;">${escapeIssuerText(r.phone)}</td>` +
+        `</tr>`
+    )
+    .join("");
+  if (count) count.textContent = `${rows.length} client${rows.length === 1 ? "" : "s"}`;
+  modal.style.display = "flex";
+}
+
+function downloadClientListCsv() {
+  const rows = buildClientListRows();
+  if (rows.length === 0) {
+    alert("No client rows to download. Generate a summary first.");
+    return;
+  }
+  const csvRows = [["ClientPdfName", "ClientPhone"], ...rows.map((r) => [r.pdf, r.phone])];
+  const csv = csvRows
+    .map((r) => r.map((f) => `"${String(f ?? "").replace(/"/g, '""')}"`).join(","))
+    .join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `client-list-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
 function downloadSummaryCsv() {
   if (!lastSummary || !lastSummary.items || lastSummary.items.length === 0) {
     alert("No summary data to download. Generate a summary first.");
@@ -3958,6 +4021,32 @@ function setupEvents() {
   if (summaryDownloadBtn) {
     summaryDownloadBtn.addEventListener("click", () => {
       downloadSummaryCsv();
+    });
+  }
+
+  const clientListBtn = document.getElementById("summary-client-list-btn");
+  if (clientListBtn) {
+    clientListBtn.addEventListener("click", () => {
+      openClientListModal();
+    });
+  }
+  const clientListClose = document.getElementById("client-list-close-btn");
+  if (clientListClose) {
+    clientListClose.addEventListener("click", () => {
+      const m = document.getElementById("client-list-modal");
+      if (m) m.style.display = "none";
+    });
+  }
+  const clientListDownload = document.getElementById("client-list-download-btn");
+  if (clientListDownload) {
+    clientListDownload.addEventListener("click", () => {
+      downloadClientListCsv();
+    });
+  }
+  const clientListModal = document.getElementById("client-list-modal");
+  if (clientListModal) {
+    clientListModal.addEventListener("click", (ev) => {
+      if (ev.target === clientListModal) clientListModal.style.display = "none";
     });
   }
 
