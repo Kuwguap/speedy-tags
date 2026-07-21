@@ -489,6 +489,7 @@ let _cachedDispatchRecipients = [];
 let _txnLoading = false;
 let _txnInflight = null;
 let _txnLastFetch = 0;
+let _txnRerunForced = false;
 const KRAB_TXN_PERIOD_KEY = "krab_txn_period";
 let txnUnifiedZoomScale = 1;
 
@@ -1432,14 +1433,24 @@ function updateTxnAuthGate() {
   return !pw;
 }
 
-async function refreshUnifiedTransactions() {
+async function refreshUnifiedTransactions(force) {
   // In-flight dedupe + 30s freshness window: the boot path historically fired
   // this 4x (tab activate, applyLoggedInUI x2, explicit boot call) — collapse
   // duplicates onto the single pending request / recent result.
-  if (_txnInflight) return _txnInflight;
-  if (!arguments[0] && Date.now() - _txnLastFetch < 30_000 && _txnRows.length > 0) return;
+  if (_txnInflight) {
+    // A FORCED call (period change, refresh button) during an in-flight fetch
+    // must not be swallowed — the fetch already running carries the old
+    // period. Queue one re-run with the fresh select state for when it lands.
+    if (force) _txnRerunForced = true;
+    return _txnInflight;
+  }
+  if (!force && Date.now() - _txnLastFetch < 30_000 && _txnRows.length > 0) return;
   _txnInflight = _refreshUnifiedTransactionsInner().finally(() => {
     _txnInflight = null;
+    if (_txnRerunForced) {
+      _txnRerunForced = false;
+      refreshUnifiedTransactions(true);
+    }
   });
   return _txnInflight;
 }
