@@ -3392,9 +3392,9 @@ async function openClientListModal() {
     .map(
       (r, i) =>
         `<tr>` +
-        `<td style="padding:0.35rem 0.5rem; border-bottom:1px solid rgba(255,255,255,0.06); opacity:0.6;">${i + 1}</td>` +
-        `<td style="padding:0.35rem 0.5rem; border-bottom:1px solid rgba(255,255,255,0.06);">${escapeIssuerText(r.pdf)}</td>` +
-        `<td style="padding:0.35rem 0.5rem; border-bottom:1px solid rgba(255,255,255,0.06); font-variant-numeric:tabular-nums;">${escapeIssuerText(r.phone)}</td>` +
+        `<td style="padding:0.35rem 0.5rem; border-bottom:1px solid rgba(15,23,42,0.1); opacity:0.6;">${i + 1}</td>` +
+        `<td style="padding:0.35rem 0.5rem; border-bottom:1px solid rgba(15,23,42,0.1);">${escapeIssuerText(r.pdf)}</td>` +
+        `<td style="padding:0.35rem 0.5rem; border-bottom:1px solid rgba(15,23,42,0.1); font-variant-numeric:tabular-nums;">${escapeIssuerText(r.phone)}</td>` +
         `</tr>`
     )
     .join("");

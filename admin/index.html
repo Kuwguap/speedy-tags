@@ -2182,28 +2182,28 @@
     <!-- Curated client list (Client PDF Name + client phone) modal -->
     <div
       id="client-list-modal"
-      style="display:none; position:fixed; inset:0; z-index:1000; background:rgba(10,12,16,0.72); backdrop-filter:blur(2px); align-items:center; justify-content:center; padding:1rem;"
+      style="display:none; position:fixed; inset:0; z-index:1000; background:rgba(15,23,42,0.45); backdrop-filter:blur(2px); align-items:center; justify-content:center; padding:1rem;"
     >
       <div
-        style="background:var(--bg-panel, #101418); color:var(--text-main, #e8eaed); border:1px solid var(--border-subtle, #2a2f36); border-radius:14px; width:min(680px, 96vw); max-height:88vh; display:flex; flex-direction:column; box-shadow:0 18px 60px rgba(0,0,0,0.5);"
+        style="background:#ffffff; color:var(--text-main, #0f172a); border:1px solid var(--border-subtle, #cbd5e1); border-radius:14px; width:min(680px, 96vw); max-height:88vh; display:flex; flex-direction:column; box-shadow:0 18px 60px rgba(15,23,42,0.25); text-align:left;"
       >
-        <div style="display:flex; align-items:center; gap:0.6rem; padding:0.9rem 1.1rem; border-bottom:1px solid var(--border-subtle, #2a2f36);">
+        <div style="display:flex; align-items:center; gap:0.6rem; padding:0.9rem 1.1rem; border-bottom:1px solid var(--border-subtle, #cbd5e1);">
           <strong style="font-size:0.95rem;">👥 Client list</strong>
-          <span id="client-list-count" class="small" style="opacity:0.7;"></span>
+          <span id="client-list-count" class="small" style="opacity:0.75;"></span>
           <span style="flex:1"></span>
           <button id="client-list-download-btn" class="secondary" type="button">⬇ <span>Download CSV</span></button>
           <button id="client-list-close-btn" class="secondary" type="button">✕</button>
         </div>
-        <div class="small" style="padding:0.5rem 1.1rem 0; opacity:0.65;">
+        <div class="small" style="padding:0.5rem 1.1rem 0; opacity:0.8;">
           Curated from the current summary window: Client PDF Name + client phone.
         </div>
         <div style="overflow:auto; padding:0.6rem 1.1rem 1.1rem;">
-          <table style="width:100%; border-collapse:collapse; font-size:0.85rem;">
+          <table style="width:100%; border-collapse:collapse; font-size:0.85rem; color:var(--text-main, #0f172a);">
             <thead>
               <tr>
-                <th style="text-align:left; padding:0.4rem 0.5rem; border-bottom:1px solid var(--border-subtle, #2a2f36);">#</th>
-                <th style="text-align:left; padding:0.4rem 0.5rem; border-bottom:1px solid var(--border-subtle, #2a2f36);">Client PDF Name</th>
-                <th style="text-align:left; padding:0.4rem 0.5rem; border-bottom:1px solid var(--border-subtle, #2a2f36);">Client Phone</th>
+                <th style="text-align:left; padding:0.4rem 0.5rem; border-bottom:1px solid var(--border-subtle, #cbd5e1);">#</th>
+                <th style="text-align:left; padding:0.4rem 0.5rem; border-bottom:1px solid var(--border-subtle, #cbd5e1);">Client PDF Name</th>
+                <th style="text-align:left; padding:0.4rem 0.5rem; border-bottom:1px solid var(--border-subtle, #cbd5e1);">Client Phone</th>
               </tr>
             </thead>
             <tbody id="client-list-tbody"></tbody>
