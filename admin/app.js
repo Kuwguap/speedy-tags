@@ -3064,6 +3064,15 @@ function clientPhoneFor(it) {
   );
 }
 
+function clientEmailFor(it) {
+  const direct =
+    it.client_email || it.lead_client_email || it.customer_email || "";
+  if (direct) return String(direct).trim();
+  // Fallback: scrape an email out of the free-text client details.
+  const m = String(it.client_details || "").match(/[\w.+-]+@[\w-]+\.[\w.-]+/);
+  return m ? m[0] : "";
+}
+
 function renderSummaryTable(summary) {
   const tbody = document.getElementById("summary-tbody");
   if (!tbody) return;
@@ -3074,7 +3083,7 @@ function renderSummaryTable(summary) {
   if (items.length === 0) {
     const tr = document.createElement("tr");
     const td = document.createElement("td");
-    td.colSpan = 16;
+    td.colSpan = 17;
     td.className = "muted";
     td.textContent = "No transmissions in this summary window.";
     tr.appendChild(td);
@@ -3135,6 +3144,10 @@ function renderSummaryTable(summary) {
     const tdClientPhone = document.createElement("td");
     tdClientPhone.textContent = clientPhoneFor(it) || "—";
     tr.appendChild(tdClientPhone);
+
+    const tdClientEmail = document.createElement("td");
+    tdClientEmail.textContent = clientEmailFor(it) || "—";
+    tr.appendChild(tdClientEmail);
 
     const tdSuccess = document.createElement("td");
     tdSuccess.textContent =
@@ -3365,11 +3378,12 @@ function buildClientListRows() {
   for (const it of items) {
     const pdf = String((it && it.filename) || "").trim();
     const phone = String(clientPhoneFor(it) || "").trim();
-    if (!pdf && !phone) continue;
-    const key = pdf.toLowerCase() + "|" + phone;
+    const email = String(clientEmailFor(it) || "").trim();
+    if (!pdf && !phone && !email) continue;
+    const key = pdf.toLowerCase() + "|" + phone + "|" + email.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ pdf: pdf || "—", phone: phone || "—" });
+    out.push({ pdf: pdf || "—", phone: phone || "—", email: email || "—" });
   }
   return out;
 }
@@ -3395,6 +3409,7 @@ async function openClientListModal() {
         `<td style="padding:0.35rem 0.5rem; border-bottom:1px solid rgba(15,23,42,0.1); opacity:0.6;">${i + 1}</td>` +
         `<td style="padding:0.35rem 0.5rem; border-bottom:1px solid rgba(15,23,42,0.1);">${escapeIssuerText(r.pdf)}</td>` +
         `<td style="padding:0.35rem 0.5rem; border-bottom:1px solid rgba(15,23,42,0.1); font-variant-numeric:tabular-nums;">${escapeIssuerText(r.phone)}</td>` +
+        `<td style="padding:0.35rem 0.5rem; border-bottom:1px solid rgba(15,23,42,0.1);">${escapeIssuerText(r.email)}</td>` +
         `</tr>`
     )
     .join("");
@@ -3408,7 +3423,7 @@ function downloadClientListCsv() {
     alert("No client rows to download. Generate a summary first.");
     return;
   }
-  const csvRows = [["ClientPdfName", "ClientPhone"], ...rows.map((r) => [r.pdf, r.phone])];
+  const csvRows = [["ClientPdfName", "ClientPhone", "ClientEmail"], ...rows.map((r) => [r.pdf, r.phone, r.email])];
   const csv = csvRows
     .map((r) => r.map((f) => `"${String(f ?? "").replace(/"/g, '""')}"`).join(","))
     .join("\n");
@@ -3437,6 +3452,7 @@ function downloadSummaryCsv() {
       "DriverName",
       "DriverPhone",
       "ClientPhone",
+      "ClientEmail",
       "Success",
       "Status",
       "Count",
@@ -3480,6 +3496,7 @@ function downloadSummaryCsv() {
       it.recipient_name || "Not recorded",
       driverPhoneFor(it, driverPhoneMap),
       clientPhoneFor(it),
+      clientEmailFor(it),
       (it.delivery_status || "").toUpperCase() === "DELIVERED" ? "YES" : "NO",
       (it.delivery_status || "").toUpperCase() || "UNKNOWN",
       issuerHandleCounts[normalizeHandle(it.telegram_handle) || "__unknown__"] || 0,
