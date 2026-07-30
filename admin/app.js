@@ -27,6 +27,17 @@ function _isLocalHost(hostname) {
   return false;
 }
 
+function _isProductionWebHost(hostname) {
+  const h = String(hostname || "").toLowerCase();
+  return (
+    h === "tristatetags.com" ||
+    h === "www.tristatetags.com" ||
+    h === "tristatetag.com" ||
+    h === "www.tristatetag.com" ||
+    h.endsWith(".vercel.app")
+  );
+}
+
 function resolveApiBase() {
   try {
     const params = new URLSearchParams(window.location.search);
@@ -55,6 +66,17 @@ function resolveApiBase() {
   try {
     const stored = (localStorage.getItem("krab_api_base") || "").trim();
     if (stored.startsWith("https://") || stored.startsWith("http://")) {
+      const loc = window.location;
+      const onProd =
+        loc &&
+        loc.protocol === "https:" &&
+        _isProductionWebHost(loc.hostname);
+      if (
+        onProd &&
+        (stored.includes("krab-dispatch-api.onrender.com") || stored.includes("onrender.com"))
+      ) {
+        return loc.origin.replace(/\/+$/, "") + "/api/dispatch";
+      }
       return stored.replace(/\/+$/, "");
     }
   } catch {
@@ -70,6 +92,10 @@ function resolveApiBase() {
       _isLocalHost(loc.hostname)
     ) {
       return loc.origin.replace(/\/+$/, "");
+    }
+    // Same-origin proxy on production (mobile Safari blocks cross-origin Render API).
+    if (loc && loc.protocol === "https:" && _isProductionWebHost(loc.hostname)) {
+      return loc.origin.replace(/\/+$/, "") + "/api/dispatch";
     }
   } catch {
     // ignore
@@ -93,6 +119,12 @@ function transactionsTabActive() {
   const p = document.getElementById("panel-transactions");
   return !!(p && p.classList.contains("tab-panel-active"));
 }
+
+// Forward registry for handlers that are owned by setupEvents()'s closure
+// (e.g. refreshRecipients) but need to be invoked from module-scope code
+// like setupAdminTabs()'s tab activation. setupEvents() populates this at
+// the end of its initialization; callers must use optional chaining.
+const adminApi = {};
 
 function trackTabActive() {
   const p = document.getElementById("panel-track");
@@ -121,6 +153,12 @@ function setupAdminTabs() {
   }
   const tabs = strip.querySelectorAll(".tab[data-tab]");
 
+  // Per-tab staleness: skip re-fetch when the tab loaded <60s ago. Tab
+  // switches within a minute become instant; explicit refresh buttons and
+  // post-mutation reloads bypass this via their force flags.
+  const TAB_STALE_MS = 60_000;
+  const _tabLastLoad = { transactions: 0, issuer: 0, dispatch: 0 };
+
   const activate = (id) => {
     tabs.forEach((btn) => {
       const on = btn.getAttribute("data-tab") === id;
@@ -138,13 +176,21 @@ function setupAdminTabs() {
     if (id !== "track") {
       stopTrackAutoRefresh();
     }
+    const fresh = Date.now() - (_tabLastLoad[id] || 0) < TAB_STALE_MS;
+    if (fresh) return;
+    _tabLastLoad[id] = Date.now();
     if (id === "issuer") {
       refreshIssuerAdmin();
     } else if (id === "transactions") {
       refreshUnifiedTransactions();
+      refreshWeeklyPerformance();
     } else if (id === "dispatch") {
-      refreshRecipients();
+      adminApi.refreshRecipients?.();
       refreshIssuerAdmin();
+      // Dispatch panel data (moved off the unlock path): load on first visit.
+      try {
+        adminApi.refreshDispatchData?.();
+      } catch {}
     } else if (id === "track") {
       refreshDriverTrack();
       startTrackAutoRefresh();
@@ -258,6 +304,23 @@ function escapeHtmlAttr(s) {
     .replace(/>/g, "&gt;");
 }
 
+function receiptViewHref(url, ref) {
+  const r = String(ref || "").trim();
+  if (r) {
+    return (
+      API_BASE +
+      "/issuer-admin/receipts/view?ref=" +
+      encodeURIComponent(r)
+    );
+  }
+  const u = String(url || "").trim();
+  if (!u) return "";
+  if (u.includes("api.telegram.org/file/bot")) {
+    return "";
+  }
+  return u;
+}
+
 function receiptViewUrl(ref) {
   return `${API_BASE}/issuer-admin/receipts/view?ref=${encodeURIComponent(
     String(ref || "").trim()
@@ -274,8 +337,12 @@ function receiptLinkHtml(url, ref) {
     )}" target="_blank" rel="noopener noreferrer">View</a>`;
   }
   const u = String(url || "").trim();
-  if (!u) return "—";
-  return `<a href="${escapeHtmlAttr(u)}" target="_blank" rel="noopener noreferrer">View</a>`;
+  // Only show a "View" link when a receipt image was actually uploaded.
+  // A reference id alone must not produce a link (nothing to view yet).
+  if (!u) return '<span class="muted">—</span>';
+  const href = receiptViewHref(u, ref);
+  if (!href) return '<span class="muted">—</span>';
+  return `<a href="${escapeHtmlAttr(href)}" target="_blank" rel="noopener noreferrer">View</a>`;
 }
 
 function issuerGroupFromHandle(rawHandle) {
@@ -365,6 +432,7 @@ async function requestWithAdminJson(path, opts = {}) {
     return { ok: false, status: 0, error: "NO_PASSWORD" };
   }
   const headers = Object.assign({}, opts.headers || {}, {
+    Accept: "application/json",
     "X-Admin-Password": pw,
   });
   let res;
@@ -380,8 +448,15 @@ async function requestWithAdminJson(path, opts = {}) {
   if (!res.ok) {
     return { ok: false, status: res.status, error: "HTTP_" + res.status };
   }
+  const text = await res.text();
+  if (!text.trim()) {
+    return { ok: false, status: res.status, error: "EMPTY_RESPONSE" };
+  }
+  if (text.trimStart().startsWith("<")) {
+    return { ok: false, status: res.status, error: "HTML_RESPONSE" };
+  }
   try {
-    const data = await res.json();
+    const data = JSON.parse(text);
     return { ok: true, status: res.status, data };
   } catch (e) {
     return { ok: false, status: res.status, error: "BAD_JSON" };
@@ -401,16 +476,17 @@ function issuerFormatDetail(detail) {
 
 async function issuerApiJson(path, opts = {}) {
   const pw = getStoredPassword();
-  if (!pw) return { ok: false, error: "NO_PASSWORD" };
-  const headers = Object.assign({}, opts.headers || {}, {
-    "X-Admin-Password": pw,
-  });
+  const allowAnon = opts.allowAnonymous === true;
+  if (!pw && !allowAnon) return { ok: false, error: "NO_PASSWORD" };
+  const headers = Object.assign({}, opts.headers || {});
+  if (pw) headers["X-Admin-Password"] = pw;
   if (opts.body !== undefined && opts.body !== null) {
     headers["Content-Type"] = headers["Content-Type"] || "application/json";
   }
+  const { allowAnonymous: _drop, ...fetchOpts } = opts;
   let res;
   try {
-    res = await fetch(API_BASE + path, { ...opts, headers });
+    res = await fetch(API_BASE + path, { ...fetchOpts, headers });
   } catch (e) {
     return { ok: false, error: "NETWORK: " + ((e && e.message) || String(e)) };
   }
@@ -448,7 +524,12 @@ function escapeIssuerText(s) {
 // ==========================================================================
 
 let _txnRows = [];
+let _cachedIssuerDrivers = [];
+let _cachedDispatchRecipients = [];
 let _txnLoading = false;
+let _txnInflight = null;
+let _txnLastFetch = 0;
+let _txnRerunForced = false;
 const KRAB_TXN_PERIOD_KEY = "krab_txn_period";
 let txnUnifiedZoomScale = 1;
 
@@ -510,8 +591,22 @@ function _txnDriverEmailSuffix(row) {
   return ` <span class="small muted">${escapeIssuerText(e)}</span>`;
 }
 
+function _txnDriverHandleSuffix(record) {
+  if (!record) return "";
+  const raw =
+    record.telegram_username ||
+    record.driver_telegram_username ||
+    record.driver_handle ||
+    "";
+  const handle = String(raw || "").trim().replace(/^@+/, "");
+  if (!handle) return "";
+  return ` <span class="small muted">@${escapeIssuerText(handle)}</span>`;
+}
+
 function _txnDriverCell(row) {
-  const parts = [];
+  // Only the driver who actually accepted the lead is shown here. Decliners
+  // and reassignment history are intentionally hidden — operations supervisors
+  // only need to see who took the lead, their email, and the accept time.
   const accepted = row && row.driver_accepted;
   const selected = (row && row.driver_selected_name) || "";
   const history = Array.isArray(row && row.driver_history)
@@ -520,47 +615,27 @@ function _txnDriverCell(row) {
   const emailSuf = _txnDriverEmailSuffix(row);
 
   if (accepted && accepted.driver_name) {
-    parts.push(
-      `<div><strong>${escapeIssuerText(accepted.driver_name)}</strong>${emailSuf}` +
-        (accepted.accepted_at
-          ? ` <span class="small muted">· accepted ${escapeIssuerText(
-              formatNy(accepted.accepted_at)
-            )}</span>`
-          : "") +
-        "</div>"
+    const handleSuf = _txnDriverHandleSuffix(accepted);
+    const acceptedSuf = accepted.accepted_at
+      ? ` <span class="small muted">· accepted ${escapeIssuerText(
+          formatNy(accepted.accepted_at)
+        )}</span>`
+      : "";
+    return (
+      `<div><strong>${escapeIssuerText(accepted.driver_name)}</strong>${emailSuf}${handleSuf}${acceptedSuf}</div>`
     );
-  } else if (selected) {
-    parts.push(
-      `<div><strong>${escapeIssuerText(selected)}</strong>${emailSuf}</div>`
-    );
-  } else if (history.length > 0 && history[0].driver_name) {
-    parts.push(
-      `<div><strong>${escapeIssuerText(history[0].driver_name)}</strong>${emailSuf}</div>`
-    );
-  } else {
-    parts.push('<div class="muted">—</div>');
   }
 
-  const extras = history.filter((h) => {
-    if (!h || !h.driver_name) return false;
-    if (accepted && h.driver_name === accepted.driver_name) return false;
-    return true;
-  });
-  if (extras.length > 0) {
-    const lines = extras
-      .slice(0, 5)
-      .map((h) => {
-        const st = (h.status || "").toLowerCase();
-        const when = h.accepted_at || h.created_at;
-        const whenLabel = when ? ` · ${escapeIssuerText(formatNy(when))}` : "";
-        return `<div class="small muted">↳ ${escapeIssuerText(
-          h.driver_name
-        )}${st ? ` · ${escapeIssuerText(st)}` : ""}${whenLabel}</div>`;
-      })
-      .join("");
-    parts.push(lines);
+  // No accepted driver yet — fall back to the originally selected driver name
+  // so supervisors at least know who the lead was routed to. Still no decliner
+  // list.
+  if (selected) {
+    return `<div><strong>${escapeIssuerText(selected)}</strong>${emailSuf}</div>`;
   }
-  return parts.join("");
+  if (history.length > 0 && history[0].driver_name) {
+    return `<div><strong>${escapeIssuerText(history[0].driver_name)}</strong>${emailSuf}</div>`;
+  }
+  return '<div class="muted">—</div>';
 }
 
 function _txnIssuerCell(row) {
@@ -612,10 +687,67 @@ function _txnDispatcherCell(row) {
   return '<span class="muted">—</span>';
 }
 
+function _txnResolveDispatcherHandle(row) {
+  const h = String((row && row.issuer_submitter_handle) || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^@/, "");
+  if (h && h !== "unknown") return h;
+  const fallback = String((row && row.dispatcher_handle) || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^@/, "");
+  return fallback || "unknown";
+}
+
+function _txnDispatcherSlug(handle) {
+  return String(handle || "unknown")
+    .trim()
+    .toLowerCase()
+    .replace(/^@/, "") || "unknown";
+}
+
+function renderTxnDispatcherGroups(rows) {
+  const host = document.getElementById("txn-dispatcher-groups");
+  if (!host) return;
+  const map = new Map();
+  for (const r of rows || []) {
+    const handle = _txnResolveDispatcherHandle(r);
+    if (handle === "unknown") continue;
+    const cur = map.get(handle) || { total: 0, delivered: 0 };
+    cur.total += 1;
+    if (_wpIsTagIssued(r)) cur.delivered += 1;
+    map.set(handle, cur);
+  }
+  const list = [...map.entries()]
+    .map(([handle, v]) => ({ handle, slug: _txnDispatcherSlug(handle), ...v }))
+    .sort((a, b) => b.delivered - a.delivered || b.total - a.total || a.handle.localeCompare(b.handle));
+  if (list.length === 0) {
+    host.innerHTML = "";
+    host.style.display = "none";
+    return;
+  }
+  host.style.display = "block";
+  host.innerHTML =
+    `<div class="panel-title" style="margin-bottom:0.4rem;font-size:0.9rem">Dispatchers (grouped)</div>` +
+    `<div class="txn-dispatcher-chips">` +
+    list
+      .map(
+        (d) =>
+          `<a class="txn-dispatcher-chip" href="/fridaypayday/${encodeURIComponent(d.slug)}">` +
+          `<strong>@${escapeIssuerText(d.handle)}</strong>` +
+          `<span class="muted">${d.delivered} tag${d.delivered === 1 ? "" : "s"} · ${d.total} row${d.total === 1 ? "" : "s"}</span>` +
+          `</a>`
+      )
+      .join("") +
+    `</div>`;
+}
+
 function _txnReceiptCell(row) {
   const url = (row && row.receipt_image_url) || "";
-  if (!url) return '<span class="muted">—</span>';
-  return receiptLinkHtml(url, row && row.reference_id);
+  const ref = (row && row.reference_id) || "";
+  if (!url && !ref) return '<span class="muted">—</span>';
+  return receiptLinkHtml(url, ref);
 }
 
 function _txnPriceCell(row) {
@@ -650,6 +782,503 @@ function _txnFormatUsd(n) {
     minimumFractionDigits: hasCents ? 2 : 0,
     maximumFractionDigits: hasCents ? 2 : 0,
   }).format(v);
+}
+
+// ==========================================================================
+// Weekly performance dashboard (Transactions tab — tristatetags.com/backend)
+// ==========================================================================
+
+const PAYROLL_RATE_ISSUER = 9;
+const PAYROLL_RATE_DISPATCHER = 5;
+const PAYROLL_RATE_CLIENT_FINDER = 10;
+const KRAB_WP_CHART_RANGE_KEY = "krab_wp_chart_range";
+const NJ_TZ = "America/New_York";
+
+let _wpChartRows = [];
+let _wpWeekReceipts = [];
+let _wpLoading = false;
+
+function _wpParseNyMs(iso) {
+  if (!iso) return NaN;
+  const t = new Date(iso);
+  return Number.isNaN(t.getTime()) ? NaN : t.getTime();
+}
+
+function _wpRollingStartMs(days) {
+  return Date.now() - days * 24 * 60 * 60 * 1000;
+}
+
+function _wpNjWeekStartMs(ms) {
+  const d = new Date(ms);
+  const fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone: NJ_TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const parts = fmt.formatToParts(d);
+  const y = Number(parts.find((p) => p.type === "year").value);
+  const m = Number(parts.find((p) => p.type === "month").value);
+  const day = Number(parts.find((p) => p.type === "day").value);
+  const noonUtc = Date.UTC(y, m - 1, day, 17, 0, 0);
+  const weekday = new Date(noonUtc).getUTCDay();
+  const daysSinceMonday = (weekday + 6) % 7;
+  return noonUtc - daysSinceMonday * 24 * 60 * 60 * 1000;
+}
+
+function _wpWeekKey(ms) {
+  const weekStart = _wpNjWeekStartMs(ms);
+  const d = new Date(weekStart);
+  const y = d.getUTCFullYear();
+  const jan1 = Date.UTC(y, 0, 1, 12, 0, 0);
+  const weekNum =
+    Math.floor((weekStart - _wpNjWeekStartMs(jan1)) / (7 * 24 * 60 * 60 * 1000)) + 1;
+  return `${y}-W${String(weekNum).padStart(2, "0")}`;
+}
+
+function _wpWeekLabel(ms) {
+  const d = new Date(ms);
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: NJ_TZ,
+    month: "short",
+    day: "numeric",
+  }).format(d);
+}
+
+function _wpIsTagIssued(row) {
+  return ((row && row.delivery_status) || "").toUpperCase() === "DELIVERED";
+}
+
+function _wpHasReceipt(row) {
+  return !!String((row && row.receipt_image_url) || "").trim();
+}
+
+function _wpDriverName(row) {
+  const acc = row && row.driver_accepted;
+  if (acc && acc.driver_name) return String(acc.driver_name).trim();
+  const sel = (row && row.driver_selected_name) || "";
+  if (sel) return String(sel).trim();
+  const hist = Array.isArray(row && row.driver_history) ? row.driver_history : [];
+  if (hist[0] && hist[0].driver_name) return String(hist[0].driver_name).trim();
+  return "";
+}
+
+function _wpUnpaidReason(row) {
+  if (!_wpIsTagIssued(row)) {
+    const st = ((row && row.delivery_status) || "unknown").toUpperCase();
+    return `Tag not delivered yet (status: ${st})`;
+  }
+  const driver = _wpDriverName(row);
+  if (!driver) {
+    return "Delivered — no driver on file; receipt missing";
+  }
+  return `Driver ${driver} — accepted; receipt not uploaded`;
+}
+
+function _wpSumReceiptUsd(rows) {
+  let sum = 0;
+  for (const r of rows) {
+    const n = _txnParsePrice(r && r.receipt_price);
+    if (n > 0) sum += n;
+  }
+  return sum;
+}
+
+function _wpBuildWeeklyBuckets(rows, maxWeeks) {
+  const map = new Map();
+  for (const row of rows || []) {
+    const ms = _wpParseNyMs(row.timestamp_ny);
+    if (Number.isNaN(ms)) continue;
+    const key = _wpWeekKey(ms);
+    if (!map.has(key)) {
+      map.set(key, {
+        key,
+        weekStartMs: _wpNjWeekStartMs(ms),
+        tags: 0,
+        receipts: 0,
+        receiptUsd: 0,
+      });
+    }
+    const b = map.get(key);
+    if (_wpIsTagIssued(row)) {
+      b.tags += 1;
+      if (_wpHasReceipt(row)) {
+        b.receipts += 1;
+        b.receiptUsd += _txnParsePrice(row.receipt_price);
+      }
+    }
+  }
+  let list = Array.from(map.values()).sort((a, b) => a.weekStartMs - b.weekStartMs);
+  if (maxWeeks != null && maxWeeks > 0 && list.length > maxWeeks) {
+    list = list.slice(list.length - maxWeeks);
+  }
+  for (const b of list) {
+    b.label = _wpWeekLabel(b.weekStartMs);
+    b.payroll =
+      b.tags *
+      (PAYROLL_RATE_ISSUER + PAYROLL_RATE_DISPATCHER + PAYROLL_RATE_CLIENT_FINDER);
+  }
+  return list;
+}
+
+function _wpDrawChart(canvas, buckets) {
+  if (!canvas) return;
+  const dpr = window.devicePixelRatio || 1;
+  const cssW = canvas.clientWidth || 900;
+  const cssH = 220;
+  canvas.width = Math.round(cssW * dpr);
+  canvas.height = Math.round(cssH * dpr);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssW, cssH);
+
+  if (!buckets || buckets.length === 0) {
+    ctx.fillStyle = "#9ca3af";
+    ctx.font = "13px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("No data for chart — send tags through Dispatch.", cssW / 2, cssH / 2);
+    return;
+  }
+
+  const padL = 44;
+  const padR = 12;
+  const padT = 14;
+  const padB = 36;
+  const plotW = cssW - padL - padR;
+  const plotH = cssH - padT - padB;
+
+  let maxCount = 1;
+  let maxUsd = 1;
+  for (const b of buckets) {
+    maxCount = Math.max(maxCount, b.tags, b.receipts);
+    maxUsd = Math.max(maxUsd, b.receiptUsd / 100);
+  }
+
+  const n = buckets.length;
+  const groupW = plotW / n;
+  const barW = Math.min(14, groupW * 0.22);
+
+  ctx.strokeStyle = "rgba(148,163,184,0.2)";
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = padT + (plotH * i) / 4;
+    ctx.beginPath();
+    ctx.moveTo(padL, y);
+    ctx.lineTo(padL + plotW, y);
+    ctx.stroke();
+  }
+
+  buckets.forEach((b, i) => {
+    const cx = padL + groupW * i + groupW / 2;
+    const tagsH = (b.tags / maxCount) * plotH;
+    const recH = (b.receipts / maxCount) * plotH;
+    const usdH = (b.receiptUsd / 100 / maxUsd) * plotH;
+
+    ctx.fillStyle = "#38bdf8";
+    ctx.fillRect(cx - barW - 2, padT + plotH - tagsH, barW, tagsH);
+    ctx.fillStyle = "#4ade80";
+    ctx.fillRect(cx + 2, padT + plotH - recH, barW, recH);
+    ctx.fillStyle = "#fbbf24";
+    ctx.fillRect(cx - 3, padT + plotH - usdH, 6, usdH);
+
+    if (n <= 26 || i % Math.ceil(n / 13) === 0) {
+      ctx.fillStyle = "#9ca3af";
+      ctx.font = "10px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(b.label, cx, cssH - 8);
+    }
+  });
+
+  ctx.fillStyle = "#9ca3af";
+  ctx.font = "10px system-ui, sans-serif";
+  ctx.textAlign = "right";
+  ctx.fillText(String(maxCount), padL - 6, padT + 4);
+  ctx.fillText("$" + Math.round(maxUsd * 100), padL - 6, padT + plotH);
+}
+
+function _wpRenderUnpaidTable(rows) {
+  const tbody = document.getElementById("wp-unpaid-tbody");
+  const statusEl = document.getElementById("wp-unpaid-status");
+  if (!tbody) return;
+  tbody.innerHTML = "";
+  const unpaid = (rows || []).filter((r) => _wpIsTagIssued(r) && !_wpHasReceipt(r));
+  if (statusEl) {
+    statusEl.textContent =
+      unpaid.length === 0
+        ? "All issued tags this week have a receipt on file."
+        : `${unpaid.length} issued tag(s) without a receipt this week.`;
+  }
+  if (unpaid.length === 0) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 5;
+    td.className = "muted";
+    td.textContent = "None this week.";
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    return;
+  }
+  unpaid.forEach((r) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      `<td class="small">${escapeIssuerText(formatNy(r.timestamp_ny))}</td>` +
+      `<td><code>${escapeIssuerText(r.reference_id || "—")}</code></td>` +
+      `<td style="text-align:left;max-width:10rem;white-space:normal;">${escapeIssuerText(
+        r.tag_name || r.filename || "—"
+      )}</td>` +
+      `<td>${escapeIssuerText(_wpDriverName(r) || "—")}</td>` +
+      `<td style="text-align:left;white-space:normal;font-size:0.78rem;">${escapeIssuerText(
+        _wpUnpaidReason(r)
+      )}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+function _wpSumLeadPriceUsd(rows) {
+  let sum = 0;
+  for (const r of rows) {
+    const n = _txnParsePrice(r && r.price);
+    sum += n > 0 ? n : 100;
+  }
+  return sum;
+}
+
+function _wpRenderCurrentWeek(weekRows, receiptUploads) {
+  const delivered = (weekRows || []).filter(_wpIsTagIssued);
+  const tags = delivered.length;
+  const withReceipt = delivered.filter(_wpHasReceipt);
+  let receiptCount = withReceipt.length;
+  let receiptUsd = _wpSumReceiptUsd(withReceipt);
+
+  if (Array.isArray(receiptUploads) && receiptUploads.length > 0) {
+    const startMs = _wpRollingStartMs(7);
+    const uploaded = receiptUploads.filter((r) => {
+      const ms = _wpParseNyMs(r.updated_at);
+      return !Number.isNaN(ms) && ms >= startMs;
+    });
+    if (uploaded.length > 0) {
+      receiptCount = uploaded.length;
+    }
+  }
+
+  const unpaid = delivered.filter((r) => !_wpHasReceipt(r)).length;
+  const issuerPay = tags * PAYROLL_RATE_ISSUER;
+  const dispPay = tags * PAYROLL_RATE_DISPATCHER;
+  const finderPay = tags * PAYROLL_RATE_CLIENT_FINDER;
+  const payrollCore = issuerPay + dispPay;
+  const totalPay = payrollCore + finderPay;
+
+  const expectedFromLeads = _wpSumLeadPriceUsd(delivered);
+  const minimumExpected = tags * 100;
+  const expectedIn = Math.max(expectedFromLeads, minimumExpected);
+  const revenueLeak = Math.max(0, expectedIn - receiptUsd);
+  const netAfterPayroll = receiptUsd - payrollCore;
+
+  const set = (id, text) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text;
+  };
+  set("wp-tags-issued", String(tags));
+  set("wp-receipts-count", String(receiptCount));
+  set("wp-receipt-total", _txnFormatUsd(receiptUsd));
+  set("wp-unpaid-count", String(unpaid));
+  set("wp-expected-in", _txnFormatUsd(expectedIn));
+  set("wp-minimum-in", _txnFormatUsd(minimumExpected));
+  set("wp-lead-price-total", _txnFormatUsd(expectedFromLeads));
+  set("wp-revenue-leak", _txnFormatUsd(revenueLeak));
+  set("wp-net-after-payroll", _txnFormatUsd(netAfterPayroll));
+  set("wp-pay-tags", String(tags));
+  set("wp-pay-tags-dup", String(tags));
+  set("wp-pay-tags-dup2", String(tags));
+  set("wp-pay-issuer", _txnFormatUsd(issuerPay));
+  set("wp-pay-dispatcher", _txnFormatUsd(dispPay));
+  set("wp-pay-finder", _txnFormatUsd(finderPay));
+  set("wp-payroll-total", _txnFormatUsd(totalPay));
+  set("wp-payroll-core", _txnFormatUsd(payrollCore));
+
+  const periodEl = document.getElementById("wp-period-label");
+  if (periodEl) {
+    const end = new Date();
+    const start = new Date(_wpRollingStartMs(7));
+    periodEl.innerHTML = `Rolling 7 days (NJ): ${formatNy(start.toISOString())} → ${formatNy(
+      end.toISOString()
+    )} · <a href="/FridayPayday" style="color:#34d399">Friday Payday →</a>`;
+  }
+
+  _wpRenderUnpaidTable(weekRows);
+}
+
+const WP_CHART_CACHE_KEY = "krab_wp_chart_rows_v1";
+const WP_CHART_CACHE_TTL_MS = 10 * 60 * 1000;
+
+function _wpLoadChartCache() {
+  try {
+    const raw = sessionStorage.getItem(WP_CHART_CACHE_KEY);
+    if (!raw) return null;
+    const { ts, rows } = JSON.parse(raw);
+    if (!Array.isArray(rows) || Date.now() - ts > WP_CHART_CACHE_TTL_MS) return null;
+    return rows;
+  } catch (_) {
+    return null;
+  }
+}
+
+function _wpSaveChartCache(rows) {
+  try {
+    sessionStorage.setItem(WP_CHART_CACHE_KEY, JSON.stringify({ ts: Date.now(), rows }));
+  } catch (_) {
+    /* quota — the crawl just reruns next load */
+  }
+}
+
+async function _wpFetchAllTransactions() {
+  // History crawl for the chart: pages are fetched in parallel batches of 5
+  // (~30 serial round trips become ~3 waves). Stops at the first short page.
+  const pageSize = 500;
+  const maxItems = 15000;
+  const batchSize = 5;
+  const all = [];
+  let offset = 0;
+  for (;;) {
+    const offsets = Array.from({ length: batchSize }, (_, i) => offset + i * pageSize);
+    const pages = await Promise.all(
+      offsets.map((o) =>
+        requestWithAdminJson(`/transactions/full?limit=${pageSize}&offset=${o}&period=all`)
+      )
+    );
+    let sawShortPage = false;
+    for (const res of pages) {
+      if (!res.ok) throw new Error(res.error || "FETCH_FAILED");
+      const page = Array.isArray(res.data) ? res.data : [];
+      all.push(...page);
+      if (page.length < pageSize) {
+        sawShortPage = true;
+        break;
+      }
+    }
+    offset += batchSize * pageSize;
+    if (sawShortPage || all.length >= maxItems) break;
+  }
+  return all;
+}
+
+async function refreshWeeklyPerformance() {
+  if (!hasAdminPassword()) return;
+  if (_wpLoading) return;
+  const statusEl = document.getElementById("wp-status");
+  _wpLoading = true;
+  if (statusEl) statusEl.textContent = "Loading weekly performance…";
+
+  try {
+    const [weekRes, receiptsRes] = await Promise.all([
+      requestWithAdminJson("/transactions/full?limit=400&period=1w"),
+      issuerApiJson("/issuer-admin/receipts/submitted?limit=500"),
+    ]);
+    if (!hasAdminPassword()) return;
+
+    const weekRows = weekRes.ok && Array.isArray(weekRes.data) ? weekRes.data : [];
+    _wpWeekReceipts =
+      receiptsRes.ok && Array.isArray(receiptsRes.data) ? receiptsRes.data : [];
+
+    _wpRenderCurrentWeek(weekRows, _wpWeekReceipts);
+
+    const rangeEl = document.getElementById("wp-chart-range");
+    let maxWeeks = 104;
+    if (rangeEl) {
+      const v = String(rangeEl.value || "104");
+      maxWeeks = v === "all" ? null : parseInt(v, 10) || 104;
+    }
+
+    const drawFrom = (rows, note) => {
+      const buckets = _wpBuildWeeklyBuckets(rows, maxWeeks);
+      _wpDrawChart(document.getElementById("wp-chart"), buckets);
+      if (statusEl) {
+        const wkNote = weekRes.ok ? "" : " (current-week API partial — check password)";
+        statusEl.textContent =
+          `Chart: ${buckets.length} week(s) from ${rows.length} transactions.${note || ""}${wkNote}`;
+      }
+    };
+
+    if (_wpChartRows.length === 0) {
+      const cached = _wpLoadChartCache();
+      if (cached) _wpChartRows = cached;
+    }
+
+    if (_wpChartRows.length > 0) {
+      drawFrom(_wpChartRows, "");
+    } else {
+      // Paint the chart NOW from this week's rows, then upgrade to full
+      // history in the background — the page never blocks on the crawl.
+      drawFrom(weekRows, " · loading full history…");
+      _wpFetchAllTransactions()
+        .then((rows) => {
+          if (!hasAdminPassword()) return;
+          _wpChartRows = rows;
+          _wpSaveChartCache(rows);
+          drawFrom(rows, "");
+        })
+        .catch((e) => {
+          console.error("wp history crawl:", e);
+          if (statusEl) statusEl.textContent = "Chart shows current week only (history fetch failed).";
+        });
+    }
+  } catch (e) {
+    console.error(e);
+    if (statusEl) {
+      statusEl.textContent =
+        e && String(e.message || e).startsWith("NETWORK:")
+          ? "API unreachable — check krab-dispatch-api on Render."
+          : "Failed to load weekly performance: " + (e && e.message ? e.message : String(e));
+    }
+  } finally {
+    _wpLoading = false;
+  }
+}
+
+function setupWeeklyPerformanceEvents() {
+  const refreshBtn = document.getElementById("wp-refresh-btn");
+  if (refreshBtn) {
+    refreshBtn.addEventListener("click", () => {
+      _wpChartRows = [];
+      try { sessionStorage.removeItem(WP_CHART_CACHE_KEY); } catch (_) {}
+      refreshWeeklyPerformance();
+    });
+  }
+  const rangeEl = document.getElementById("wp-chart-range");
+  if (rangeEl) {
+    try {
+      const saved = localStorage.getItem(KRAB_WP_CHART_RANGE_KEY);
+      if (saved) rangeEl.value = saved;
+    } catch (_) {}
+    rangeEl.addEventListener("change", () => {
+      try {
+        localStorage.setItem(KRAB_WP_CHART_RANGE_KEY, rangeEl.value);
+      } catch (_) {}
+      if (_wpChartRows.length) {
+        const maxWeeks =
+          rangeEl.value === "all" ? null : parseInt(rangeEl.value, 10) || 104;
+        _wpDrawChart(
+          document.getElementById("wp-chart"),
+          _wpBuildWeeklyBuckets(_wpChartRows, maxWeeks)
+        );
+      } else if (hasAdminPassword()) {
+        refreshWeeklyPerformance();
+      }
+    });
+  }
+  window.addEventListener("resize", () => {
+    if (!_wpChartRows.length) return;
+    const rangeEl2 = document.getElementById("wp-chart-range");
+    const maxWeeks =
+      rangeEl2 && rangeEl2.value === "all"
+        ? null
+        : parseInt((rangeEl2 && rangeEl2.value) || "104", 10) || 104;
+    _wpDrawChart(
+      document.getElementById("wp-chart"),
+      _wpBuildWeeklyBuckets(_wpChartRows, maxWeeks)
+    );
+  });
 }
 
 function _txnStatusCell(row) {
@@ -708,46 +1337,96 @@ function renderUnifiedTransactions() {
       : "No transactions yet. Send a document through Krab Dispatch.";
     tr.appendChild(td);
     tbody.appendChild(tr);
+    renderTxnDispatcherGroups([]);
     return;
   }
   let priceSum = 0;
   let priceCount = 0;
   let receiptPriceSum = 0;
   let receiptPriceCount = 0;
-  rows.forEach((r, idx) => {
-    const tr = document.createElement("tr");
-    const parsed = _txnParsePrice(r && r.price);
-    if (parsed > 0) {
-      priceSum += parsed;
-      priceCount += 1;
+
+  // Group rows by dispatcher (lead creator) with section headers.
+  const grouped = new Map();
+  const groupOrder = [];
+  for (const r of rows) {
+    const handle = _txnResolveDispatcherHandle(r);
+    if (!grouped.has(handle)) {
+      grouped.set(handle, []);
+      groupOrder.push(handle);
     }
-    const parsedReceipt = _txnParsePrice(r && r.receipt_price);
-    if (parsedReceipt > 0) {
-      receiptPriceSum += parsedReceipt;
-      receiptPriceCount += 1;
-    }
-    tr.innerHTML =
-      `<td>${idx + 1}</td>` +
-      `<td class="small">${escapeIssuerText(formatNy(r.timestamp_ny))}</td>` +
-      `<td style="text-align:left;max-width:12rem;white-space:normal;">${
-        r.tag_name
-          ? escapeIssuerText(r.tag_name)
-          : `<span class="muted">${escapeIssuerText(r.filename || "—")}</span>`
-      }</td>` +
-      `<td style="text-align:left;max-width:14rem;white-space:normal;">${_txnIssuerCell(r)}</td>` +
-      `<td style="text-align:left;max-width:14rem;white-space:normal;">${_txnDriverCell(r)}</td>` +
-      `<td style="text-align:left;white-space:normal;">${_txnDispatcherCell(r)}</td>` +
-      `<td>${
-        r.reference_id
-          ? `<code>${escapeIssuerText(r.reference_id)}</code>`
-          : '<span class="muted">—</span>'
-      }</td>` +
-      `<td>${_txnPriceCell(r)}</td>` +
-      `<td>${_txnReceiptPriceCell(r)}</td>` +
-      `<td>${_txnReceiptCell(r)}</td>` +
-      `<td>${_txnStatusCell(r)}</td>`;
-    tbody.appendChild(tr);
+    grouped.get(handle).push(r);
+  }
+  groupOrder.sort((a, b) => {
+    if (a === "unknown") return 1;
+    if (b === "unknown") return -1;
+    const da = grouped.get(a).filter(_wpIsTagIssued).length;
+    const db = grouped.get(b).filter(_wpIsTagIssued).length;
+    return db - da || grouped.get(b).length - grouped.get(a).length || a.localeCompare(b);
   });
+
+  let rowNum = 0;
+  tbody.innerHTML = "";
+  priceSum = 0;
+  priceCount = 0;
+  receiptPriceSum = 0;
+  receiptPriceCount = 0;
+
+  for (const handle of groupOrder) {
+    const groupRows = grouped.get(handle) || [];
+    const slug = _txnDispatcherSlug(handle);
+    const delivered = groupRows.filter(_wpIsTagIssued).length;
+    const headerTr = document.createElement("tr");
+    headerTr.className = "txn-dispatcher-group-header";
+    const label =
+      handle === "unknown"
+        ? "Unknown dispatcher"
+        : `@${escapeIssuerText(handle)}`;
+    const paydayLink =
+      handle !== "unknown"
+        ? ` <a href="/fridaypayday/${encodeURIComponent(slug)}" class="txn-dispatcher-payday-link">Payroll →</a>`
+        : "";
+    headerTr.innerHTML =
+      `<td colspan="11" style="text-align:left;background:var(--accent-soft,#f0fdf4);font-weight:600;padding:0.55rem 0.65rem;">` +
+      `${label} — ${delivered} delivered · ${groupRows.length} row${groupRows.length === 1 ? "" : "s"}${paydayLink}` +
+      `</td>`;
+    tbody.appendChild(headerTr);
+
+    for (const r of groupRows) {
+      rowNum += 1;
+      const tr = document.createElement("tr");
+      const parsed = _txnParsePrice(r && r.price);
+      if (parsed > 0) {
+        priceSum += parsed;
+        priceCount += 1;
+      }
+      const parsedReceipt = _txnParsePrice(r && r.receipt_price);
+      if (parsedReceipt > 0) {
+        receiptPriceSum += parsedReceipt;
+        receiptPriceCount += 1;
+      }
+      tr.innerHTML =
+        `<td>${rowNum}</td>` +
+        `<td class="small">${escapeIssuerText(formatNy(r.timestamp_ny))}</td>` +
+        `<td style="text-align:left;max-width:12rem;white-space:normal;">${
+          r.tag_name
+            ? escapeIssuerText(r.tag_name)
+            : `<span class="muted">${escapeIssuerText(r.filename || "—")}</span>`
+        }</td>` +
+        `<td style="text-align:left;max-width:14rem;white-space:normal;">${_txnIssuerCell(r)}</td>` +
+        `<td style="text-align:left;max-width:14rem;white-space:normal;">${_txnDriverCell(r)}</td>` +
+        `<td style="text-align:left;white-space:normal;">${_txnDispatcherCell(r)}</td>` +
+        `<td>${
+          r.reference_id
+            ? `<code>${escapeIssuerText(r.reference_id)}</code>`
+            : '<span class="muted">—</span>'
+        }</td>` +
+        `<td>${_txnPriceCell(r)}</td>` +
+        `<td>${_txnReceiptPriceCell(r)}</td>` +
+        `<td>${_txnReceiptCell(r)}</td>` +
+        `<td>${_txnStatusCell(r)}</td>`;
+      tbody.appendChild(tr);
+    }
+  }
 
   // Spreadsheet-style totals row: sum lead Price and Receipt Price for visible rows.
   const totalTr = document.createElement("tr");
@@ -783,6 +1462,7 @@ function renderUnifiedTransactions() {
         : `Showing ${rows.length} of ${_txnRows.length} transactions`;
     statusEl.textContent = `${shownLabel}${rangeLabel ? ` · ${rangeLabel}` : ""} · Lead price total: ${_txnFormatUsd(priceSum)} · Receipt price total: ${_txnFormatUsd(receiptPriceSum)}`;
   }
+  renderTxnDispatcherGroups(rows);
 }
 
 function updateTxnAuthGate() {
@@ -793,7 +1473,29 @@ function updateTxnAuthGate() {
   return !pw;
 }
 
-async function refreshUnifiedTransactions() {
+async function refreshUnifiedTransactions(force) {
+  // In-flight dedupe + 30s freshness window: the boot path historically fired
+  // this 4x (tab activate, applyLoggedInUI x2, explicit boot call) — collapse
+  // duplicates onto the single pending request / recent result.
+  if (_txnInflight) {
+    // A FORCED call (period change, refresh button) during an in-flight fetch
+    // must not be swallowed — the fetch already running carries the old
+    // period. Queue one re-run with the fresh select state for when it lands.
+    if (force) _txnRerunForced = true;
+    return _txnInflight;
+  }
+  if (!force && Date.now() - _txnLastFetch < 30_000 && _txnRows.length > 0) return;
+  _txnInflight = _refreshUnifiedTransactionsInner().finally(() => {
+    _txnInflight = null;
+    if (_txnRerunForced) {
+      _txnRerunForced = false;
+      refreshUnifiedTransactions(true);
+    }
+  });
+  return _txnInflight;
+}
+
+async function _refreshUnifiedTransactionsInner() {
   setTxnBanner("");
   if (updateTxnAuthGate()) {
     setTxnStatus("");
@@ -855,7 +1557,9 @@ async function refreshUnifiedTransactions() {
         }.`
       : ""
   );
+  _txnLastFetch = Date.now();
   renderUnifiedTransactions();
+  renderUnifiedDriversTable();
 }
 
 function doAdminLogout() {
@@ -864,7 +1568,11 @@ function doAdminLogout() {
   clearAdminAuthErrorDisplays();
   _issuerAiSnapshot = null;
   _txnLoading = false;
+  _txnInflight = null;
+  _txnLastFetch = 0;
   _txnRows = [];
+  _wpChartRows = [];
+  _wpWeekReceipts = [];
   setTxnBanner("");
   setTxnStatus("");
   renderUnifiedTransactions();
@@ -899,16 +1607,21 @@ function setupTxnEvents() {
       try {
         localStorage.setItem(KRAB_TXN_PERIOD_KEY, periodSel.value);
       } catch (_) {}
-      refreshUnifiedTransactions();
+      refreshUnifiedTransactions(true);
     });
   }
   const refresh = document.getElementById("txn-refresh-btn");
   if (refresh) {
-    refresh.addEventListener("click", () => refreshUnifiedTransactions());
+    refresh.addEventListener("click", () => refreshUnifiedTransactions(true));
   }
   const search = document.getElementById("txn-search-input");
   if (search) {
-    search.addEventListener("input", () => renderUnifiedTransactions());
+    // Debounced: the 2000-row table rebuild is too heavy for per-keystroke.
+    let t = null;
+    search.addEventListener("input", () => {
+      if (t) clearTimeout(t);
+      t = setTimeout(() => renderUnifiedTransactions(), 180);
+    });
   }
 }
 
@@ -1189,6 +1902,7 @@ function resetIssuerDriverForm() {
 function renderIssuerDrivers(drivers) {
   const tb = document.getElementById("issuer-drivers-tbody");
   if (!tb) return;
+  _cachedIssuerDrivers = Array.isArray(drivers) ? drivers : [];
   tb.innerHTML = "";
   const list = Array.isArray(drivers) ? drivers : [];
   _issuerDriversCache = list;
@@ -1200,6 +1914,7 @@ function renderIssuerDrivers(drivers) {
     td.textContent = "No drivers.";
     tr.appendChild(td);
     tb.appendChild(tr);
+    renderUnifiedDriversTable();
     return;
   }
   list.forEach((d) => {
@@ -1242,6 +1957,116 @@ function renderIssuerDrivers(drivers) {
     tr.appendChild(act);
     tb.appendChild(tr);
   });
+  renderUnifiedDriversTable();
+}
+
+function _normalizeDriverNameKey(name) {
+  return String(name || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+function mergeUnifiedDrivers(recipients, issuerDrivers, txnRows) {
+  const map = new Map();
+
+  function upsert(key, patch) {
+    const k = key || "unknown";
+    const cur = map.get(k) || {
+      name: "",
+      email: "",
+      telegramId: "",
+      telegramUsername: "",
+      phone: "",
+      sources: [],
+    };
+    if (patch.name) cur.name = patch.name;
+    if (patch.email) cur.email = patch.email;
+    if (patch.telegramId) cur.telegramId = patch.telegramId;
+    if (patch.telegramUsername) cur.telegramUsername = patch.telegramUsername;
+    if (patch.phone) cur.phone = patch.phone;
+    for (const s of patch.sources || []) {
+      if (!cur.sources.includes(s)) cur.sources.push(s);
+    }
+    map.set(k, cur);
+  }
+
+  for (const r of recipients || []) {
+    const name = String(r.name || "").trim();
+    const key = _normalizeDriverNameKey(name) || `dispatch-email:${r.email || r.id}`;
+    upsert(key, { name, email: r.email || "", sources: ["dispatch"] });
+  }
+
+  for (const d of issuerDrivers || []) {
+    const name = String(d.driver_name || "").trim();
+    const tgId = String(d.driver_telegram_id || "").trim();
+    const key = _normalizeDriverNameKey(name) || `issuer-tg:${tgId || d.id}`;
+    upsert(key, {
+      name,
+      telegramId: tgId,
+      phone: d.phone_number || "",
+      sources: ["issuer"],
+    });
+  }
+
+  for (const row of txnRows || []) {
+    const acc = row && row.driver_accepted;
+    const name = String(
+      (acc && acc.driver_name) || row.driver_selected_name || ""
+    ).trim();
+    if (!name) continue;
+    const key = _normalizeDriverNameKey(name);
+    const tgUser =
+      (acc && (acc.telegram_username || acc.driver_telegram_username)) || "";
+    upsert(key, {
+      name,
+      email: row.driver_recipient_email || "",
+      telegramId: (acc && acc.driver_telegram_id) || "",
+      telegramUsername: tgUser,
+      sources: ["transactions"],
+    });
+  }
+
+  return [...map.values()]
+    .filter((d) => d.name || d.email || d.telegramId)
+    .sort((a, b) => (a.name || a.email).localeCompare(b.name || b.email));
+}
+
+function renderUnifiedDriversTable() {
+  const tb = document.getElementById("unified-drivers-tbody");
+  if (!tb) return;
+  if (!getStoredPassword()) {
+    tb.innerHTML =
+      '<tr><td colspan="6" class="muted">Unlock to load merged driver directory.</td></tr>';
+    return;
+  }
+  const merged = mergeUnifiedDrivers(
+    _cachedDispatchRecipients,
+    _cachedIssuerDrivers,
+    _txnRows || []
+  );
+  tb.innerHTML = "";
+  if (merged.length === 0) {
+    tb.innerHTML =
+      '<tr><td colspan="6" class="muted">No drivers in Dispatch recipients or Issuer bot yet.</td></tr>';
+    return;
+  }
+  for (const d of merged) {
+    const tr = document.createElement("tr");
+    const uname = d.telegramUsername
+      ? d.telegramUsername.startsWith("@")
+        ? d.telegramUsername
+        : `@${d.telegramUsername}`
+      : "—";
+    tr.innerHTML =
+      `<td style="text-align:left">${escapeIssuerText(d.name || "—")}</td>` +
+      `<td>${escapeIssuerText(d.email || "—")}</td>` +
+      `<td><code>${escapeIssuerText(d.telegramId || "—")}</code></td>` +
+      `<td>${escapeIssuerText(uname)}</td>` +
+      `<td>${escapeIssuerText(d.phone || "—")}</td>` +
+      `<td class="small muted">${escapeIssuerText(d.sources.join(", "))}</td>`;
+    tb.appendChild(tr);
+  }
 }
 
 function renderIssuerAssistants(groups, assistantsByGroup) {
@@ -1489,9 +2314,25 @@ function applyIssuerSettingsUi(settings) {
   }
 }
 
-async function refreshIssuerAdmin() {
+let _issuerInflight = null;
+let _issuerLastFetch = 0;
+
+async function refreshIssuerAdmin(force) {
+  // This is a 10+N request suite — dedupe concurrent calls and skip repeats
+  // within 60s. Mutation handlers pass force=true so post-edit reloads always run.
+  if (_issuerInflight) return _issuerInflight;
+  if (!force && Date.now() - _issuerLastFetch < 60_000) return;
+  _issuerLastFetch = Date.now();
+  _issuerInflight = _refreshIssuerAdminInner().finally(() => {
+    _issuerInflight = null;
+  });
+  return _issuerInflight;
+}
+
+async function _refreshIssuerAdminInner() {
   setIssuerBanner("");
   if (updateIssuerAuthGate()) {
+    _issuerLastFetch = 0; // locked — don't count this as a fetch
     return;
   }
   const dtb = document.getElementById("issuer-drivers-tbody");
@@ -1750,9 +2591,13 @@ function setupIssuerAdminEvents() {
       }
       const body = { driver_name: name, driver_telegram_id: tg };
       if (phone) body.phone_number = phone;
+      // Public path: allow non-authenticated users on the lock screen to
+      // register a driver chatID. Read endpoints stay locked behind the
+      // admin password.
       const res = await issuerApiJson("/issuer-admin/drivers", {
         method: "POST",
         body: JSON.stringify(body),
+        allowAnonymous: true,
       });
       if (!res.ok) {
         alert(res.error || "Could not add driver");
@@ -1761,7 +2606,11 @@ function setupIssuerAdminEvents() {
       document.getElementById("issuer-driver-name").value = "";
       document.getElementById("issuer-driver-tg-id").value = "";
       document.getElementById("issuer-driver-phone").value = "";
-      await refreshIssuerAdmin();
+      if (hasAdminPassword()) {
+        await refreshIssuerAdmin();
+      } else {
+        alert("Driver added.");
+      }
     });
   }
 
@@ -2034,7 +2883,7 @@ function ensureTrackMap() {
   if (!el || typeof L === "undefined") return null;
   _trackMap = L.map(el, { zoomControl: true }).setView([40.7128, -74.006], 10);
   const dark = L.tileLayer(
-    "https://basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}@2x.png",
+    "https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png",
     { maxZoom: 20, attribution: "© OpenStreetMap © CARTO" }
   );
   const sat = L.tileLayer(
@@ -2519,7 +3368,9 @@ function renderTransactions(items) {
 async function refreshTransactions() {
   const body = document.getElementById("tx-body");
   try {
-    const data = await fetchWithAdmin("/transactions");
+    // Bounded: the Dispatch panel this feeds shows recent activity; the
+    // unbounded fetch was the heaviest single request on the unlock path.
+    const data = await fetchWithAdmin("/transactions?limit=300");
     if (!hasAdminPassword()) {
       return;
     }
@@ -2569,10 +3420,7 @@ async function refreshLatest() {
             .replace(/>/g, "&gt;")}</div>`
         : "";
     const recLine = data.receipt_image_url
-      ? `<div class="small">Receipt: ${receiptLinkHtml(
-          data.receipt_image_url,
-          data.reference_id
-        )}</div>`
+      ? `<div class="small">Receipt: ${receiptLinkHtml(data.receipt_image_url, data.reference_id)}</div>`
       : "";
     el.innerHTML = `
       <div><strong>${data.filename}</strong></div>
@@ -2775,6 +3623,54 @@ function applyTxnUnifiedZoom(scale) {
   }
 }
 
+// Pull a phone-like sequence out of free text (client_details) as a fallback
+// when the API doesn't send a dedicated client phone field.
+function extractPhoneLike(text) {
+  const s = String(text || "");
+  const m = s.match(/\+?\d[\d\-\s().]{7,}\d/);
+  return m ? m[0].replace(/\s+/g, " ").trim() : "";
+}
+
+// Driver phone isn't on each transmission row — join it from the issuer driver
+// directory by normalized name.
+function buildDriverPhoneMap() {
+  const map = {};
+  for (const d of _cachedIssuerDrivers || []) {
+    const key = _normalizeDriverNameKey(d && d.driver_name);
+    if (key && d.phone_number) map[key] = d.phone_number;
+  }
+  return map;
+}
+
+function driverPhoneFor(it, map) {
+  return (
+    it.recipient_phone ||
+    it.driver_phone ||
+    (map && map[_normalizeDriverNameKey(it.recipient_name)]) ||
+    ""
+  );
+}
+
+function clientPhoneFor(it) {
+  return (
+    it.client_phone ||
+    it.lead_client_phone ||
+    it.customer_phone ||
+    it.phone ||
+    extractPhoneLike(it.client_details) ||
+    ""
+  );
+}
+
+function clientEmailFor(it) {
+  const direct =
+    it.client_email || it.lead_client_email || it.customer_email || "";
+  if (direct) return String(direct).trim();
+  // Fallback: scrape an email out of the free-text client details.
+  const m = String(it.client_details || "").match(/[\w.+-]+@[\w-]+\.[\w.-]+/);
+  return m ? m[0] : "";
+}
+
 /**
  * driver name (normalized) → leads accepted, from GET /issuer-admin/stats.
  * Loaded once per summary render; null when unavailable (locked / API down).
@@ -2809,7 +3705,7 @@ function renderSummaryTable(summary) {
   if (items.length === 0) {
     const tr = document.createElement("tr");
     const td = document.createElement("td");
-    td.colSpan = 15;
+    td.colSpan = 18;
     td.className = "muted";
     td.textContent = "No transmissions in this summary window.";
     tr.appendChild(td);
@@ -2823,6 +3719,7 @@ function renderSummaryTable(summary) {
     const handle = normalizeHandle(it.telegram_handle) || "__unknown__";
     issuerHandleCounts[handle] = (issuerHandleCounts[handle] || 0) + 1;
   }
+  const driverPhoneMap = buildDriverPhoneMap();
 
   for (let i = 0; i < sorted.length; i += 1) {
     const it = sorted[i];
@@ -2840,13 +3737,39 @@ function renderSummaryTable(summary) {
     tdPdf.textContent = it.filename || "—";
     tr.appendChild(tdPdf);
 
-    const tdIssuerName = document.createElement("td");
-    tdIssuerName.textContent = it.telegram_name || "—";
-    tr.appendChild(tdIssuerName);
+    const tdReceipt = document.createElement("td");
+    tdReceipt.className = "small";
+    tdReceipt.innerHTML = receiptLinkHtml(it.receipt_image_url, it.reference_id);
+    tr.appendChild(tdReceipt);
+
+    const tdReceiptPrice = document.createElement("td");
+    const rp =
+      it.receipt_price != null && String(it.receipt_price).trim() !== ""
+        ? String(it.receipt_price).trim()
+        : "";
+    tdReceiptPrice.textContent = rp || "—";
+    tr.appendChild(tdReceiptPrice);
+
+    const tdPrice = document.createElement("td");
+    const p = it.price != null && String(it.price).trim() !== "" ? String(it.price).trim() : "";
+    tdPrice.textContent = p || "—";
+    tr.appendChild(tdPrice);
 
     const tdDriverName = document.createElement("td");
     tdDriverName.textContent = it.recipient_name || "—";
     tr.appendChild(tdDriverName);
+
+    const tdDriverPhone = document.createElement("td");
+    tdDriverPhone.textContent = driverPhoneFor(it, driverPhoneMap) || "—";
+    tr.appendChild(tdDriverPhone);
+
+    const tdClientPhone = document.createElement("td");
+    tdClientPhone.textContent = clientPhoneFor(it) || "—";
+    tr.appendChild(tdClientPhone);
+
+    const tdClientEmail = document.createElement("td");
+    tdClientEmail.textContent = clientEmailFor(it) || "—";
+    tr.appendChild(tdClientEmail);
 
     const tdSuccess = document.createElement("td");
     tdSuccess.textContent =
@@ -2890,6 +3813,10 @@ function renderSummaryTable(summary) {
     tdLiveCount.textContent = String(liveCount);
     tr.appendChild(tdLiveCount);
 
+    const tdIssuerName = document.createElement("td");
+    tdIssuerName.textContent = it.telegram_name || "—";
+    tr.appendChild(tdIssuerName);
+
     const tdIssuerHandle = document.createElement("td");
     tdIssuerHandle.textContent = formatHandleWithAt(it.telegram_handle) || "—";
     tr.appendChild(tdIssuerHandle);
@@ -2901,27 +3828,6 @@ function renderSummaryTable(summary) {
     const tdRef = document.createElement("td");
     tdRef.textContent = (it.reference_id && String(it.reference_id).trim()) || "—";
     tr.appendChild(tdRef);
-
-    const tdPrice = document.createElement("td");
-    const p = it.price != null && String(it.price).trim() !== "" ? String(it.price).trim() : "";
-    tdPrice.textContent = p || "—";
-    tr.appendChild(tdPrice);
-
-    const tdReceiptPrice = document.createElement("td");
-    const rp =
-      it.receipt_price != null && String(it.receipt_price).trim() !== ""
-        ? String(it.receipt_price).trim()
-        : "";
-    tdReceiptPrice.textContent = rp || "—";
-    tr.appendChild(tdReceiptPrice);
-
-    const tdReceipt = document.createElement("td");
-    tdReceipt.className = "small";
-    tdReceipt.innerHTML = receiptLinkHtml(
-      it.receipt_image_url,
-      it.receipt_image_url ? it.reference_id : ""
-    );
-    tr.appendChild(tdReceipt);
 
     tbody.appendChild(tr);
   }
@@ -3102,6 +4008,71 @@ async function askSummaryWithGpt(question, options = {}) {
   return (res.data && res.data.answer) || "No answer returned.";
 }
 
+// ── Curated client list (Client PDF Name + client phone) ──────────────────
+function buildClientListRows() {
+  const items = (lastSummary && lastSummary.items) || [];
+  const out = [];
+  const seen = new Set();
+  for (const it of items) {
+    const pdf = String((it && it.filename) || "").trim();
+    const phone = String(clientPhoneFor(it) || "").trim();
+    const email = String(clientEmailFor(it) || "").trim();
+    if (!pdf && !phone && !email) continue;
+    const key = pdf.toLowerCase() + "|" + phone + "|" + email.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ pdf: pdf || "—", phone: phone || "—", email: email || "—" });
+  }
+  return out;
+}
+
+async function openClientListModal() {
+  // Need a summary window loaded; generate one on demand.
+  if (!lastSummary || !lastSummary.items || lastSummary.items.length === 0) {
+    await refreshSummary();
+  }
+  const rows = buildClientListRows();
+  const modal = document.getElementById("client-list-modal");
+  const tbody = document.getElementById("client-list-tbody");
+  const count = document.getElementById("client-list-count");
+  if (!modal || !tbody) return;
+  if (rows.length === 0) {
+    alert("No client rows in the current summary window. Generate a summary first.");
+    return;
+  }
+  tbody.innerHTML = rows
+    .map(
+      (r, i) =>
+        `<tr>` +
+        `<td style="padding:0.35rem 0.5rem; border-bottom:1px solid rgba(15,23,42,0.1); opacity:0.6;">${i + 1}</td>` +
+        `<td style="padding:0.35rem 0.5rem; border-bottom:1px solid rgba(15,23,42,0.1);">${escapeIssuerText(r.pdf)}</td>` +
+        `<td style="padding:0.35rem 0.5rem; border-bottom:1px solid rgba(15,23,42,0.1); font-variant-numeric:tabular-nums;">${escapeIssuerText(r.phone)}</td>` +
+        `<td style="padding:0.35rem 0.5rem; border-bottom:1px solid rgba(15,23,42,0.1);">${escapeIssuerText(r.email)}</td>` +
+        `</tr>`
+    )
+    .join("");
+  if (count) count.textContent = `${rows.length} client${rows.length === 1 ? "" : "s"}`;
+  modal.style.display = "flex";
+}
+
+function downloadClientListCsv() {
+  const rows = buildClientListRows();
+  if (rows.length === 0) {
+    alert("No client rows to download. Generate a summary first.");
+    return;
+  }
+  const csvRows = [["ClientPdfName", "ClientPhone", "ClientEmail"], ...rows.map((r) => [r.pdf, r.phone, r.email])];
+  const csv = csvRows
+    .map((r) => r.map((f) => `"${String(f ?? "").replace(/"/g, '""')}"`).join(","))
+    .join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `client-list-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
 function downloadSummaryCsv() {
   if (!lastSummary || !lastSummary.items || lastSummary.items.length === 0) {
     alert("No summary data to download. Generate a summary first.");
@@ -3113,19 +4084,22 @@ function downloadSummaryCsv() {
       "Row",
       "TimeDate",
       "ClientPdfName",
-      "Notes",
-      "LeadIssuer",
-      "IssuerName",
+      "Receipt",
+      "ReceiptPrice",
+      "TotalPrice",
       "DriverName",
+      "DriverPhone",
+      "ClientPhone",
+      "ClientEmail",
       "Success",
       "Status",
       "Count",
+      "IssuerName",
       "IssuerUsername",
       "DriverEmail",
       "Reference",
-      "Price",
-      "ReceiptPrice",
-      "Receipt",
+      "Notes",
+      "LeadIssuer",
     ],
   ];
 
@@ -3134,6 +4108,7 @@ function downloadSummaryCsv() {
     const handle = normalizeHandle(it.telegram_handle) || "__unknown__";
     issuerHandleCounts[handle] = (issuerHandleCounts[handle] || 0) + 1;
   }
+  const driverPhoneMap = buildDriverPhoneMap();
 
   for (let i = 0; i < lastSummary.items.length; i += 1) {
     const it = lastSummary.items[i];
@@ -3159,6 +4134,20 @@ function downloadSummaryCsv() {
       i + 1,
       formatNy(it.timestamp_ny || ""),
       it.filename || "",
+      receiptCsvValue,
+      receiptPriceStr,
+      priceStr,
+      it.recipient_name || "Not recorded",
+      driverPhoneFor(it, driverPhoneMap),
+      clientPhoneFor(it),
+      clientEmailFor(it),
+      (it.delivery_status || "").toUpperCase() === "DELIVERED" ? "YES" : "NO",
+      (it.delivery_status || "").toUpperCase() || "UNKNOWN",
+      issuerHandleCounts[normalizeHandle(it.telegram_handle) || "__unknown__"] || 0,
+      it.telegram_name || "",
+      formatHandleWithAt(it.telegram_handle),
+      it.recipient_email || "",
+      (it.reference_id && String(it.reference_id).trim()) || "",
       (() => {
         const s = String(it.client_details || "")
           .replace(/\s+/g, " ")
@@ -3167,17 +4156,6 @@ function downloadSummaryCsv() {
         return s.length > 500 ? s.slice(0, 500) + "…" : s;
       })(),
       (it.lead_client_name && String(it.lead_client_name).trim()) || "",
-      it.telegram_name || "",
-      it.recipient_name || "Not recorded",
-      (it.delivery_status || "").toUpperCase() === "DELIVERED" ? "YES" : "NO",
-      (it.delivery_status || "").toUpperCase() || "UNKNOWN",
-      issuerHandleCounts[normalizeHandle(it.telegram_handle) || "__unknown__"] || 0,
-      formatHandleWithAt(it.telegram_handle),
-      it.recipient_email || "",
-      (it.reference_id && String(it.reference_id).trim()) || "",
-      priceStr,
-      receiptPriceStr,
-      receiptCsvValue,
     ]);
   }
 
@@ -3352,6 +4330,28 @@ function buildClientWindowSummary(allTx, windowKey) {
   };
 }
 
+// The summary table's Driver Phone column joins on the issuer drivers
+// directory. Historically that cache only filled when the issuer tab was
+// opened, so the column rendered blank on first load — fetch it on demand.
+let _issuerDriversInflight = null;
+async function ensureIssuerDriversLoaded() {
+  if (Array.isArray(_cachedIssuerDrivers) && _cachedIssuerDrivers.length > 0) return;
+  if (_issuerDriversInflight) return _issuerDriversInflight;
+  _issuerDriversInflight = (async () => {
+    try {
+      const res = await issuerApiJson("/issuer-admin/drivers");
+      if (res.ok && Array.isArray(res.data)) {
+        _cachedIssuerDrivers = res.data;
+      }
+    } catch (_) {
+      /* summary still renders; phone cells fall back to em-dash */
+    } finally {
+      _issuerDriversInflight = null;
+    }
+  })();
+  return _issuerDriversInflight;
+}
+
 async function refreshSummary() {
   const windowEl = document.getElementById("summary-window");
   const periodEl = document.getElementById("summary-period");
@@ -3393,6 +4393,8 @@ async function refreshSummary() {
     if (!hasAdminPassword()) {
       return;
     }
+    // Load the drivers directory before rendering so Driver Phone resolves.
+    await ensureIssuerDriversLoaded();
     lastSummary = data;
     periodEl.textContent =
       data.period_start_ny && data.period_end_ny
@@ -3532,11 +4534,13 @@ async function tryInitialLogin() {
   const genAtStart = _adminAuthSuccessGeneration;
   if (!hasAdminPassword()) return;
   try {
-    await refreshTransactions();
+    // Validate the password with ONE cheap request, unlock the UI
+    // immediately, and load the rest in parallel without blocking paint.
     await refreshLatest();
-    await refreshSummary();
     bumpAdminAuthSuccessGeneration();
     applyLoggedInUI(true);
+    // Dispatch-panel data (transactions list, rolling summary) loads lazily
+    // on first visit to the Dispatch tab — not on the unlock path.
   } catch {
     if (_adminAuthSuccessGeneration !== genAtStart) {
       return;
@@ -3619,12 +4623,11 @@ function setupEvents() {
     syncAdminPasswordInputs(pw);
     clearAdminAuthErrorDisplays();
     try {
-      await refreshTransactions();
+      // One cheap validating request, then unlock and load the rest async.
       await refreshLatest();
-      await refreshSummary();
       bumpAdminAuthSuccessGeneration();
       applyLoggedInUI(true);
-      // Recipients will be refreshed by the modified applyLoggedInUI
+      // Dispatch-panel data loads lazily on first Dispatch-tab visit.
     } catch (e) {
       console.error(e);
       storePassword("");
@@ -3685,6 +4688,32 @@ function setupEvents() {
   if (summaryDownloadBtn) {
     summaryDownloadBtn.addEventListener("click", () => {
       downloadSummaryCsv();
+    });
+  }
+
+  const clientListBtn = document.getElementById("summary-client-list-btn");
+  if (clientListBtn) {
+    clientListBtn.addEventListener("click", () => {
+      openClientListModal();
+    });
+  }
+  const clientListClose = document.getElementById("client-list-close-btn");
+  if (clientListClose) {
+    clientListClose.addEventListener("click", () => {
+      const m = document.getElementById("client-list-modal");
+      if (m) m.style.display = "none";
+    });
+  }
+  const clientListDownload = document.getElementById("client-list-download-btn");
+  if (clientListDownload) {
+    clientListDownload.addEventListener("click", () => {
+      downloadClientListCsv();
+    });
+  }
+  const clientListModal = document.getElementById("client-list-modal");
+  if (clientListModal) {
+    clientListModal.addEventListener("click", (ev) => {
+      if (ev.target === clientListModal) clientListModal.style.display = "none";
     });
   }
 
@@ -4097,6 +5126,8 @@ function setupEvents() {
         return;
       }
       renderRecipients(recipients);
+      _cachedDispatchRecipients = Array.isArray(recipients) ? recipients : [];
+      renderUnifiedDriversTable();
     } catch (e) {
       console.error("Failed to fetch recipients:", e);
       recipientsBody.innerHTML = `
@@ -4358,9 +5389,17 @@ function setupEvents() {
     originalApplyLoggedInUI(loggedIn);
     if (loggedIn) {
       updateIssuerAuthGate();
-      refreshRecipients();
-      refreshIssuerAdmin();
-      maybeRefreshTxnTab();
+      // Lazy per-tab: only load data for the tab the user is looking at.
+      // Other tabs load on first activation (see setupAdminTabs.activate).
+      if (transactionsTabActive()) {
+        maybeRefreshTxnTab();
+        refreshWeeklyPerformance();
+      } else if (document.getElementById("panel-issuer")?.classList.contains("tab-panel-active")) {
+        refreshIssuerAdmin();
+      } else {
+        refreshRecipients();
+        adminApi.refreshDispatchData?.();
+      }
     } else {
       updateIssuerAuthGate();
       updateTxnAuthGate();
@@ -4379,12 +5418,21 @@ function setupEvents() {
 
   setupIssuerAdminEvents();
   setupTxnEvents();
+  setupWeeklyPerformanceEvents();
   setupTrackEvents();
 
   applySummaryZoom(1);
   applyTxZoom(1);
   applyTxnUnifiedZoom(1);
   updateRecipientConfidentialUI();
+
+  // Publish closure-owned handlers so module-scope callers (tab activation,
+  // etc.) can reach them. Must happen before applyLoggedInUI() so any
+  // ordering between setupEvents() and tab activation is safe.
+  adminApi.refreshRecipients = refreshRecipients;
+  adminApi.refreshDispatchData = () => {
+    void Promise.allSettled([refreshTransactions(), refreshLatest(), refreshSummary()]);
+  };
 
   // Initial lock layout: without this, first paint shows tables before any login attempt.
   applyLoggedInUI(!!String(getStoredPassword() || "").trim());
@@ -4397,14 +5445,12 @@ window.addEventListener("DOMContentLoaded", async () => {
   setupEvents();
   updateTxnAuthGate();
   renderUnifiedTransactions();
-  refreshRecipients();
+  // refreshRecipients() is owned by setupEvents() and is already invoked
+  // through applyLoggedInUI() at the end of setupEvents(); calling it here
+  // would reference an undefined name in this scope (TDZ ReferenceError).
   await tryInitialLogin();
-  // If the Transactions tab is active on first load and we already have a
-  // stored password, kick off the joined fetch immediately so the spreadsheet
-  // is populated without the user switching tabs.
-  if (transactionsTabActive() && getStoredPassword()) {
-    refreshUnifiedTransactions();
-  }
+  // applyLoggedInUI (called inside tryInitialLogin) loads the visible tab's
+  // data; the old explicit re-kick here caused duplicate joined fetches.
 });
 
 

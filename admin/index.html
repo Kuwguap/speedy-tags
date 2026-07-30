@@ -13,16 +13,16 @@
     />
     <style>
       :root {
-        color-scheme: dark;
-        --bg: #020617;
-        --card: #020617;
-        --accent: #38bdf8;
-        --accent-soft: rgba(56, 189, 248, 0.1);
-        --border-subtle: #1f2937;
-        --text-main: #e5e7eb;
-        --text-muted: #9ca3af;
-        --danger: #f97373;
-        --success: #4ade80;
+        color-scheme: light;
+        --bg: #f1f5f9;
+        --card: #ffffff;
+        --accent: #0284c7;
+        --accent-soft: rgba(2, 132, 199, 0.12);
+        --border-subtle: #cbd5e1;
+        --text-main: #0f172a;
+        --text-muted: #475569;
+        --danger: #b91c1c;
+        --success: #16a34a;
       }
 
       * {
@@ -33,7 +33,7 @@
         margin: 0;
         font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
           sans-serif;
-        background: radial-gradient(circle at top, #0f172a 0, #020617 50%);
+        background: radial-gradient(circle at top, #f8fafc 0, #f1f5f9 65%);
         color: var(--text-main);
         text-align: center;
         min-height: 100vh;
@@ -62,8 +62,8 @@
         justify-content: center;
         gap: 0;
         padding: 0.5rem 0.75rem 0;
-        background: #0b1222;
-        border-bottom: 1px solid rgba(31, 41, 55, 0.95);
+        background: #ffffff;
+        border-bottom: 1px solid rgba(203, 213, 225, 0.95);
         flex-shrink: 0;
         flex-wrap: wrap;
       }
@@ -71,9 +71,9 @@
       .tab-strip .tab {
         appearance: none;
         font: inherit;
-        background: rgba(30, 41, 59, 0.75);
+        background: rgba(241, 245, 249, 0.95);
         color: var(--text-muted);
-        border: 1px solid rgba(55, 65, 81, 0.9);
+        border: 1px solid rgba(203, 213, 225, 0.9);
         border-bottom: none;
         border-radius: 10px 10px 0 0;
         padding: 0.5rem 1.1rem;
@@ -86,7 +86,7 @@
 
       .tab-strip .tab:hover {
         color: var(--text-main);
-        background: rgba(51, 65, 85, 0.85);
+        background: rgba(226, 232, 240, 0.95);
       }
 
       .tab-strip .tab.tab-active {
@@ -147,7 +147,7 @@
         border-radius: 999px;
         padding: 0.42rem 0.75rem;
         border: 1px solid var(--border-subtle);
-        background: rgba(15, 23, 42, 0.85);
+        background: rgba(255, 255, 255, 0.85);
         color: var(--text-main);
         font-size: 0.83rem;
       }
@@ -168,7 +168,7 @@
         border-radius: 999px;
         padding: 0.35rem 0.7rem;
         border: 1px solid var(--border-subtle);
-        background: rgba(15, 23, 42, 0.85);
+        background: rgba(255, 255, 255, 0.85);
         color: var(--text-main);
         font-size: 0.82rem;
       }
@@ -183,11 +183,50 @@
       #panel-transactions .txn-total-row td {
         position: sticky;
         bottom: 0;
-        background: rgba(2, 6, 23, 0.96);
+        background: rgba(255, 255, 255, 0.96);
         border-top: 1px solid rgba(56, 189, 248, 0.35);
         border-bottom: none;
         padding: 0.65rem 0.7rem;
         font-size: 0.82rem;
+      }
+
+      #panel-transactions .txn-dispatcher-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.45rem;
+      }
+
+      #panel-transactions .txn-dispatcher-chip {
+        display: inline-flex;
+        flex-direction: column;
+        gap: 0.1rem;
+        padding: 0.4rem 0.65rem;
+        border-radius: 0.65rem;
+        border: 1px solid rgba(16, 185, 129, 0.35);
+        background: rgba(240, 253, 244, 0.9);
+        color: inherit;
+        text-decoration: none;
+        font-size: 0.78rem;
+      }
+
+      #panel-transactions .txn-dispatcher-chip:hover {
+        border-color: rgba(16, 185, 129, 0.65);
+        background: rgba(220, 252, 231, 0.95);
+      }
+
+      #panel-transactions .txn-dispatcher-payday-link {
+        margin-left: 0.5rem;
+        font-weight: 500;
+        color: #059669;
+        text-decoration: none;
+      }
+
+      #panel-transactions .txn-dispatcher-payday-link:hover {
+        text-decoration: underline;
+      }
+
+      #panel-transactions .txn-dispatcher-group-header td {
+        border-top: 2px solid rgba(16, 185, 129, 0.25);
       }
 
       #panel-transactions .table-wrap table {
@@ -198,8 +237,8 @@
         margin-bottom: 0.85rem;
         padding: 0.75rem 0.9rem;
         border-radius: 0.75rem;
-        border: 1px solid rgba(31, 41, 55, 0.95);
-        background: rgba(2, 6, 23, 0.45);
+        border: 1px solid rgba(203, 213, 225, 0.95);
+        background: rgba(255, 255, 255, 0.45);
       }
 
       .issuer-tab-root .assistant-card ul {
@@ -342,7 +381,7 @@
         padding: 0.65rem 0.95rem;
         border-radius: 0.65rem;
         border: 1px solid var(--border-subtle);
-        background: rgba(15, 23, 42, 0.85);
+        background: rgba(255, 255, 255, 0.85);
         color: var(--text-main);
         box-sizing: border-box;
       }
@@ -446,11 +485,11 @@
       }
 
       .card {
-        background: radial-gradient(circle at top left, #020617, #000000 55%);
+        background: radial-gradient(circle at top left, #ffffff, #e2e8f0 55%);
         border-radius: 1.5rem;
         padding: 1.75rem;
         border: 1px solid rgba(148, 163, 184, 0.15);
-        box-shadow: 0 30px 120px rgba(15, 23, 42, 0.9);
+        box-shadow: 0 30px 120px rgba(15, 23, 42, 0.12);
         backdrop-filter: blur(18px);
       }
 
@@ -516,7 +555,7 @@
         padding: 0.3rem 0.75rem;
         border-radius: 999px;
         border: 1px solid var(--border-subtle);
-        background: rgba(15, 23, 42, 0.8);
+        background: rgba(255, 255, 255, 0.8);
         font-size: 0.8rem;
       }
 
@@ -566,8 +605,8 @@
         padding: 1.1rem;
         background: linear-gradient(
           145deg,
-          rgba(15, 23, 42, 0.9),
-          rgba(15, 23, 42, 0.98)
+          rgba(255, 255, 255, 0.9),
+          rgba(255, 255, 255, 0.98)
         );
         border: 1px solid rgba(30, 64, 175, 0.3);
       }
@@ -629,7 +668,7 @@
         border-radius: 999px;
         padding: 0.4rem 0.75rem;
         border: 1px solid var(--border-subtle);
-        background: rgba(15, 23, 42, 0.85);
+        background: rgba(255, 255, 255, 0.85);
         color: var(--text-main);
         font-size: 0.85rem;
       }
@@ -653,7 +692,7 @@
         border-radius: 0.9rem;
         border: 1px solid var(--border-subtle);
         overflow: auto;
-        background: radial-gradient(circle at top left, #020617, #020617 55%);
+        background: radial-gradient(circle at top left, #f8fafc, #f8fafc 55%);
         max-height: 280px;
         -webkit-overflow-scrolling: touch;
         touch-action: auto;
@@ -683,8 +722,8 @@
         padding: 0.75rem;
         border-radius: 0.9rem;
         border: 1px solid var(--border-subtle);
-        background: rgba(2, 6, 23, 0.96);
-        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.65);
+        background: rgba(255, 255, 255, 0.96);
+        box-shadow: 0 24px 80px rgba(15, 23, 42, 0.18);
       }
 
       .tx-table-wrapper.expanded .tx-table-wrap {
@@ -715,8 +754,8 @@
         padding: 0.75rem;
         border-radius: 0.9rem;
         border: 1px solid var(--border-subtle);
-        background: rgba(2, 6, 23, 0.96);
-        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.65);
+        background: rgba(255, 255, 255, 0.96);
+        box-shadow: 0 24px 80px rgba(15, 23, 42, 0.18);
       }
 
       .summary-table-wrapper.expanded .summary-table-wrap {
@@ -748,8 +787,8 @@
         padding: 0.75rem;
         border-radius: 0.9rem;
         border: 1px solid var(--border-subtle);
-        background: rgba(2, 6, 23, 0.96);
-        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.65);
+        background: rgba(255, 255, 255, 0.96);
+        box-shadow: 0 24px 80px rgba(15, 23, 42, 0.18);
       }
 
       .txn-ledger-wrapper.expanded .txn-ledger-table-wrap {
@@ -806,7 +845,7 @@
         padding: 0.6rem;
         border: 1px solid var(--border-subtle);
         border-radius: 0.75rem;
-        background: rgba(2, 6, 23, 0.55);
+        background: rgba(255, 255, 255, 0.55);
       }
 
       .summary-ai .field-row {
@@ -818,7 +857,7 @@
         border-radius: 999px;
         padding: 0.42rem 0.75rem;
         border: 1px solid var(--border-subtle);
-        background: rgba(15, 23, 42, 0.85);
+        background: rgba(255, 255, 255, 0.85);
         color: var(--text-main);
         font-size: 0.83rem;
       }
@@ -826,10 +865,10 @@
       .summary-ai-log {
         max-height: 180px;
         overflow: auto;
-        border: 1px solid rgba(31, 41, 55, 0.8);
+        border: 1px solid rgba(203, 213, 225, 0.8);
         border-radius: 0.65rem;
         padding: 0.5rem;
-        background: rgba(15, 23, 42, 0.45);
+        background: rgba(255, 255, 255, 0.45);
         text-align: left;
       }
 
@@ -857,14 +896,14 @@
       }
 
       thead {
-        background: rgba(15, 23, 42, 0.98);
+        background: rgba(255, 255, 255, 0.98);
       }
 
       th,
       td {
         padding: 0.55rem 0.7rem;
         text-align: center;
-        border-bottom: 1px solid rgba(31, 41, 55, 0.8);
+        border-bottom: 1px solid rgba(203, 213, 225, 0.8);
         white-space: nowrap;
       }
 
@@ -887,7 +926,7 @@
         padding: 0.1rem 0.55rem;
         font-size: 0.7rem;
         border: 1px solid rgba(148, 163, 184, 0.3);
-        background: rgba(15, 23, 42, 0.9);
+        background: rgba(255, 255, 255, 0.9);
       }
 
       .pill.delivered {
@@ -897,7 +936,7 @@
 
       .pill.pending {
         border-color: rgba(234, 179, 8, 0.65);
-        color: #fde68a;
+        color: #92400e;
       }
 
       .pill.failed {
@@ -987,8 +1026,8 @@
       .metric {
         padding: 0.5rem 0.6rem;
         border-radius: 0.75rem;
-        border: 1px solid rgba(31, 41, 55, 0.9);
-        background: radial-gradient(circle at top, #020617, #020617 55%);
+        border: 1px solid rgba(203, 213, 225, 0.9);
+        background: radial-gradient(circle at top, #f8fafc, #f8fafc 55%);
       }
 
       .metric-label {
@@ -1008,11 +1047,123 @@
       }
 
       .metric-value.warning {
-        color: #fde68a;
+        color: #92400e;
       }
 
       .metric-value.danger {
         color: var(--danger);
+      }
+
+      .weekly-performance-panel {
+        text-align: left;
+        margin-bottom: 1.25rem;
+        padding: 1rem 1.1rem;
+        border-radius: 14px;
+        border: 1px solid var(--border-subtle);
+        background: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
+        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+      }
+
+      .weekly-kpi-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 0.65rem;
+        margin: 0.75rem 0 1rem;
+      }
+
+      .weekly-kpi-grid .metric {
+        padding: 0.65rem 0.75rem;
+        border-radius: 10px;
+        background: #ffffff;
+        border: 1px solid var(--border-subtle);
+      }
+
+      .weekly-kpi-grid .metric-label {
+        font-size: 0.72rem;
+        color: var(--text-muted);
+        margin-bottom: 0.25rem;
+        line-height: 1.35;
+      }
+
+      .weekly-kpi-grid .metric-value {
+        font-size: 1.35rem;
+        font-weight: 700;
+      }
+
+      .weekly-chart-wrap {
+        position: relative;
+        width: 100%;
+        margin: 0.5rem 0 1rem;
+        border-radius: 10px;
+        border: 1px solid var(--border-subtle);
+        background: #ffffff;
+        padding: 0.5rem;
+      }
+
+      .weekly-chart-wrap canvas {
+        display: block;
+        width: 100%;
+        height: 220px;
+      }
+
+      .weekly-chart-legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem 1.25rem;
+        justify-content: center;
+        font-size: 0.72rem;
+        color: var(--text-muted);
+        margin-bottom: 0.5rem;
+      }
+
+      .weekly-chart-legend span::before {
+        content: "";
+        display: inline-block;
+        width: 10px;
+        height: 10px;
+        border-radius: 2px;
+        margin-right: 0.35rem;
+        vertical-align: middle;
+      }
+
+      .weekly-chart-legend .leg-tags::before {
+        background: #38bdf8;
+      }
+
+      .weekly-chart-legend .leg-receipts::before {
+        background: #4ade80;
+      }
+
+      .weekly-chart-legend .leg-revenue::before {
+        background: #fbbf24;
+      }
+
+      .weekly-payroll-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+        gap: 0.5rem;
+        margin: 0.75rem 0;
+        padding: 0.75rem;
+        border-radius: 10px;
+        border: 1px dashed var(--border-subtle);
+        background: #f8fafc;
+      }
+
+      .weekly-payroll-grid .payroll-line {
+        font-size: 0.82rem;
+      }
+
+      .weekly-payroll-grid .payroll-line strong {
+        color: var(--accent);
+      }
+
+      .weekly-payroll-total {
+        grid-column: 1 / -1;
+        font-size: 1rem;
+        font-weight: 700;
+        padding-top: 0.35rem;
+        border-top: 1px solid rgba(31, 41, 55, 0.9);
+        margin-top: 0.25rem;
       }
 
       .small {
@@ -1020,9 +1171,9 @@
         color: var(--text-muted);
       }
 
-      /* ── Driver Track (live map tab) ─────────────────────────────── */
+      /* ── Driver Track (live map tab) — light theme ───────────────── */
       #track-map {
-        background: #0d1626;
+        background: #e2e8f0;
       }
 
       .trk-pulse-icon {
@@ -1193,7 +1344,7 @@
                       type="text"
                       id="txn-search-input"
                       placeholder="Search ref / tag / driver / dispatcher"
-                      style="min-width: 220px; border-radius: 999px; padding: 0.35rem 0.7rem; border: 1px solid var(--border-subtle); background: rgba(15, 23, 42, 0.85); color: var(--text-main); font-size: 0.82rem;"
+                      style="min-width: 220px; border-radius: 999px; padding: 0.35rem 0.7rem; border: 1px solid var(--border-subtle); background: rgba(255, 255, 255, 0.85); color: var(--text-main); font-size: 0.82rem;"
                     />
                     <button id="txn-refresh-btn" type="button">
                       ⟳
@@ -1233,6 +1384,100 @@
                 </div>
               </div>
               <div id="txn-private-wrap">
+              <section id="weekly-performance-panel" class="weekly-performance-panel" aria-label="Weekly performance">
+                <div class="panel-header" style="margin-bottom: 0.35rem">
+                  <div class="panel-title">📊 Weekly performance (NJ time)</div>
+                  <div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;justify-content:flex-end">
+                    <select
+                      id="wp-chart-range"
+                      class="secondary"
+                      title="Chart history"
+                      style="border-radius:999px;padding:0.35rem 0.6rem;background:transparent;color:var(--text-main);border:1px solid var(--border-subtle);"
+                    >
+                      <option value="52">Last 52 weeks</option>
+                      <option value="104" selected>Last 2 years</option>
+                      <option value="260">Last 5 years</option>
+                      <option value="all">All loaded data</option>
+                    </select>
+                    <button id="wp-refresh-btn" type="button">
+                      ⟳
+                      <span>Refresh</span>
+                    </button>
+                  </div>
+                </div>
+                <div id="wp-period-label" class="small" style="margin-bottom: 0.35rem">
+                  Rolling 7-day window — unlock to load.
+                </div>
+                <div class="weekly-kpi-grid">
+                  <div class="metric">
+                    <div class="metric-label">1. Tags issued this week</div>
+                    <div id="wp-tags-issued" class="metric-value">—</div>
+                  </div>
+                  <div class="metric">
+                    <div class="metric-label">2. Receipts uploaded this week</div>
+                    <div id="wp-receipts-count" class="metric-value success">—</div>
+                  </div>
+                  <div class="metric">
+                    <div class="metric-label">3. Cash IN (receipt $ total)</div>
+                    <div id="wp-receipt-total" class="metric-value" style="color:#fbbf24">—</div>
+                  </div>
+                  <div class="metric">
+                    <div class="metric-label">4. Expected IN (min tags×$100)</div>
+                    <div id="wp-expected-in" class="metric-value">—</div>
+                    <div class="small muted" style="margin-top:0.25rem">Floor: <span id="wp-minimum-in">—</span> · Leads: <span id="wp-lead-price-total">—</span></div>
+                  </div>
+                  <div class="metric">
+                    <div class="metric-label">Revenue leak (expected − receipts)</div>
+                    <div id="wp-revenue-leak" class="metric-value" style="color:#f87171">—</div>
+                  </div>
+                  <div class="metric">
+                    <div class="metric-label">Net after payroll ($9+$5 only)</div>
+                    <div id="wp-net-after-payroll" class="metric-value success">—</div>
+                  </div>
+                  <div class="metric">
+                    <div class="metric-label">Unpaid (no receipt)</div>
+                    <div id="wp-unpaid-count" class="metric-value warning">—</div>
+                  </div>
+                </div>
+                <div class="weekly-chart-legend">
+                  <span class="leg-tags">Tags issued</span>
+                  <span class="leg-receipts">Receipts uploaded</span>
+                  <span class="leg-revenue">Receipt $ (÷100 on chart)</span>
+                </div>
+                <div class="weekly-chart-wrap">
+                  <canvas id="wp-chart" width="900" height="220" role="img" aria-label="Weekly tags, receipts, and revenue chart"></canvas>
+                </div>
+                <div class="panel-title" style="margin: 0.5rem 0 0.35rem; font-size: 0.9rem">5. Payroll this week</div>
+                <div class="weekly-payroll-grid">
+                  <div class="payroll-line">Issuer <strong>$9</strong> × <span id="wp-pay-tags">0</span> = <span id="wp-pay-issuer">$0</span></div>
+                  <div class="payroll-line">Dispatcher <strong>$5</strong> × <span id="wp-pay-tags-dup">0</span> = <span id="wp-pay-dispatcher">$0</span></div>
+                  <div class="payroll-line">Issuer + Dispatcher: <strong id="wp-payroll-core">$0</strong></div>
+                  <div class="payroll-line muted">Client finder <strong>$10</strong> × <span id="wp-pay-tags-dup2">0</span> = <span id="wp-pay-finder">$0</span></div>
+                  <div class="weekly-payroll-total">Total payroll incl. finder: <span id="wp-payroll-total">$0</span></div>
+                  <div class="small" style="margin-top:0.5rem"><a href="/fridaypayday" style="color:#059669">Open Friday Payday dashboard →</a></div>
+                </div>
+                <div class="panel-title" style="margin: 0.75rem 0 0.35rem; font-size: 0.9rem">6. Tags issued unpaid — no receipt</div>
+                <div id="wp-unpaid-status" class="small" style="margin-bottom: 0.4rem"></div>
+                <div class="table-wrap" style="max-height: 200px">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Date (NJ)</th>
+                        <th>Ref</th>
+                        <th>Tag / client</th>
+                        <th>Driver</th>
+                        <th>Why unpaid</th>
+                      </tr>
+                    </thead>
+                    <tbody id="wp-unpaid-tbody">
+                      <tr>
+                        <td colspan="5" class="muted">Unlock and refresh to load.</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div id="wp-status" class="small" style="margin-top: 0.5rem"></div>
+              </section>
               <div id="txn-no-auth" class="issuer-muted-block" style="display: none; color: var(--text-muted); font-size: 0.85rem; margin-bottom: 0.7rem;">
                 Unlock on the <strong>Krab Issuer</strong> tab first. The unified transactions ledger uses the same admin password.
               </div>
@@ -1240,6 +1485,7 @@
               <div id="txn-status" class="small" style="margin-bottom: 0.5rem">
                 Loading unified transactions…
               </div>
+              <div id="txn-dispatcher-groups" style="display:none;margin-bottom:0.75rem"></div>
               <div id="txn-ledger-wrapper" class="txn-ledger-wrapper">
                 <div class="txn-expanded-controls">
                   <button id="txn-ledger-expanded-zoom-out-btn" class="secondary" type="button">－</button>
@@ -1459,6 +1705,10 @@
                       ⬇
                       <span>Download CSV</span>
                     </button>
+                    <button id="summary-client-list-btn" class="secondary" type="button" title="Curated list: Client PDF Name + client phone">
+                      👥
+                      <span>View/Download client list</span>
+                    </button>
                     <button id="summary-expand-btn" class="secondary" type="button">
                       ⤢
                       <span>Expand</span>
@@ -1535,23 +1785,26 @@
                           <th>#</th>
                           <th>Time Date</th>
                           <th>Client PDF Name</th>
-                          <th>Issuer Name</th>
+                          <th>Receipt</th>
+                          <th>Receipt Price</th>
+                          <th>Total Price</th>
                           <th>Driver Name</th>
+                          <th>Driver Phone</th>
+                          <th>Client Phone</th>
+                          <th>Client Email</th>
                           <th>Success</th>
                           <th>Status</th>
                           <th>Count</th>
                           <th>Live Count</th>
+                          <th>Issuer Name</th>
                           <th>Issuer @Username</th>
                           <th>Driver Email</th>
                           <th>Reference</th>
-                          <th>Price</th>
-                          <th>Receipt Price</th>
-                          <th>Receipt</th>
                         </tr>
                       </thead>
                       <tbody id="summary-tbody">
                         <tr>
-                          <td colspan="15" class="muted">
+                          <td colspan="18" class="muted">
                             Generate a summary to see grouped results by sender.
                           </td>
                         </tr>
@@ -1636,6 +1889,32 @@
                   </tbody>
                 </table>
               </div>
+            </div>
+          </section>
+
+          <section id="unified-drivers-panel" class="panel" style="margin-top: 1rem">
+            <div class="panel-title" style="margin-bottom: 0.35rem">All drivers (Dispatch + Issuer bots)</div>
+            <p class="small muted" style="margin-bottom: 0.5rem">
+              Merged from Krab Dispatch email recipients, Krab Issuer Telegram drivers, and transaction records.
+            </p>
+            <div class="table-wrap" style="max-height: 320px">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Telegram ID</th>
+                    <th>Telegram @username</th>
+                    <th>Phone</th>
+                    <th>Sources</th>
+                  </tr>
+                </thead>
+                <tbody id="unified-drivers-tbody">
+                  <tr>
+                    <td colspan="6" class="muted">Unlock to load merged driver directory.</td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           </section>
         </div>
@@ -2106,6 +2385,40 @@
               </div>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Curated client list (Client PDF Name + client phone) modal -->
+    <div
+      id="client-list-modal"
+      style="display:none; position:fixed; inset:0; z-index:1000; background:rgba(15,23,42,0.45); backdrop-filter:blur(2px); align-items:center; justify-content:center; padding:1rem;"
+    >
+      <div
+        style="background:#ffffff; color:var(--text-main, #0f172a); border:1px solid var(--border-subtle, #cbd5e1); border-radius:14px; width:min(680px, 96vw); max-height:88vh; display:flex; flex-direction:column; box-shadow:0 18px 60px rgba(15,23,42,0.25); text-align:left;"
+      >
+        <div style="display:flex; align-items:center; gap:0.6rem; padding:0.9rem 1.1rem; border-bottom:1px solid var(--border-subtle, #cbd5e1);">
+          <strong style="font-size:0.95rem;">👥 Client list</strong>
+          <span id="client-list-count" class="small" style="opacity:0.75;"></span>
+          <span style="flex:1"></span>
+          <button id="client-list-download-btn" class="secondary" type="button">⬇ <span>Download CSV</span></button>
+          <button id="client-list-close-btn" class="secondary" type="button">✕</button>
+        </div>
+        <div class="small" style="padding:0.5rem 1.1rem 0; opacity:0.8;">
+          Curated from the current summary window: Client PDF Name + client phone.
+        </div>
+        <div style="overflow:auto; padding:0.6rem 1.1rem 1.1rem;">
+          <table style="width:100%; border-collapse:collapse; font-size:0.85rem; color:var(--text-main, #0f172a);">
+            <thead>
+              <tr>
+                <th style="text-align:left; padding:0.4rem 0.5rem; border-bottom:1px solid var(--border-subtle, #cbd5e1);">#</th>
+                <th style="text-align:left; padding:0.4rem 0.5rem; border-bottom:1px solid var(--border-subtle, #cbd5e1);">Client PDF Name</th>
+                <th style="text-align:left; padding:0.4rem 0.5rem; border-bottom:1px solid var(--border-subtle, #cbd5e1);">Client Phone</th>
+                <th style="text-align:left; padding:0.4rem 0.5rem; border-bottom:1px solid var(--border-subtle, #cbd5e1);">Client Email</th>
+              </tr>
+            </thead>
+            <tbody id="client-list-tbody"></tbody>
+          </table>
         </div>
       </div>
     </div>
