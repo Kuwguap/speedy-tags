@@ -1281,16 +1281,102 @@ function setupWeeklyPerformanceEvents() {
   });
 }
 
+// ==========================================================================
+// Work status (manual per-transaction workflow flag, separate from delivery
+// status). Rendered as a compact <select> under the delivery pill in both the
+// unified Transactions table and the Summary table. Saved via
+// PATCH /transactions/{id}/work-status.
+// ==========================================================================
+
+const WORK_STATUS_OPTIONS = [
+  { value: "", label: "—" },
+  { value: "working_on_it", label: "working on it" },
+  { value: "stuck", label: "stuck" },
+  { value: "in_progress", label: "in progress" },
+  { value: "done", label: "done" },
+];
+
+function workStatusModifierClass(value) {
+  if (value === "done") return "ws-done";
+  if (value === "stuck") return "ws-stuck";
+  if (value === "working_on_it" || value === "in_progress") return "ws-active";
+  return "";
+}
+
+function workStatusSelectHtml(row) {
+  if (!row || row.id == null || String(row.id).trim() === "") return "";
+  const current = String(row.work_status || "");
+  const mod = workStatusModifierClass(current);
+  const opts = WORK_STATUS_OPTIONS.map(
+    (o) =>
+      `<option value="${o.value}"${o.value === current ? " selected" : ""}>${o.label}</option>`
+  ).join("");
+  return (
+    `<select class="work-status-select${mod ? " " + mod : ""}"` +
+    ` data-work-status-id="${escapeHtmlAttr(String(row.id))}"` +
+    ` data-ws-prev="${escapeHtmlAttr(current)}">${opts}</select>`
+  );
+}
+
+function applyWorkStatusTint(sel) {
+  sel.classList.remove("ws-done", "ws-stuck", "ws-active");
+  const mod = workStatusModifierClass(sel.value);
+  if (mod) sel.classList.add(mod);
+}
+
+// Keeps the in-memory row objects in sync so a later re-render (without a
+// refetch) still shows the saved status.
+function updateWorkStatusInRows(id, status) {
+  const idStr = String(id);
+  for (const r of _txnRows || []) {
+    if (r && String(r.id) === idStr) r.work_status = status;
+  }
+  const items = (lastSummary && lastSummary.items) || [];
+  for (const it of items) {
+    if (it && String(it.id) === idStr) it.work_status = status;
+  }
+}
+
+async function commitWorkStatusChange(sel) {
+  const id = sel.getAttribute("data-work-status-id") || "";
+  if (!id) return;
+  const prev = sel.getAttribute("data-ws-prev") || "";
+  const next = sel.value || "";
+  if (next === prev) return;
+  sel.disabled = true;
+  const res = await requestWithAdminJson(
+    `/transactions/${encodeURIComponent(id)}/work-status`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: next || null }),
+    }
+  );
+  sel.disabled = false;
+  // A 2xx with an empty/non-JSON body (e.g. 204) is still a saved write.
+  const saved = res.ok || (res.status >= 200 && res.status < 300);
+  if (saved) {
+    sel.setAttribute("data-ws-prev", next);
+    updateWorkStatusInRows(id, next || null);
+    applyWorkStatusTint(sel);
+  } else {
+    alert("Could not save status");
+    sel.value = prev;
+    applyWorkStatusTint(sel);
+  }
+}
+
 function _txnStatusCell(row) {
   const s = ((row && row.delivery_status) || "").toUpperCase();
-  if (!s) return '<span class="muted">—</span>';
+  const wsSelect = workStatusSelectHtml(row);
+  if (!s) return '<span class="muted">—</span>' + wsSelect;
   const klass =
     s === "DELIVERED"
       ? "delivered"
       : s === "PENDING"
       ? "pending"
       : "failed";
-  return `<span class="pill ${klass}">${escapeIssuerText(s)}</span>`;
+  return `<span class="pill ${klass}">${escapeIssuerText(s)}</span>${wsSelect}`;
 }
 
 function _txnMatches(row, qLower) {
@@ -3671,28 +3757,131 @@ function clientEmailFor(it) {
   return m ? m[0] : "";
 }
 
-/**
- * driver name (normalized) → leads accepted, from GET /issuer-admin/stats.
- * Loaded once per summary render; null when unavailable (locked / API down).
- */
-let _issuerAcceptedByDriverName = null;
+// ==========================================================================
+// Live Count — manual per-driver countdown.
+// The admin types a base count into any summary row's Live Count input; that
+// row becomes the anchor (base_count + anchor_ts stored server-side via
+// PUT /live-counts). Rows of the same driver at/after the anchor timestamp
+// count down chronologically: base, base-1, base-2, … (may go negative).
+// Rows before the anchor, and drivers with no entry, show a blank input.
+// ==========================================================================
 
-async function loadIssuerAcceptedByDriverName() {
-  try {
-    const res = await issuerApiJson("/issuer-admin/stats");
-    if (!res.ok || !res.data || !Array.isArray(res.data.drivers)) {
-      return null;
-    }
-    const map = {};
-    for (const d of res.data.drivers) {
-      const key = String((d && d.driver_name) || "").trim().toLowerCase();
-      if (!key) continue;
-      map[key] = (map[key] || 0) + (Number(d.leads_accepted) || 0);
-    }
-    return map;
-  } catch {
-    return null;
+/** driver_key → { base_count, anchor_ts } from GET /live-counts; null = none loaded. */
+let _liveCountsByDriver = null;
+/** true when /live-counts was unavailable due to missing/invalid admin password. */
+let _liveCountsLocked = false;
+
+function liveCountDriverKey(name) {
+  return String(name || "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+// One fetch per summary render; sets the module state used by renderSummaryTable.
+async function refreshLiveCountsState() {
+  _liveCountsByDriver = null;
+  _liveCountsLocked = false;
+  const res = await requestWithAdminJson("/live-counts");
+  if (res.ok && res.data && typeof res.data === "object" && !Array.isArray(res.data)) {
+    _liveCountsByDriver = res.data;
+  } else if (res.status === 401 || res.error === "NO_PASSWORD") {
+    _liveCountsLocked = true;
   }
+}
+
+/**
+ * Map of summary item → number to display in its Live Count input.
+ * Items missing a driver name/timestamp, before the anchor, or belonging to a
+ * driver with no live-count entry are simply absent from the map (blank input).
+ */
+function computeLiveCountDisplay(items, countsMap) {
+  const result = new Map();
+  if (!countsMap) return result;
+  const byDriver = new Map();
+  for (const it of items || []) {
+    if (!it) continue;
+    const key = liveCountDriverKey(it.recipient_name);
+    if (!key) continue;
+    const ms = parseItemTimeMs(it);
+    if (!Number.isFinite(ms)) continue;
+    if (!byDriver.has(key)) byDriver.set(key, []);
+    byDriver.get(key).push({ it, ms });
+  }
+  for (const [key, rows] of byDriver) {
+    const entry = countsMap[key];
+    if (!entry || entry.base_count == null) continue;
+    const base = Number(entry.base_count);
+    if (!Number.isFinite(base)) continue;
+    const anchorMs = Date.parse(String(entry.anchor_ts || ""));
+    if (!Number.isFinite(anchorMs)) continue;
+    rows.sort((a, b) => a.ms - b.ms);
+    let offset = 0;
+    for (const r of rows) {
+      // 1s tolerance so the anchor row itself is included even if the stored
+      // anchor_ts round-tripped with slightly different precision.
+      if (r.ms >= anchorMs - 1000) {
+        result.set(r.it, base - offset);
+        offset += 1;
+      }
+    }
+  }
+  return result;
+}
+
+async function commitLiveCountEdit(input) {
+  const driver = input.getAttribute("data-live-count-driver") || "";
+  const ts = input.getAttribute("data-live-count-ts") || "";
+  if (!driver || !ts) return;
+  const raw = String(input.value || "").trim();
+  let base = null;
+  if (raw !== "") {
+    base = Number(raw);
+    if (!Number.isFinite(base)) return;
+  }
+  input.disabled = true;
+  const res = await requestWithAdminJson("/live-counts", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ driver, base_count: base, anchor_ts: ts }),
+  });
+  input.disabled = false;
+  // A 2xx with an empty/non-JSON body (e.g. 204) is still a saved write.
+  const saved = res.ok || (res.status >= 200 && res.status < 300);
+  if (saved) {
+    const key = liveCountDriverKey(driver);
+    if (!_liveCountsByDriver) _liveCountsByDriver = {};
+    if (base == null) {
+      delete _liveCountsByDriver[key];
+    } else {
+      _liveCountsByDriver[key] = { base_count: base, anchor_ts: ts };
+    }
+  } else {
+    alert("Could not save live count");
+  }
+  // Repaint from local state: on success the edited row becomes the anchor and
+  // later rows of that driver count down; on failure this reverts the input.
+  if (lastSummary) renderSummaryTable(lastSummary);
+}
+
+// Delegated listeners: table bodies are rebuilt via innerHTML on every render,
+// so per-element handlers would be lost. Nothing here fires on render — only
+// on actual user input.
+function setupWorkStatusAndLiveCountEvents() {
+  document.addEventListener("change", (ev) => {
+    const el = ev.target;
+    if (!el || !el.classList) return;
+    if (el.classList.contains("work-status-select")) {
+      void commitWorkStatusChange(el);
+    } else if (el.classList.contains("live-count-input")) {
+      void commitLiveCountEdit(el);
+    }
+  });
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Enter") return;
+    const el = ev.target;
+    if (el && el.classList && el.classList.contains("live-count-input")) {
+      // Blur commits via the change listener above (only if the value changed).
+      el.blur();
+    }
+  });
 }
 
 function renderSummaryTable(summary) {
@@ -3720,6 +3909,7 @@ function renderSummaryTable(summary) {
     issuerHandleCounts[handle] = (issuerHandleCounts[handle] || 0) + 1;
   }
   const driverPhoneMap = buildDriverPhoneMap();
+  const liveCountDisplay = computeLiveCountDisplay(sorted, _liveCountsByDriver);
 
   for (let i = 0; i < sorted.length; i += 1) {
     const it = sorted[i];
@@ -3759,6 +3949,29 @@ function renderSummaryTable(summary) {
     tdDriverName.textContent = it.recipient_name || "—";
     tr.appendChild(tdDriverName);
 
+    // Live Count: manual per-driver countdown (see computeLiveCountDisplay).
+    const tdLiveCount = document.createElement("td");
+    const liveInput = document.createElement("input");
+    liveInput.type = "number";
+    liveInput.className = "live-count-input";
+    liveInput.placeholder = "—";
+    const liveDriverName = String(it.recipient_name || "").trim();
+    const liveRowTs = String(it.timestamp_ny || "").trim();
+    if (_liveCountsLocked) {
+      liveInput.disabled = true;
+      liveInput.title = "Unlock to edit";
+    } else if (!liveDriverName || !liveRowTs) {
+      // Rows without a driver name or timestamp cannot anchor a countdown.
+      liveInput.disabled = true;
+    } else {
+      liveInput.setAttribute("data-live-count-driver", liveDriverName);
+      liveInput.setAttribute("data-live-count-ts", liveRowTs);
+    }
+    const liveVal = liveCountDisplay.get(it);
+    if (liveVal != null) liveInput.value = String(liveVal);
+    tdLiveCount.appendChild(liveInput);
+    tr.appendChild(tdLiveCount);
+
     const tdDriverPhone = document.createElement("td");
     tdDriverPhone.textContent = driverPhoneFor(it, driverPhoneMap) || "—";
     tr.appendChild(tdDriverPhone);
@@ -3790,6 +4003,7 @@ function renderSummaryTable(summary) {
     }
     statusPill.textContent = status || "UNKNOWN";
     tdStatus.appendChild(statusPill);
+    tdStatus.insertAdjacentHTML("beforeend", workStatusSelectHtml(it));
     tr.appendChild(tdStatus);
 
     const tdCount = document.createElement("td");
@@ -3797,21 +4011,6 @@ function renderSummaryTable(summary) {
     const rawCount = issuerHandleCounts[handleKey] || 0;
     tdCount.textContent = String(rawCount);
     tr.appendChild(tdCount);
-
-    // Live Count = Count minus leads already accepted by this row's driver
-    // (matched by normalized name against /issuer-admin/stats), floored at 0.
-    const tdLiveCount = document.createElement("td");
-    let liveCount = rawCount;
-    const driverKey = String(it.recipient_name || "").trim().toLowerCase();
-    if (
-      _issuerAcceptedByDriverName &&
-      driverKey &&
-      _issuerAcceptedByDriverName[driverKey] != null
-    ) {
-      liveCount = Math.max(0, rawCount - _issuerAcceptedByDriverName[driverKey]);
-    }
-    tdLiveCount.textContent = String(liveCount);
-    tr.appendChild(tdLiveCount);
 
     const tdIssuerName = document.createElement("td");
     tdIssuerName.textContent = it.telegram_name || "—";
@@ -4436,8 +4635,8 @@ async function refreshSummary() {
       }
     }
 
-    // Live Count needs issuer "leads accepted" per driver — one fetch per render.
-    _issuerAcceptedByDriverName = await loadIssuerAcceptedByDriverName();
+    // Live Count anchors (manual per-driver countdown) — one fetch per render.
+    await refreshLiveCountsState();
     if (!hasAdminPassword()) {
       return;
     }
@@ -5420,6 +5619,7 @@ function setupEvents() {
   setupTxnEvents();
   setupWeeklyPerformanceEvents();
   setupTrackEvents();
+  setupWorkStatusAndLiveCountEvents();
 
   applySummaryZoom(1);
   applyTxZoom(1);

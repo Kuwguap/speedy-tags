@@ -944,6 +944,42 @@
         color: var(--danger);
       }
 
+      .work-status-select {
+        font-size: 0.72rem;
+        padding: 2px 4px;
+        border-radius: 6px;
+        border: 1px solid var(--border-subtle);
+        background: #fff;
+        color: var(--text-main);
+        margin-top: 3px;
+        display: block;
+      }
+
+      .work-status-select.ws-done {
+        border-color: var(--success);
+        color: var(--success);
+      }
+
+      .work-status-select.ws-stuck {
+        border-color: var(--danger);
+        color: var(--danger);
+      }
+
+      .work-status-select.ws-active {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+
+      .live-count-input {
+        width: 64px;
+        font-size: 0.72rem;
+        padding: 2px 4px;
+        border-radius: 6px;
+        border: 1px solid var(--border-subtle);
+        background: #fff;
+        color: var(--text-main);
+      }
+
       .summary-metrics {
         display: grid;
         grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1792,13 +1828,13 @@
                           <th>Receipt Price</th>
                           <th>Total Price</th>
                           <th>Driver Name</th>
+                          <th>Live Count</th>
                           <th>Driver Phone</th>
                           <th>Client Phone</th>
                           <th>Client Email</th>
                           <th>Success</th>
                           <th>Status</th>
                           <th>Count</th>
-                          <th>Live Count</th>
                           <th>Issuer Name</th>
                           <th>Issuer @Username</th>
                           <th>Driver Email</th>
