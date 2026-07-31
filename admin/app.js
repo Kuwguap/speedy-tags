@@ -3789,8 +3789,11 @@ async function refreshLiveCountsState() {
 
 /**
  * Map of summary item → number to display in its Live Count input.
- * Items missing a driver name/timestamp, before the anchor, or belonging to a
- * driver with no live-count entry are simply absent from the map (blank input).
+ * Setting a count on any row makes EVERY transaction of that driver show the
+ * base number (existing rows all read e.g. 20); each NEW transaction after
+ * the anchor then subtracts one (19, 18, …). Items missing a driver
+ * name/timestamp, or belonging to a driver with no live-count entry, are
+ * absent from the map (blank input).
  */
 function computeLiveCountDisplay(items, countsMap) {
   const result = new Map();
@@ -3815,11 +3818,13 @@ function computeLiveCountDisplay(items, countsMap) {
     rows.sort((a, b) => a.ms - b.ms);
     let offset = 0;
     for (const r of rows) {
-      // 1s tolerance so the anchor row itself is included even if the stored
-      // anchor_ts round-tripped with slightly different precision.
-      if (r.ms >= anchorMs - 1000) {
-        result.set(r.it, base - offset);
+      // 1s tolerance so the anchor row itself lands in the "show base" bucket
+      // even if the stored anchor_ts round-tripped with different precision.
+      if (r.ms <= anchorMs + 1000) {
+        result.set(r.it, base);
+      } else {
         offset += 1;
+        result.set(r.it, base - offset);
       }
     }
   }
