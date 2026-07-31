@@ -56,6 +56,41 @@ function serviceLine(order) {
   return productChoiceTitle(order.productChoice);
 }
 
+/** Public HTTPS document URLs already on the order at ingest time.
+ * docParsedSource holds the customer's AI auto-fill uploads (often a license
+ * or registration scan); the doc* fields are usually still null here because
+ * checkout documents upload after tag info — those go via attachDocsToKrableads.
+ */
+export function buildKrableadsFilesList(order) {
+  const o = order || {};
+  const files = [];
+  const seen = new Set();
+  const push = (url, label) => {
+    const t = typeof url === "string" ? url.trim() : "";
+    if (!t || !/^https?:\/\//i.test(t) || seen.has(t)) return;
+    seen.add(t);
+    files.push({ url: t, label });
+  };
+  let sources = o.docParsedSource;
+  if (typeof sources === "string") {
+    try {
+      const parsed = JSON.parse(sources);
+      sources = Array.isArray(parsed) ? parsed : [sources];
+    } catch {
+      sources = [sources];
+    }
+  }
+  if (Array.isArray(sources)) {
+    sources.forEach((u, i) =>
+      push(u, sources.length > 1 ? `Customer document ${i + 1}/${sources.length}` : "Customer document"),
+    );
+  }
+  push(o.docDriversLicense, "Drivers License");
+  push(o.docInsuranceCard, "Insurance Card");
+  push(o.docVinPhoto, "VIN Photo");
+  return files;
+}
+
 /** Plain-text New Lead message matching krableads external_lead_parser labels. */
 export function buildKrableadsLeadMessage(order) {
   const o = order || {};
@@ -104,6 +139,7 @@ export async function submitLeadToKrableads(order) {
 
   const url = (process.env.KRABLEADS_INGEST_URL || DEFAULT_INGEST_URL).trim();
   const message = buildKrableadsLeadMessage(order);
+  const files = buildKrableadsFilesList(order);
 
   try {
     // Bounded wait: the customer's checkout PATCH awaits this call, and the
@@ -117,9 +153,9 @@ export async function submitLeadToKrableads(order) {
         method: "POST",
         headers: {
           Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "text/plain; charset=utf-8",
+          "Content-Type": "application/json; charset=utf-8",
         },
-        body: message,
+        body: JSON.stringify(files.length > 0 ? { message, files } : { message }),
         signal: abort.signal,
       });
     } finally {
@@ -165,6 +201,73 @@ export async function submitLeadToKrableads(order) {
       lead_id: body?.lead_id ? String(body.lead_id) : undefined,
       external_order_id: body?.external_order_id ? String(body.external_order_id) : undefined,
     };
+  } catch (e) {
+    return { ok: false, error: e?.message || String(e) };
+  }
+}
+
+/**
+ * Checkout documents upload AFTER the tag-info ingest, so they need a second
+ * call: attach the doc URLs to the already-created krableads lead. krableads
+ * delivers them to the accepting Telegram group (immediately if the group
+ * already accepted, on accept otherwise) and AI-reads them to fill any lead
+ * fields the customer left blank.
+ * @returns {Promise<{ ok: true, delivered?: string, ai_filled?: string[] } | { ok: false, error: string, status?: number }>}
+ */
+export async function attachDocsToKrableads(order) {
+  const apiKey = (process.env.KRABLEADS_INGEST_API_KEY || "").trim();
+  if (!apiKey) return { ok: false, error: "KRABLEADS_INGEST_API_KEY not configured" };
+
+  const o = order || {};
+  const referenceId = String(o.krableadsReferenceId || o.krableads_reference_id || "").trim();
+  const shortId = String(o.id || "").slice(0, 8);
+  if (!referenceId && !shortId) return { ok: false, error: "Order has no krableads reference" };
+
+  const files = [];
+  const push = (url, label) => {
+    const t = typeof url === "string" ? url.trim() : "";
+    if (t && /^https?:\/\//i.test(t)) files.push({ url: t, label });
+  };
+  push(o.docDriversLicense, "Drivers License");
+  push(o.docInsuranceCard, "Insurance Card");
+  push(o.docVinPhoto, "VIN Photo");
+  if (files.length === 0) return { ok: false, error: "No document URLs on order" };
+
+  const ingestUrl = (process.env.KRABLEADS_INGEST_URL || DEFAULT_INGEST_URL).trim();
+  const url = ingestUrl.replace(/\/ingest\/?$/, "/attach");
+
+  try {
+    const abort = new AbortController();
+    // The AI gap-fill on the krableads side reads every image before
+    // responding; give it more headroom than the ingest call.
+    const timer = setTimeout(() => abort.abort(), 60_000);
+    let res;
+    try {
+      res = await fetch(url, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json; charset=utf-8",
+        },
+        body: JSON.stringify({
+          reference_id: referenceId || undefined,
+          external_order_id: shortId || undefined,
+          files,
+        }),
+        signal: abort.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+    const body = await res.json().catch(() => null);
+    if (!res.ok || !body?.ok) {
+      const msg = [
+        ...(Array.isArray(body?.errors) ? body.errors.map(String) : []),
+        body?.error ? String(body.error) : "",
+      ].filter(Boolean).join("; ") || res.statusText || `HTTP ${res.status}`;
+      return { ok: false, error: msg, status: res.status };
+    }
+    return { ok: true, delivered: body.delivered, ai_filled: body.ai_filled };
   } catch (e) {
     return { ok: false, error: e?.message || String(e) };
   }

@@ -10,7 +10,7 @@ import jwt from "jsonwebtoken";
 import Stripe from "stripe";
 import { Resend } from "resend";
 import { supabase, useSupabase } from "./db.js";
-import { isKrableadsIngestEnabled, submitLeadToKrableads } from "./krableads-ingest.js";
+import { isKrableadsIngestEnabled, submitLeadToKrableads, attachDocsToKrableads } from "./krableads-ingest.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = join(__dirname, "data");
@@ -4049,7 +4049,23 @@ app.post("/api/orders/:id/documents", upload.fields([
       const updated = await findOrderById(id);
       const full = useSupabase() ? orderRowToApi(updated) : updated;
       Object.assign(full, updates);
-      await sendDocImagesToTelegram(full);
+      // krableads-managed leads: hand the doc URLs to krableadsV2, which
+      // forwards them to the accepting Telegram group and AI-fills any lead
+      // fields the customer left blank. Legacy path stays as fallback.
+      let docsHandled = false;
+      if (isKrableadsIngestEnabled() && (full.krableadsReferenceId || full.krableads_reference_id)) {
+        const attach = await attachDocsToKrableads(full);
+        if (attach.ok) {
+          docsHandled = true;
+          console.log(
+            `[KrableadsIngest] Order ${id.slice(0, 8)} docs attached (${attach.delivered || "queued"}` +
+            `${attach.ai_filled?.length ? `, AI filled: ${attach.ai_filled.join(", ")}` : ""})`,
+          );
+        } else {
+          console.error(`[KrableadsIngest] Order ${id.slice(0, 8)} doc attach failed: ${attach.error}`);
+        }
+      }
+      if (!docsHandled) await sendDocImagesToTelegram(full);
     }
     const final = await findOrderById(id);
     res.json(useSupabase() ? orderRowToApi(final) : final);
