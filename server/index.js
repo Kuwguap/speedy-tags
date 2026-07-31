@@ -1952,8 +1952,26 @@ function buildAbandonedCartEmailHtml(order, stage) {
 
 async function sendAbandonedCartEmail(order, stage) {
   if (!resend) return false;
-  const to = String(order.deliveryEmail || "").trim();
-  if (!to || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) return false;
+  // Normalize: strip wrapping <>/quotes and trailing punctuation people type,
+  // then validate strictly (no commas, no double dots) — addresses that pass
+  // a loose regex but fail Resend's parser otherwise 422 the whole send.
+  let to = String(order.deliveryEmail || "")
+    .trim()
+    .replace(/^<+|>+$/g, "")
+    .replace(/^["']+|["']+$/g, "")
+    .replace(/[.,;:]+$/g, "")
+    .trim();
+  if (
+    !to ||
+    /[,;\s<>"]/.test(to) ||
+    /\.\./.test(to) ||
+    !/^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/.test(to)
+  ) {
+    console.warn(
+      `[AbandonedCart] skipping invalid email ${JSON.stringify(order.deliveryEmail)} (order ${String(order.id).slice(0, 8)})`
+    );
+    return false;
+  }
   const subject = stage === 2 ? "Still need your temporary tag?" : "You left something in your cart";
   try {
     const { error } = await resend.emails.send({
@@ -1964,7 +1982,10 @@ async function sendAbandonedCartEmail(order, stage) {
       headers: { "List-Unsubscribe": `<${unsubscribeUrlForOrder(order)}>` },
     });
     if (error) {
-      console.error("[AbandonedCart] Resend error:", error);
+      console.error(
+        `[AbandonedCart] Resend error for ${to} (order ${String(order.id).slice(0, 8)}):`,
+        error
+      );
       return false;
     }
     console.log(`[AbandonedCart] stage ${stage} → ${to} (order ${String(order.id).slice(0, 8)})`);
@@ -4474,6 +4495,17 @@ const server = app.listen(PORT, () => {
     console.warn("WARNING: LEAD_NOTIFICATION_TELEGRAM_IDS empty — new leads won't be DMed");
   }
   if (useSupabase()) console.log("Using Supabase"); else console.log("Using file storage");
+  if (isKrableadsIngestEnabled()) {
+    console.log(
+      "[KrableadsIngest] ENABLED — web leads route to krableadsV2 (" +
+        (process.env.KRABLEADS_INGEST_URL || "default url") +
+        "); legacy Telegram dispatch is the fallback"
+    );
+  } else {
+    console.log(
+      "[KrableadsIngest] disabled (KRABLEADS_INGEST_API_KEY not set) — using legacy Telegram dispatch"
+    );
+  }
   void ensureTelegramWebhookOnStartup();
   // Safety net: reconcile paid-but-pending Stripe orders even if the webhook is
   // down/misconfigured or the customer never returns to the success page.
