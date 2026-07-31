@@ -1233,15 +1233,18 @@
         padding: 0.35rem 0.7rem;
         border-radius: 999px;
         border: 1px solid var(--border-subtle);
-        background: rgba(15, 23, 42, 0.85);
+        background: #ffffff;
         color: var(--text-main);
         font-size: 0.8rem;
+        font-weight: 600;
         cursor: pointer;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
       }
 
       .track-chip.track-chip-active {
-        border-color: #6ea3d8;
-        box-shadow: 0 0 0 1px #6ea3d8 inset;
+        border-color: var(--accent);
+        background: var(--accent-soft);
+        box-shadow: 0 0 0 1px var(--accent) inset;
       }
 
       .track-chip .trk-live-dot {
