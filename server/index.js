@@ -3811,9 +3811,17 @@ app.patch("/api/orders/:id/tag-info", async (req, res) => {
       } else {
         await updateOrder(id, { krableadsIngestError: ingest.error });
         telegramErrors.push({ error: ingest.error, status: ingest.status });
-        console.error("[KrableadsIngest]", id.slice(0, 8), ingest.error);
+        console.error(
+          "[KrableadsIngest]",
+          id.slice(0, 8),
+          ingest.error,
+          "— falling back to legacy Telegram dispatch"
+        );
       }
-    } else {
+    }
+    // Legacy Telegram dispatch: the primary path when ingest is disabled, and
+    // the FALLBACK when an enabled ingest fails — a lead must never strand.
+    if (!telegramSent) {
       const dispatchers = await loadDispatchers();
       if (dispatchers.length > 0 && TELEGRAM_BOT_TOKEN) {
         for (const d of dispatchers) {

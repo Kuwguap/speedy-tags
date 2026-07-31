@@ -106,14 +106,25 @@ export async function submitLeadToKrableads(order) {
   const message = buildKrableadsLeadMessage(order);
 
   try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "text/plain; charset=utf-8",
-      },
-      body: message,
-    });
+    // Bounded wait: the customer's checkout PATCH awaits this call, and the
+    // ingest service (Render) can cold-start. On timeout the caller falls
+    // back to legacy Telegram dispatch so the lead is never stranded.
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(), 25_000);
+    let res;
+    try {
+      res = await fetch(url, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "text/plain; charset=utf-8",
+        },
+        body: message,
+        signal: abort.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
 
     let body = null;
     const ct = res.headers.get("content-type") || "";
