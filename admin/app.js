@@ -3816,12 +3816,28 @@ function computeLiveCountDisplay(items, countsMap) {
     const anchorMs = Date.parse(String(entry.anchor_ts || ""));
     if (!Number.isFinite(anchorMs)) continue;
     rows.sort((a, b) => a.ms - b.ms);
+    // Preferred: count down from the server's post-anchor transaction list,
+    // which covers ALL of the driver's transactions — not just the rows the
+    // current time-window/table-cap happens to include. Fallback (older
+    // backend without post_anchor_ts): count the rendered rows themselves.
+    const postAnchor = Array.isArray(entry.post_anchor_ts)
+      ? entry.post_anchor_ts.map((s) => Date.parse(String(s))).filter(Number.isFinite).sort((a, b) => a - b)
+      : null;
     let offset = 0;
     for (const r of rows) {
       // 1s tolerance so the anchor row itself lands in the "show base" bucket
       // even if the stored anchor_ts round-tripped with different precision.
       if (r.ms <= anchorMs + 1000) {
         result.set(r.it, base);
+      } else if (postAnchor) {
+        // This row is itself one of the post-anchor transactions, so the
+        // count of entries at-or-before it includes it: first new row = base-1.
+        let n = 0;
+        for (const ms of postAnchor) {
+          if (ms <= r.ms + 1) n += 1;
+          else break;
+        }
+        result.set(r.it, base - Math.max(n, 1));
       } else {
         offset += 1;
         result.set(r.it, base - offset);
@@ -3831,21 +3847,32 @@ function computeLiveCountDisplay(items, countsMap) {
   return result;
 }
 
+let _liveCountLastCommit = null;
+
 async function commitLiveCountEdit(input) {
   const driver = input.getAttribute("data-live-count-driver") || "";
-  const ts = input.getAttribute("data-live-count-ts") || "";
-  if (!driver || !ts) return;
+  if (!driver) return;
   const raw = String(input.value || "").trim();
   let base = null;
   if (raw !== "") {
     base = Number(raw);
     if (!Number.isFinite(base)) return;
   }
+  // Enter blurs AND commits directly; blur may also fire `change` → a second
+  // commit for the same edit. Swallow the duplicate, allow deliberate repeats.
+  const sig = liveCountDriverKey(driver) + "|" + raw;
+  const nowMs = Date.now();
+  if (_liveCountLastCommit && _liveCountLastCommit.sig === sig && nowMs - _liveCountLastCommit.at < 1500) return;
+  _liveCountLastCommit = { sig, at: nowMs };
+  // Anchor at the moment of the edit — NOT the clicked row's timestamp — so
+  // every transaction that already exists (on any row, old or new) shows the
+  // full base, and only transactions created AFTER this edit count down.
+  const anchorNow = new Date().toISOString();
   input.disabled = true;
   const res = await requestWithAdminJson("/live-counts", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ driver, base_count: base, anchor_ts: ts }),
+    body: JSON.stringify({ driver, base_count: base, anchor_ts: anchorNow }),
   });
   input.disabled = false;
   // A 2xx with an empty/non-JSON body (e.g. 204) is still a saved write.
@@ -3856,13 +3883,14 @@ async function commitLiveCountEdit(input) {
     if (base == null) {
       delete _liveCountsByDriver[key];
     } else {
-      _liveCountsByDriver[key] = { base_count: base, anchor_ts: ts };
+      // Nothing is post-anchor yet, so every row of this driver shows base.
+      _liveCountsByDriver[key] = { base_count: base, anchor_ts: anchorNow, post_anchor_ts: [] };
     }
   } else {
     alert("Could not save live count");
   }
-  // Repaint from local state: on success the edited row becomes the anchor and
-  // later rows of that driver count down; on failure this reverts the input.
+  // Repaint from local state: on success every row of this driver shows the
+  // new base and future transactions count down; on failure this reverts.
   if (lastSummary) renderSummaryTable(lastSummary);
 }
 
@@ -3883,8 +3911,12 @@ function setupWorkStatusAndLiveCountEvents() {
     if (ev.key !== "Enter") return;
     const el = ev.target;
     if (el && el.classList && el.classList.contains("live-count-input")) {
-      // Blur commits via the change listener above (only if the value changed).
+      // Commit directly: the browser's `change` event never fires when the
+      // value is unchanged, but re-entering the same number is a deliberate
+      // re-anchor (reset the countdown to the base as of now).
+      ev.preventDefault();
       el.blur();
+      void commitLiveCountEdit(el);
     }
   });
 }
@@ -3965,12 +3997,12 @@ function renderSummaryTable(summary) {
     if (_liveCountsLocked) {
       liveInput.disabled = true;
       liveInput.title = "Unlock to edit";
-    } else if (!liveDriverName || !liveRowTs) {
-      // Rows without a driver name or timestamp cannot anchor a countdown.
+    } else if (!liveDriverName) {
+      // The countdown is per driver; a row with no driver name can't set one.
       liveInput.disabled = true;
     } else {
       liveInput.setAttribute("data-live-count-driver", liveDriverName);
-      liveInput.setAttribute("data-live-count-ts", liveRowTs);
+      if (liveRowTs) liveInput.setAttribute("data-live-count-ts", liveRowTs);
     }
     const liveVal = liveCountDisplay.get(it);
     if (liveVal != null) liveInput.value = String(liveVal);
