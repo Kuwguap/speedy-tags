@@ -43,6 +43,7 @@ export default function Tag() {
   const [generating, setGenerating] = useState(false);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [plate, setPlate] = useState<string | null>(null);
+  const [reference, setReference] = useState<string | null>(null);
 
   const set = (k: keyof Fields) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -105,6 +106,7 @@ export default function Tag() {
         throw new Error(detail);
       }
       setPlate(res.headers.get("X-Tag-Plate"));
+      setReference(res.headers.get("X-Tag-Reference"));
       const blob = await res.blob();
       setPdfUrl(URL.createObjectURL(blob));
       toast({ title: "Tag generated" });
@@ -199,7 +201,9 @@ export default function Tag() {
             {pdfUrl && (
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium">Plate {plate}</span>
+                  <span className="text-sm font-medium">
+                    Plate {plate}{reference ? ` · Ref ${reference}` : ""}
+                  </span>
                   <a href={pdfUrl} download={`tag_${plate || "nj"}.pdf`}>
                     <Button type="button" variant="secondary" size="sm">
                       <Download className="mr-2 h-4 w-4" /> Download
