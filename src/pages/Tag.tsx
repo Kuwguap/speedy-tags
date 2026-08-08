@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Header } from "@/components/Header";
 import { api } from "@/lib/api";
 import { useSeo } from "@/hooks/useSeo";
@@ -12,7 +12,6 @@ import { Loader2, Search, FileText, Download } from "lucide-react";
 type Fields = {
   firstName: string;
   lastName: string;
-  phone: string;
   vin: string;
   year: string;
   make: string;
@@ -28,7 +27,7 @@ type Fields = {
 };
 
 const EMPTY: Fields = {
-  firstName: "", lastName: "", phone: "", vin: "", year: "", make: "", model: "",
+  firstName: "", lastName: "", vin: "", year: "", make: "", model: "",
   color: "", body: "", address: "", city: "", state: "", zip: "",
   insuranceCompany: "", policyNumber: "",
 };
@@ -46,6 +45,9 @@ export default function Tag() {
 
   const set = (k: keyof Fields) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  // Revoke the last object URL when leaving the page.
+  useEffect(() => () => { if (pdfUrl) URL.revokeObjectURL(pdfUrl); }, [pdfUrl]);
 
   async function decodeVin() {
     const vin = form.vin.trim();
@@ -89,7 +91,10 @@ export default function Tag() {
       });
       if (!res.ok) {
         let detail = `HTTP ${res.status}`;
-        try { detail = (await res.json())?.detail || detail; } catch { /* ignore */ }
+        try {
+          const j = await res.json();
+          detail = j?.detail || j?.error || detail;
+        } catch { /* ignore */ }
         throw new Error(detail);
       }
       setPlate(res.headers.get("X-Tag-Plate"));
@@ -124,7 +129,6 @@ export default function Tag() {
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               {field("firstName", "First name", "Josue")}
               {field("lastName", "Last name", "Pavon")}
-              {field("phone", "Phone", "3474794095")}
               <div className="space-y-1">
                 <Label htmlFor="vin">VIN</Label>
                 <div className="flex gap-2">
