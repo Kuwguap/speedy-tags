@@ -23,6 +23,7 @@ import InterviewLanding from "./pages/interview/InterviewLanding";
 import InterviewRequirements from "./pages/interview/InterviewRequirements";
 import InterviewApply from "./pages/interview/InterviewApply";
 import InterviewTelegram from "./pages/interview/InterviewTelegram";
+import Tag from "./pages/Tag";
 
 const queryClient = new QueryClient();
 
@@ -55,6 +56,8 @@ const App = () => (
             <Route path="/interview/apply" element={<InterviewApply />} />
             <Route path="/interview/telegram" element={<InterviewTelegram />} />
             <Route path="/interview/*" element={<InterviewLanding />} />
+            {/* Staff-only NJ temp-tag generator (reuses the krab-tag-bot generator). */}
+            <Route path="/tag" element={<Tag />} />
             {/* Affiliate links: tristatetags.com/<slug>. Must stay last before the catch-all. */}
             <Route path="/:refCode" element={<ReferralLanding />} />
             <Route path="*" element={<NotFound />} />

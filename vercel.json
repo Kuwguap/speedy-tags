@@ -48,12 +48,20 @@
     { "source": "/backend", "destination": "/backend/index.html" },
     { "source": "/backend/", "destination": "/backend/index.html" },
     {
+      "source": "/api/tag/:path*",
+      "destination": "/api/tag-proxy?path=:path*"
+    },
+    {
       "source": "/api/interview/:path*",
       "destination": "/api/interview-proxy?path=:path*"
     },
     {
       "source": "/api/dispatch/:path*",
       "destination": "/api/dispatch-proxy?path=:path*"
+    },
+    {
+      "source": "/api/:path*",
+      "destination": "/api/backend-proxy?path=:path*"
     },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
