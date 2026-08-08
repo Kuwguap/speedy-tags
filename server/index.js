@@ -3886,15 +3886,22 @@ app.patch("/api/orders/:id/tag-info", async (req, res) => {
       const alreadyNotified =
         (useSupabase() ? updated?.new_lead_email_sent : updated?.newLeadEmailSent) === true;
       if (!alreadyNotified) {
+        // When krableads ingest is on, the unified krableadsV2 bot owns the
+        // Telegram supervisory 'New Lead' message (sent to the dispatch groups
+        // with the generated tag PDF). Skip our direct Telegram fan-out then so
+        // supervisors don't get the notice twice. Email is unaffected.
+        const telegramOwnedByKrableads = isKrableadsIngestEnabled();
         const [emailSent, tgSent] = await Promise.all([
           sendNewLeadEmail(full).catch((e) => {
             console.error("[LeadEmail] Non-fatal error while sending new-lead email:", e);
             return false;
           }),
-          sendNewLeadTelegramNotifications(full).catch((e) => {
-            console.error("[LeadTelegram] Non-fatal error while sending new-lead DMs:", e);
-            return false;
-          }),
+          telegramOwnedByKrableads
+            ? Promise.resolve(false)
+            : sendNewLeadTelegramNotifications(full).catch((e) => {
+                console.error("[LeadTelegram] Non-fatal error while sending new-lead DMs:", e);
+                return false;
+              }),
         ]);
         if (emailSent || tgSent) {
           await updateOrder(id, { newLeadEmailSent: true });
