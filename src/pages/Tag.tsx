@@ -38,6 +38,7 @@ export default function Tag() {
   useSeo({ title: "Generate Tag | TriStateTags", noindex: true });
   const { toast } = useToast();
   const [form, setForm] = useState<Fields>(EMPTY);
+  const [paste, setPaste] = useState("");
   const [vinChecking, setVinChecking] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
@@ -68,8 +69,8 @@ export default function Tag() {
   }
 
   async function generate() {
-    if (!form.firstName.trim() && !form.vin.trim()) {
-      toast({ title: "Enter a name or VIN", variant: "destructive" });
+    if (!form.firstName.trim() && !form.vin.trim() && !paste.trim()) {
+      toast({ title: "Enter a name or VIN (or paste details)", variant: "destructive" });
       return;
     }
     setGenerating(true);
@@ -78,16 +79,22 @@ export default function Tag() {
       return null;
     });
     try {
+      // Send only NON-empty form fields so a pasted block isn't blocked by
+      // blank inputs; the server parses `message` and lets explicit fields win.
+      const explicit: Record<string, string> = {
+        first: form.firstName, last: form.lastName,
+        vin: form.vin, year: form.year, make: form.make, model: form.model,
+        color: form.color, body: form.body,
+        address: form.address, city: form.city, state: form.state, zip: form.zip,
+        insurance_company: form.insuranceCompany, policy: form.policyNumber,
+      };
+      const payload: Record<string, string> = {};
+      for (const [k, v] of Object.entries(explicit)) if (v && v.trim()) payload[k] = v.trim();
+      if (paste.trim()) payload.message = paste;
       const res = await fetch("/api/tag/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          first: form.firstName, last: form.lastName,
-          vin: form.vin, year: form.year, make: form.make, model: form.model,
-          color: form.color, body: form.body,
-          address: form.address, city: form.city, state: form.state, zip: form.zip,
-          insurance_company: form.insuranceCompany, policy: form.policyNumber,
-        }),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) {
         let detail = `HTTP ${res.status}`;
@@ -126,6 +133,22 @@ export default function Tag() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-6">
+            <div className="space-y-1">
+              <Label htmlFor="paste">Paste details (optional)</Label>
+              <textarea
+                id="paste"
+                value={paste}
+                onChange={(e) => setPaste(e.target.value)}
+                rows={5}
+                placeholder={"Name: Josue Pavon\nVIN: 5N1AL0MM8DC337962\nColor: White\nCity: Bronx  State: NY  Zip: 10465\nInsurance: Progressive\nPolicy: 9896095819"}
+                className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono"
+              />
+              <p className="text-xs text-muted-foreground">
+                Paste labeled lines (same format as the Telegram bot), or fill the form below.
+                Anything you type in the form overrides the paste.
+              </p>
+            </div>
+
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               {field("firstName", "First name", "Josue")}
               {field("lastName", "Last name", "Pavon")}
