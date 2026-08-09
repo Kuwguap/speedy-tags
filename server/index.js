@@ -112,7 +112,7 @@ const TAG_GENERATE_URL = (process.env.TAG_GENERATE_URL || "https://krab-tag-bot.
 const TAG_API_KEY = (process.env.TAG_API_KEY || "").trim();
 const TAG_PRICE_USD = (() => {
   const n = Number(process.env.TAG_PRICE_USD);
-  return Number.isFinite(n) && n > 0 ? n : 100;
+  return Number.isFinite(n) && n > 0 ? n : 1;
 })();
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_IDS = (process.env.TELEGRAM_CHAT_IDS || "")
