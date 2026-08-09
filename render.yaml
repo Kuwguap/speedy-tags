@@ -64,7 +64,7 @@ services:
         sync: false
       # Flat price (USD) charged for one temp tag on /tag. Defaults to 100.
       - key: TAG_PRICE_USD
-        value: "100"
+        value: "1"
       # OpenAI key powers the /tag paste → structured-fields AI parser.
       - key: OPENAI_API_KEY
         sync: false
