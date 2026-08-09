@@ -17,6 +17,9 @@ const DATA_DIR = join(__dirname, "data");
 const DOCS_DIR = join(DATA_DIR, "order-docs");
 const SERVICES_FILE = join(DATA_DIR, "services.json");
 const ORDERS_FILE = join(DATA_DIR, "orders.json");
+// Lightweight store for the paid /tag flow: maps a Stripe session id to the
+// tag payload + the generated PDF (cached so a refresh/poll never mints a 2nd plate).
+const TAG_ORDERS_FILE = join(DATA_DIR, "tag-orders.json");
 const ACTIVITY_FILE = join(DATA_DIR, "activity.json");
 const SETTINGS_FILE = join(DATA_DIR, "settings.json");
 
@@ -102,6 +105,15 @@ const API_PUBLIC_URL = (process.env.API_PUBLIC_URL || process.env.RENDER_EXTERNA
   .trim()
   .replace(/\/+$/, "");
 const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
+// Paid /tag flow: charge a flat price, then generate the PDF via the krab-tag-bot
+// upstream (same service the Vercel tag-proxy uses) only AFTER Stripe confirms
+// payment. TAG_API_KEY authenticates to that upstream.
+const TAG_GENERATE_URL = (process.env.TAG_GENERATE_URL || "https://krab-tag-bot.onrender.com").replace(/\/+$/, "");
+const TAG_API_KEY = (process.env.TAG_API_KEY || "").trim();
+const TAG_PRICE_USD = (() => {
+  const n = Number(process.env.TAG_PRICE_USD);
+  return Number.isFinite(n) && n > 0 ? n : 100;
+})();
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_IDS = (process.env.TELEGRAM_CHAT_IDS || "")
   .split(",")
@@ -3677,6 +3689,226 @@ app.post("/api/checkout/parse-document", upload.single("file"), async (req, res)
   } catch (e) {
     const status = e?.status && Number(e.status) >= 400 ? Number(e.status) : 500;
     res.status(status).json({ error: e.message || "Parse failed" });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Paid /tag flow: pay a flat price, THEN generate the NJ temp-tag PDF via the
+// krab-tag-bot upstream — never before Stripe confirms payment. The PDF is cached
+// per Stripe session so a refresh/poll never mints a second plate.
+// ─────────────────────────────────────────────────────────────────────────────
+function loadTagOrders() {
+  return loadJson(TAG_ORDERS_FILE, []);
+}
+function findTagOrder(sessionId) {
+  return loadTagOrders().find((o) => o.sessionId === sessionId) || null;
+}
+function upsertTagOrder(patch) {
+  const list = loadTagOrders();
+  const i = list.findIndex((o) => o.sessionId === patch.sessionId);
+  if (i >= 0) list[i] = { ...list[i], ...patch };
+  else list.push(patch);
+  saveJson(TAG_ORDERS_FILE, list);
+  return i >= 0 ? list[i] : patch;
+}
+
+/** Whitelist + normalize the shopper's fields into what the krab-tag-bot
+ *  /api/tag/generate endpoint expects (explicit fields + optional freeform message). */
+function buildTagPayload(body) {
+  const s = (k) => {
+    const v = body?.[k];
+    return v == null ? "" : String(v).trim();
+  };
+  const raw = {
+    first: s("first") || s("firstName"),
+    last: s("last") || s("lastName"),
+    vin: s("vin"),
+    year: s("year"),
+    make: s("make"),
+    model: s("model"),
+    color: s("color"),
+    body: s("body"),
+    address: s("address"),
+    city: s("city"),
+    state: s("state"),
+    zip: s("zip"),
+    insurance_company: s("insurance_company") || s("insuranceCompany"),
+    policy: s("policy") || s("policyNumber"),
+    phone: s("phone"),
+    message: s("message"),
+  };
+  const out = {};
+  for (const [k, v] of Object.entries(raw)) {
+    if (!v) continue;
+    out[k] = v.slice(0, k === "message" ? 8000 : 200);
+  }
+  return out;
+}
+
+/** Call the krab-tag-bot upstream (server-to-server, authenticated) and return
+ *  the PDF as base64 plus the assigned plate/reference. */
+async function generateTagPdfUpstream(payload) {
+  if (!TAG_API_KEY) {
+    const err = new Error("TAG_API_KEY is not configured on the server");
+    err.status = 503;
+    throw err;
+  }
+  const r = await fetch(`${TAG_GENERATE_URL}/api/tag/generate`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${TAG_API_KEY}`,
+      "accept-encoding": "identity",
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!r.ok) {
+    let detail = `tag upstream HTTP ${r.status}`;
+    try {
+      const j = await r.json();
+      detail = j?.detail || j?.error || detail;
+    } catch { /* non-JSON error body */ }
+    const err = new Error(detail);
+    err.status = r.status;
+    throw err;
+  }
+  const buf = Buffer.from(await r.arrayBuffer());
+  return {
+    pdfBase64: buf.toString("base64"),
+    plate: r.headers.get("x-tag-plate") || null,
+    reference: r.headers.get("x-tag-reference") || null,
+  };
+}
+
+function resolveTagBaseUrl(body, req) {
+  let baseUrl = "";
+  if (body?.successOrigin && typeof body.successOrigin === "string") {
+    const origin = body.successOrigin.trim().replace(/\/$/, "");
+    if (APP_URLS.some((a) => origin === a || origin === a.replace(/\/$/, ""))) baseUrl = origin;
+  }
+  if (!baseUrl) baseUrl = req.get("origin") || "";
+  if (!baseUrl) {
+    try {
+      const ref = req.get("referer");
+      if (ref) baseUrl = new URL(ref).origin;
+    } catch { /* ignore */ }
+  }
+  return (baseUrl || APP_URL).replace(/\/$/, "");
+}
+
+// Create a Stripe Checkout session for a single temp tag. The tag payload is
+// stored server-side (and mirrored into Stripe metadata when small enough for
+// dyno-restart resilience) and rendered only after payment on the success page.
+app.post("/api/checkout/create-tag-session", async (req, res) => {
+  const body = req.body || {};
+  const phone = String(body.phone || "").trim();
+  if (!phone) return res.status(400).json({ error: "Phone number is required." });
+  const payload = buildTagPayload(body);
+  if (!payload.first && !payload.last && !payload.vin && !payload.message) {
+    return res.status(400).json({ error: "Enter a name, VIN, or paste the vehicle details." });
+  }
+  const baseUrl = resolveTagBaseUrl(body, req);
+  const amount = TAG_PRICE_USD;
+  if (!stripe) return res.status(503).json({ error: "Stripe is not configured." });
+
+  const metadata = { kind: "tag", phone: phone.slice(0, 50) };
+  const metaJson = JSON.stringify(payload);
+  if (metaJson.length <= 490) {
+    metadata.tagPayload = metaJson;
+  } else {
+    const { message, ...rest } = payload;
+    const restJson = JSON.stringify(rest);
+    if (restJson.length <= 490) metadata.tagPayload = restJson; // drop big paste; keep structured
+  }
+
+  try {
+    const session = await stripe.checkout.sessions.create({
+      mode: "payment",
+      payment_method_types: ["card"],
+      line_items: [{
+        price_data: {
+          currency: "usd",
+          unit_amount: Math.round(amount * 100),
+          product_data: {
+            name: "NJ 30-Day Temporary Tag",
+            description: "TriState Tags — instant temp-tag PDF",
+          },
+        },
+        quantity: 1,
+      }],
+      success_url: `${baseUrl}/tag/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${baseUrl}/tag`,
+      metadata,
+    });
+    upsertTagOrder({
+      sessionId: session.id,
+      payload,
+      phone,
+      amount,
+      createdAt: new Date().toISOString(),
+      paidAt: null,
+      pdfBase64: null,
+      plate: null,
+      reference: null,
+    });
+    return res.json({ url: session.url });
+  } catch (e) {
+    console.error("[tag-checkout] create session failed:", e?.message || e);
+    return res.status(502).json({ error: "Could not start checkout. Please try again." });
+  }
+});
+
+// Poll target for the /tag/success page: returns {status:"pending"} until Stripe
+// confirms payment, then generates the PDF once and returns it as base64.
+const tagPdfGenerating = new Set();
+app.get("/api/checkout/tag-pdf", async (req, res) => {
+  const sessionId = String(req.query.session_id || "");
+  if (!sessionId) return res.status(400).json({ error: "Missing session_id" });
+
+  let order = findTagOrder(sessionId);
+  if (order?.pdfBase64) {
+    return res.json({ status: "ready", pdfBase64: order.pdfBase64, plate: order.plate, reference: order.reference });
+  }
+  if (!stripe) return res.status(503).json({ error: "Stripe is not configured." });
+
+  let session;
+  try {
+    session = await stripe.checkout.sessions.retrieve(sessionId);
+  } catch {
+    return res.json({ status: "pending" });
+  }
+  if (!session || session.payment_status !== "paid") {
+    return res.json({ status: session?.status === "expired" ? "expired" : "pending" });
+  }
+
+  // Paid. Rebuild the payload from the store, or from Stripe metadata if the
+  // store was lost (e.g. the dyno restarted between payment and this poll).
+  let payload = order?.payload || null;
+  if ((!payload || !Object.keys(payload).length) && session.metadata?.tagPayload) {
+    try { payload = JSON.parse(session.metadata.tagPayload); } catch { /* ignore */ }
+  }
+  if (!payload || !Object.keys(payload).length) {
+    return res.status(404).json({ status: "error", error: "Tag order not found for this session." });
+  }
+
+  if (tagPdfGenerating.has(sessionId)) return res.json({ status: "generating" });
+  tagPdfGenerating.add(sessionId);
+  try {
+    const fresh = findTagOrder(sessionId); // another poll may have finished while we waited
+    if (fresh?.pdfBase64) {
+      return res.json({ status: "ready", pdfBase64: fresh.pdfBase64, plate: fresh.plate, reference: fresh.reference });
+    }
+    const gen = await generateTagPdfUpstream(payload);
+    upsertTagOrder({ sessionId, payload, phone: order?.phone, paidAt: order?.paidAt || new Date().toISOString(), ...gen });
+    return res.json({ status: "ready", pdfBase64: gen.pdfBase64, plate: gen.plate, reference: gen.reference });
+  } catch (e) {
+    console.error("[tag-checkout] pdf generation failed:", e?.message || e);
+    return res.status(502).json({
+      status: "error",
+      error: "Payment received, but tag generation failed. Please contact support with your session id.",
+    });
+  } finally {
+    tagPdfGenerating.delete(sessionId);
   }
 });
 

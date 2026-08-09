@@ -102,6 +102,20 @@ export const api = {
   },
   decodeVin: (vin: string) =>
     request<{ year: string; make: string; model: string }>("/vin/decode?vin=" + encodeURIComponent(vin)),
+  // Paid /tag flow: create a $100 Stripe Checkout session for one temp tag.
+  createTagCheckoutSession: (data: Record<string, unknown>) =>
+    request<{ url: string }>("/checkout/create-tag-session", {
+      method: "POST",
+      body: JSON.stringify({
+        ...data,
+        successOrigin: typeof window !== "undefined" ? window.location.origin : undefined,
+      }),
+    }),
+  // Poll after payment: {status:"pending"|"generating"|"ready", pdfBase64?, plate?, reference?}
+  getTagPdf: (sessionId: string) =>
+    request<{ status: string; pdfBase64?: string; plate?: string | null; reference?: string | null }>(
+      "/checkout/tag-pdf?session_id=" + encodeURIComponent(sessionId),
+    ),
   uploadOrderDocuments: (orderId: string, formData: FormData) =>
     request<OrderRecord>(`/orders/${encodeURIComponent(orderId)}/documents`, { method: "POST", body: formData }),
   sendOrderSuccessEmail: (orderId: string) =>
