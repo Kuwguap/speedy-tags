@@ -51,7 +51,22 @@ services:
         sync: false
       - key: STRIPE_SECRET_KEY
         sync: false
+      # Stripe webhook signing secret (whsec_...) — set in the Render dashboard.
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
       - key: APP_URL
+        sync: false
+      # Paid /tag flow: the krab-tag-bot upstream that renders the NJ temp-tag PDF,
+      # and the Bearer key it requires. TAG_API_KEY must match krab-tag-bot's.
+      - key: TAG_GENERATE_URL
+        value: https://krab-tag-bot.onrender.com
+      - key: TAG_API_KEY
+        sync: false
+      # Flat price (USD) charged for one temp tag on /tag. Defaults to 100.
+      - key: TAG_PRICE_USD
+        value: "1"
+      # OpenAI key powers the /tag paste → structured-fields AI parser.
+      - key: OPENAI_API_KEY
         sync: false
       # Interview form proxy target — must return {"ok":true} at /api/health (Render web service)
       - key: KRAB_INTERVIEWER_URL
