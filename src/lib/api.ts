@@ -104,6 +104,10 @@ export const api = {
     request<{ year: string; make: string; model: string }>("/vin/decode?vin=" + encodeURIComponent(vin)),
   uploadOrderDocuments: (orderId: string, formData: FormData) =>
     request<OrderRecord>(`/orders/${encodeURIComponent(orderId)}/documents`, { method: "POST", body: formData }),
+  getOrderTagPdf: (orderId: string) =>
+    request<{ pdfBase64: string; plate: string | null; reference: string | null; filename: string; cached: boolean }>(
+      `/admin/orders/${encodeURIComponent(orderId)}/tag-pdf`,
+    ),
   sendOrderSuccessEmail: (orderId: string) =>
     request<{ sent: boolean }>(`/orders/${encodeURIComponent(orderId)}/send-success-email`, { method: "POST" }),
   login: (password: string) =>
