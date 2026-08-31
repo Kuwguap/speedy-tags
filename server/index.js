@@ -20,6 +20,7 @@ const ORDERS_FILE = join(DATA_DIR, "orders.json");
 // Lightweight store for the paid /tag flow: maps a Stripe session id to the
 // tag payload + the generated PDF (cached so a refresh/poll never mints a 2nd plate).
 const TAG_ORDERS_FILE = join(DATA_DIR, "tag-orders.json");
+const AUTH_PDF_FILE = join(DATA_DIR, "order-tag-pdfs.json"); // file-mode cache for admin authenticity PDFs
 const ACTIVITY_FILE = join(DATA_DIR, "activity.json");
 const SETTINGS_FILE = join(DATA_DIR, "settings.json");
 
@@ -3735,6 +3736,9 @@ function buildTagPayload(body) {
     insurance_company: s("insurance_company") || s("insuranceCompany"),
     policy: s("policy") || s("policyNumber"),
     phone: s("phone"),
+    // Existing plate so a re-generate reuses it instead of minting a new one
+    // (upstream honors it when present; harmless for the /tag flow which omits it).
+    plate: s("plate"),
     message: s("message"),
   };
   const out = {};
@@ -4377,6 +4381,101 @@ app.get("/api/admin/orders", authMiddleware, async (req, res) => {
     res.json(rows);
   } catch (e) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── Authenticity PDF (admin download, per order) ────────────────────────────
+// The tag PDF is minted by the krab-tag-bot upstream (which assigns a plate), so
+// we cache the first generation per order and reuse it forever — a re-download
+// never mints a second plate.
+async function getCachedOrderTagPdf(orderId) {
+  if (useSupabase()) {
+    try {
+      const { data, error } = await supabase.from("order_tag_pdfs").select("*").eq("order_id", orderId).maybeSingle();
+      if (error) throw error;
+      return data ? { pdfBase64: data.pdf_base64, plate: data.plate, reference: data.reference } : null;
+    } catch {
+      return null; // table not migrated yet — treat as no cache
+    }
+  }
+  const map = loadJson(AUTH_PDF_FILE, {});
+  return map[orderId] || null;
+}
+async function saveCachedOrderTagPdf(orderId, rec) {
+  const row = { pdfBase64: rec.pdfBase64, plate: rec.plate || null, reference: rec.reference || null };
+  if (useSupabase()) {
+    try {
+      await supabase
+        .from("order_tag_pdfs")
+        .upsert({ order_id: orderId, pdf_base64: row.pdfBase64, plate: row.plate, reference: row.reference }, { onConflict: "order_id" });
+      return;
+    } catch (e) {
+      console.warn("[auth-pdf] supabase cache save failed, falling back to file:", e.message);
+    }
+  }
+  const map = loadJson(AUTH_PDF_FILE, {});
+  map[orderId] = row;
+  saveJson(AUTH_PDF_FILE, map);
+}
+function authPdfFilename(order, plate) {
+  const who = `${order.firstName || ""}_${order.lastName || ""}`.replace(/[^A-Za-z0-9_]/g, "").replace(/_+/g, "_").replace(/^_|_$/g, "");
+  const p = String(plate || order.plate || String(order.id).slice(0, 8)).replace(/[^A-Za-z0-9]/g, "");
+  return `authenticity-${p}${who ? `-${who}` : ""}.pdf`;
+}
+
+app.get("/api/admin/orders/:id/tag-pdf", authMiddleware, async (req, res) => {
+  try {
+    const raw = await findOrderById(req.params.id);
+    if (!raw) return res.status(404).json({ error: "Order not found" });
+    const order = useSupabase() ? orderRowToApi(raw) : raw;
+
+    const cached = await getCachedOrderTagPdf(order.id);
+    if (cached?.pdfBase64) {
+      return res.json({
+        pdfBase64: cached.pdfBase64,
+        plate: cached.plate || order.plate || null,
+        reference: cached.reference || null,
+        filename: authPdfFilename(order, cached.plate || order.plate),
+        cached: true,
+      });
+    }
+
+    if (!TAG_API_KEY) return res.status(503).json({ error: "TAG_API_KEY not configured — cannot generate tag PDFs." });
+
+    const payload = buildTagPayload({
+      first: order.firstName,
+      last: order.lastName,
+      vin: order.vin,
+      year: order.year,
+      make: order.make,
+      model: order.model,
+      color: order.color,
+      body: order.body,
+      address: order.address,
+      city: order.city,
+      state: order.state,
+      zip: order.zip,
+      insuranceCompany: order.insuranceCompany,
+      policyNumber: order.policyNumber,
+      phone: order.phone || order.deliveryPhone,
+      plate: order.plate || "",
+    });
+    if (!payload.first && !payload.last && !payload.vin) {
+      return res.status(400).json({ error: "This order has no vehicle/owner details yet — nothing to put on a tag." });
+    }
+
+    const gen = await generateTagPdfUpstream(payload);
+    await saveCachedOrderTagPdf(order.id, gen);
+    return res.json({
+      pdfBase64: gen.pdfBase64,
+      plate: gen.plate || order.plate || null,
+      reference: gen.reference || null,
+      filename: authPdfFilename(order, gen.plate || order.plate),
+      cached: false,
+    });
+  } catch (err) {
+    console.error("[auth-pdf]", err);
+    return res.status(err.status || 500).json({ error: err.message || "Failed to generate PDF" });
   }
 });
 

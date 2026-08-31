@@ -461,6 +461,31 @@ export default function Admin() {
 
   const [followupBusy, setFollowupBusy] = useState(false);
   const [followupOrderId, setFollowupOrderId] = useState<string | null>(null);
+  const [pdfOrderId, setPdfOrderId] = useState<string | null>(null);
+
+  const downloadAuthenticityPdf = async (order: OrderRecord) => {
+    setPdfOrderId(order.id);
+    try {
+      const { pdfBase64, filename } = await api.getOrderTagPdf(order.id);
+      const bytes = Uint8Array.from(atob(pdfBase64), (c) => c.charCodeAt(0));
+      const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename || `authenticity-${order.id.slice(0, 8)}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (err) {
+      toast({
+        title: "Couldn't get the authenticity PDF",
+        description: err instanceof Error ? err.message : "",
+        variant: "destructive",
+      });
+    } finally {
+      setPdfOrderId(null);
+    }
+  };
 
   const runFollowupSweep = async () => {
     setFollowupBusy(true);
@@ -1962,6 +1987,15 @@ export default function Admin() {
                   {!orderDetail.deliveryEmail && (
                     <p className="text-xs text-muted-foreground">No delivery email on file to send to.</p>
                   )}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="cursor-pointer mt-2"
+                    disabled={pdfOrderId === orderDetail.id}
+                    onClick={() => downloadAuthenticityPdf(orderDetail)}
+                  >
+                    {pdfOrderId === orderDetail.id ? "Preparing PDF…" : "⬇ Download authenticity PDF"}
+                  </Button>
                 </div>
                 <OrderDetailBlock
                   order={orderDetail}
