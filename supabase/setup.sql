@@ -156,4 +156,15 @@ INSERT INTO activity (type, payload) VALUES
 --    Without this, the server may still see "Could not find the
 --    phone_enc_data column of orders in the schema cache" until PostgREST
 --    is restarted.
+
+-- Cache of the generated authenticity (temp-tag) PDF per order, so an admin
+-- re-download never mints a second plate.
+CREATE TABLE IF NOT EXISTS order_tag_pdfs (
+  order_id   TEXT PRIMARY KEY,
+  pdf_base64 TEXT,
+  plate      TEXT,
+  reference  TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 NOTIFY pgrst, 'reload schema';
