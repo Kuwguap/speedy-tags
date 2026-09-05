@@ -84,7 +84,7 @@ export default function CheckoutDocuments() {
     return (
       <div className="min-h-screen bg-background">
         <Header />
-        <div className="container max-w-lg py-24 text-center">
+        <div className="container max-w-lg py-10 sm:py-24 text-center">
           <p className="text-destructive mb-4">Invalid order.</p>
           <Button onClick={() => navigate("/")}>Back to Home</Button>
         </div>

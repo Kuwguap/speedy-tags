@@ -137,7 +137,7 @@ export default function CheckoutProduct() {
     return (
       <div className="min-h-screen bg-background">
         <Header />
-        <div className="container max-w-xl py-24 text-center">
+        <div className="container max-w-xl py-10 sm:py-24 text-center">
           <p className="text-muted-foreground">Loading...</p>
         </div>
       </div>

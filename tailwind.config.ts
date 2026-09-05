@@ -8,7 +8,9 @@ export default {
   theme: {
     container: {
       center: true,
-      padding: "2rem",
+      // 1rem on phones, 2rem from sm up. A flat 2rem spent 64px of a 375px
+      // screen on side rails, which is a desktop gutter on a phone.
+      padding: { DEFAULT: "1rem", sm: "2rem" },
       screens: {
         "2xl": "1400px",
       },

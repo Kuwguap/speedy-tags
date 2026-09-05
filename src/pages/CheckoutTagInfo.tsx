@@ -437,7 +437,7 @@ export default function CheckoutTagInfo() {
     return (
       <div className="min-h-screen bg-background">
         <Header />
-        <div className="container max-w-lg py-24 text-center">
+        <div className="container max-w-lg py-10 sm:py-24 text-center">
           <p className="text-muted-foreground">Verifying your payment… this may take a moment after checkout.</p>
         </div>
       </div>
@@ -448,7 +448,7 @@ export default function CheckoutTagInfo() {
     return (
       <div className="min-h-screen bg-background">
         <Header />
-        <div className="container max-w-lg py-24 text-center">
+        <div className="container max-w-lg py-10 sm:py-24 text-center">
           <p className="text-destructive mb-4">{error}</p>
           <Button onClick={() => navigate("/")}>Back to Home</Button>
         </div>
@@ -567,18 +567,18 @@ export default function CheckoutTagInfo() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <Label htmlFor="firstName">First Name</Label>
-                  <Input id="firstName" value={form.firstName} onChange={(e) => update("firstName", e.target.value)} className={errors.firstName ? "border-destructive" : ""} />
+                  <Input id="firstName" autoComplete="given-name" autoCapitalize="words" value={form.firstName} onChange={(e) => update("firstName", e.target.value)} className={errors.firstName ? "border-destructive" : ""} />
                   {errors.firstName && <p className="text-destructive text-xs mt-1">{errors.firstName}</p>}
                 </div>
                 <div>
                   <Label htmlFor="lastName">Last Name</Label>
-                  <Input id="lastName" value={form.lastName} onChange={(e) => update("lastName", e.target.value)} className={errors.lastName ? "border-destructive" : ""} />
+                  <Input id="lastName" autoComplete="family-name" autoCapitalize="words" value={form.lastName} onChange={(e) => update("lastName", e.target.value)} className={errors.lastName ? "border-destructive" : ""} />
                   {errors.lastName && <p className="text-destructive text-xs mt-1">{errors.lastName}</p>}
                 </div>
               </div>
               <div>
                 <Label htmlFor="phone">Phone</Label>
-                <Input id="phone" value={form.phone} onChange={(e) => update("phone", e.target.value)} placeholder="(555) 123-4567" className={errors.phone ? "border-destructive" : ""} />
+                <Input id="phone" type="tel" inputMode="tel" autoComplete="tel" value={form.phone} onChange={(e) => update("phone", e.target.value)} placeholder="(555) 123-4567" className={errors.phone ? "border-destructive" : ""} />
                 {errors.phone && <p className="text-destructive text-xs mt-1">{errors.phone}</p>}
               </div>
               <div>
@@ -657,6 +657,9 @@ export default function CheckoutTagInfo() {
                 <div className="flex gap-2">
                   <Input
                     id="vin"
+                    autoCapitalize="characters"
+                    spellCheck={false}
+                    autoCorrect="off"
                     value={form.vin}
                     onChange={(e) => update("vin", e.target.value.toUpperCase())}
                     placeholder="1HGCM82633A123456"
@@ -674,22 +677,22 @@ export default function CheckoutTagInfo() {
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <div>
                   <Label htmlFor="year">Year</Label>
-                  <Input id="year" value={form.year} onChange={(e) => update("year", e.target.value)} placeholder="2022" className={errors.year ? "border-destructive" : ""} />
+                  <Input id="year" inputMode="numeric" pattern="[0-9]*" value={form.year} onChange={(e) => update("year", e.target.value)} placeholder="2022" className={errors.year ? "border-destructive" : ""} />
                   {errors.year && <p className="text-destructive text-xs mt-1">{errors.year}</p>}
                 </div>
                 <div>
                   <Label htmlFor="make">Make</Label>
-                  <Input id="make" value={form.make} onChange={(e) => update("make", e.target.value)} placeholder="Honda" className={errors.make ? "border-destructive" : ""} />
+                  <Input id="make" autoCapitalize="words" value={form.make} onChange={(e) => update("make", e.target.value)} placeholder="Honda" className={errors.make ? "border-destructive" : ""} />
                   {errors.make && <p className="text-destructive text-xs mt-1">{errors.make}</p>}
                 </div>
                 <div>
                   <Label htmlFor="model">Model</Label>
-                  <Input id="model" value={form.model} onChange={(e) => update("model", e.target.value)} placeholder="Civic" className={errors.model ? "border-destructive" : ""} />
+                  <Input id="model" autoCapitalize="words" value={form.model} onChange={(e) => update("model", e.target.value)} placeholder="Civic" className={errors.model ? "border-destructive" : ""} />
                   {errors.model && <p className="text-destructive text-xs mt-1">{errors.model}</p>}
                 </div>
                 <div>
                   <Label htmlFor="color">Color</Label>
-                  <Input id="color" value={form.color} onChange={(e) => update("color", e.target.value)} placeholder="White" className={errors.color ? "border-destructive" : ""} />
+                  <Input id="color" autoCapitalize="words" value={form.color} onChange={(e) => update("color", e.target.value)} placeholder="White" className={errors.color ? "border-destructive" : ""} />
                   {errors.color && <p className="text-destructive text-xs mt-1">{errors.color}</p>}
                 </div>
               </div>
@@ -698,11 +701,11 @@ export default function CheckoutTagInfo() {
                 <>
                   <div>
                     <Label htmlFor="insuranceCompany">Insurance Company Name</Label>
-                    <Input id="insuranceCompany" value={form.insuranceCompany} onChange={(e) => update("insuranceCompany", e.target.value)} placeholder="State Farm" />
+                    <Input id="insuranceCompany" autoCapitalize="words" value={form.insuranceCompany} onChange={(e) => update("insuranceCompany", e.target.value)} placeholder="State Farm" />
                   </div>
                   <div>
                     <Label htmlFor="policyNumber">Policy Number</Label>
-                    <Input id="policyNumber" value={form.policyNumber} onChange={(e) => update("policyNumber", e.target.value)} placeholder="123456789" />
+                    <Input id="policyNumber" autoCapitalize="characters" spellCheck={false} autoCorrect="off" value={form.policyNumber} onChange={(e) => update("policyNumber", e.target.value)} placeholder="123456789" />
                   </div>
                 </>
               )}
