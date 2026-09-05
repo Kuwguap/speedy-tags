@@ -70,6 +70,11 @@ export default function CheckoutTagInfo() {
   const [parsing, setParsing] = useState<"text" | "file" | null>(null);
   const [parseText, setParseText] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Progress across a batch, and what has landed so far. Uploading three
+  // documents behind a single spinner looks identical to being stuck.
+  const [uploadTotal, setUploadTotal] = useState(0);
+  const [uploadDone, setUploadDone] = useState(0);
+  const [uploadedNames, setUploadedNames] = useState<string[]>([]);
 
   const needsOwnInsurance = normalizeProductChoice(order?.productChoice) === "tag_only";
 
@@ -123,39 +128,94 @@ export default function CheckoutTagInfo() {
     }
   };
 
-  const handleParseFile = async (file: File) => {
+  /** Why a file is not worth sending. Null when it is fine. */
+  const rejectReason = (file: File): string | null => {
     const isImage = file.type.startsWith("image/");
     const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
-    if (!isImage && !isPdf) {
+    if (!isImage && !isPdf) return "not an image or PDF";
+    if (file.size > 10 * 1024 * 1024) return "over 10 MB";
+    return null;
+  };
+
+  /** Every document the customer picked, in one go.
+
+   * Sequential on purpose. Each call APPENDS to the order's docParsedSource on
+   * the server, and that list is what gets forwarded to dispatch -- firing them
+   * in parallel raced that append and lost documents. Three uploads take a few
+   * seconds either way; losing one is forever.
+   *
+   * One bad file does not sink the batch: the good ones still land and the
+   * summary says plainly what was skipped and why.
+   */
+  const handleParseFiles = async (picked: File[]) => {
+    if (!picked.length) return;
+    if (!order?.id) {
       toast({
-        title: "Unsupported file",
-        description: "Upload an image or a PDF.",
+        title: "Order not ready yet",
+        description: "Wait for payment verification, then upload.",
         variant: "destructive",
       });
       return;
     }
-    if (file.size > 10 * 1024 * 1024) {
-      toast({ title: "File too large", description: "Max 10 MB.", variant: "destructive" });
+
+    const good: File[] = [];
+    const rejected: string[] = [];
+    picked.forEach((f) => {
+      const why = rejectReason(f);
+      if (why) rejected.push(`${f.name} (${why})`);
+      else good.push(f);
+    });
+
+    if (!good.length) {
+      toast({
+        title: "Nothing to upload",
+        description: rejected.join(", "),
+        variant: "destructive",
+      });
+      if (fileInputRef.current) fileInputRef.current.value = "";
       return;
     }
-    if (!order?.id) {
-      toast({ title: "Order not ready yet", description: "Wait for payment verification, then upload.", variant: "destructive" });
-      return;
-    }
+
     setParsing("file");
-    try {
-      const { fields } = await api.parseTagInfoDocument(file, order?.id);
-      applyParsedFields(fields);
-      toast({ title: "Done", description: "Review and edit before submitting." });
-    } catch (err) {
+    setUploadTotal(good.length);
+    const failed: string[] = [];
+    let read = 0;
+
+    for (let i = 0; i < good.length; i += 1) {
+      setUploadDone(i);
+      try {
+        const { fields } = await api.parseTagInfoDocument(good[i], order.id);
+        applyParsedFields(fields);
+        read += 1;
+        setUploadedNames((prev) => [...prev, good[i].name]);
+      } catch (err) {
+        failed.push(good[i].name);
+      }
+    }
+
+    setUploadDone(good.length);
+    setParsing(null);
+    setUploadTotal(0);
+    setUploadDone(0);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+
+    const problems = [...rejected, ...failed.map((n) => `${n} (could not be read)`)];
+    if (read && !problems.length) {
+      toast({
+        title: read === 1 ? "Done" : `Read ${read} documents`,
+        description: "Review and edit before submitting.",
+      });
+    } else if (read) {
+      toast({
+        title: `Read ${read} of ${read + problems.length}`,
+        description: `Skipped: ${problems.join(", ")}. Review the form before submitting.`,
+      });
+    } else {
       toast({
         title: "Parse failed",
-        description: err instanceof Error ? err.message : "Try again.",
+        description: problems.join(", ") || "Try again.",
         variant: "destructive",
       });
-    } finally {
-      setParsing(null);
-      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
@@ -165,8 +225,27 @@ export default function CheckoutTagInfo() {
       setLoading(false);
       return;
     }
-    api
-      .verifyCheckoutSession(sessionId, isTest)
+    retryAsync(
+      () => api.verifyCheckoutSession(sessionId, isTest),
+      {
+        attempts: 8,
+        baseDelayMs: 1500,
+        maxDelayMs: 10000,
+        shouldRetry: (err) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          return (
+            msg.includes("Payment not completed") ||
+            msg.includes("Server unavailable") ||
+            msg.includes("Failed to fetch") ||
+            msg.includes("Network") ||
+            msg.includes("502") ||
+            msg.includes("503") ||
+            msg.includes("504") ||
+            msg.includes("Gateway")
+          );
+        },
+      },
+    )
       .then((data) => setOrder(data))
       .catch((err) => setError(err instanceof Error ? err.message : "Verification failed"))
       .finally(() => setLoading(false));
@@ -336,7 +415,10 @@ export default function CheckoutTagInfo() {
       const isEmail = updated?.deliveryMethod === "email";
       const isMail = updated?.deliveryMethod === "mail";
       navigate(
-        `/checkout/documents?orderId=${order.id}${isDriver ? "&driver=1" : ""}${isOvernightFedex ? "&fedex=1" : ""}${isEmail ? "&email=1" : ""}${isMail ? "&mail=1" : ""}`,
+        // Straight to done. The separate documents step asked for the same
+        // licence and insurance card the AI upload above already took, by
+        // category and one at a time, after the customer had finished.
+        `/checkout/done?orderId=${order.id}${isDriver ? "&driver=1" : ""}${isOvernightFedex ? "&fedex=1" : ""}${isEmail ? "&email=1" : ""}${isMail ? "&mail=1" : ""}`,
       );
     } catch (err) {
       toast({
@@ -356,7 +438,7 @@ export default function CheckoutTagInfo() {
       <div className="min-h-screen bg-background">
         <Header />
         <div className="container max-w-lg py-24 text-center">
-          <p className="text-muted-foreground">Verifying your payment...</p>
+          <p className="text-muted-foreground">Verifying your payment… this may take a moment after checkout.</p>
         </div>
       </div>
     );
@@ -394,9 +476,20 @@ export default function CheckoutTagInfo() {
                 <Upload className="h-4 w-4" /> Upload a document
               </Label>
             <p className="text-xs text-muted-foreground">
-              Each upload is saved to your order — all AI documents are sent to dispatch when someone accepts this lead (or fallback).
+              Pick them all at once — licence, title and insurance card together.
+              Every one is saved to your order and sent to dispatch with the job.
               {!order?.id ? " Wait for verification before uploading files." : ""}
             </p>
+            {uploadedNames.length ? (
+              <ul className="text-xs text-muted-foreground space-y-1 pt-1">
+                {uploadedNames.map((n, i) => (
+                  <li key={`${n}-${i}`} className="flex items-start gap-1.5">
+                    <span className="text-primary shrink-0">✓</span>
+                    <span className="break-all">{n}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
               <div className="flex items-center gap-2">
                 <Button
                   type="button"
@@ -410,16 +503,21 @@ export default function CheckoutTagInfo() {
                   ) : (
                     <Upload className="h-4 w-4 mr-2" />
                   )}
-                  {parsing === "file" ? "Extracting…" : "Choose file"}
+                  {parsing === "file"
+                    ? uploadTotal > 1
+                      ? `Reading ${Math.min(uploadDone + 1, uploadTotal)} of ${uploadTotal}…`
+                      : "Extracting…"
+                    : "Choose files"}
                 </Button>
                 <input
                   ref={fileInputRef}
                   type="file"
+                  multiple
                   accept="image/*,application/pdf,.pdf"
                   className="hidden"
                   onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f) handleParseFile(f);
+                    const picked = Array.from(e.target.files ?? []);
+                    if (picked.length) handleParseFiles(picked);
                   }}
                 />
               </div>

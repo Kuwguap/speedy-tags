@@ -45,6 +45,10 @@ export function BackgroundMusic() {
   const [enabled, setEnabled] = useState(true);
   const [playing, setPlaying] = useState(false);
   const [needsTap, setNeedsTap] = useState(false);
+  // The nudge is a one-time offer. Without this it re-armed on every failed
+  // autoplay retry -- and a retry fires on every tap and keypress -- so it
+  // blinked in and out of the corner for the whole visit.
+  const [nudgeSpent, setNudgeSpent] = useState(false);
   const isAdmin = location.pathname.startsWith("/admin");
 
   useEffect(() => {
@@ -151,7 +155,19 @@ export function BackgroundMusic() {
     };
   }, [enabled, isAdmin, tryPlay, pause]);
 
+  // An offer to press something is only useful briefly. Left up it becomes
+  // furniture, and it sits over the page on a phone where there is no room
+  // to spare.
+  useEffect(() => {
+    if (!needsTap || nudgeSpent) return;
+    const t = setTimeout(() => setNudgeSpent(true), 6000);
+    return () => clearTimeout(t);
+  }, [needsTap, nudgeSpent]);
+
   const toggle = async () => {
+    // Whichever way this goes, the user has now made the choice the nudge was
+    // asking for.
+    setNudgeSpent(true);
     if (playing) {
       pause();
       setEnabled(false);
@@ -176,9 +192,11 @@ export function BackgroundMusic() {
   return (
     <>
       <audio ref={audioRef} src={MUSIC_SRC} preload="auto" aria-hidden tabIndex={-1} playsInline />
-      {(needsTap || playing || enabled) ? (
-        <div className="fixed bottom-4 right-4 z-50 flex flex-col items-end gap-2">
-          {needsTap && !playing ? (
+      {/* Always mounted. This used to render only while the music was on or
+          wanted, so muting removed the control itself and there was no way
+          back. A toggle that disappears when you use it is not a toggle. */}
+      <div className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] right-4 z-50 flex flex-col items-end gap-2">
+          {needsTap && !playing && !nudgeSpent ? (
             <Button
               type="button"
               size="sm"
@@ -194,13 +212,12 @@ export function BackgroundMusic() {
             size="icon"
             variant="secondary"
             onClick={toggle}
-            className="h-9 w-9 rounded-full shadow-md bg-background/80 backdrop-blur-sm border border-border/60"
+            className="h-11 w-11 sm:h-9 sm:w-9 rounded-full shadow-md bg-background/80 backdrop-blur-sm border border-border/60"
             aria-label={playing ? "Mute background music" : "Play background music"}
           >
             {playing ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
           </Button>
-        </div>
-      ) : null}
+      </div>
     </>
   );
 }
