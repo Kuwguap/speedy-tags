@@ -7,11 +7,18 @@ export function useIsMobile() {
 
   React.useEffect(() => {
     const mql = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`);
+    
     const onChange = () => {
-      setIsMobile(window.innerWidth < MOBILE_BREAKPOINT);
+      setIsMobile(mql.matches);
     };
+    
+    // Use the matchMedia result directly for Safari compatibility
+    // Safari iOS can have unreliable window.innerWidth due to address bar
+    setIsMobile(mql.matches);
+    
+    // Add event listener with compatibility for older Safari versions
     mql.addEventListener("change", onChange);
-    setIsMobile(window.innerWidth < MOBILE_BREAKPOINT);
+    
     return () => mql.removeEventListener("change", onChange);
   }, []);
 
