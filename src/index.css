@@ -83,5 +83,34 @@
   body {
     @apply bg-background text-foreground font-sans antialiased;
     font-feature-settings: "rlig" 1, "calt" 1;
+    -webkit-font-feature-settings: "rlig" 1, "calt" 1;
+  }
+  
+  /* Safari mobile tap highlight fix */
+  button,
+  a,
+  input,
+  textarea,
+  select {
+    -webkit-tap-highlight-color: transparent;
+  }
+  
+  /* Safari smooth scrolling support */
+  @supports (scroll-behavior: smooth) {
+    html {
+      scroll-behavior: smooth;
+    }
+  }
+  
+  /* Safari flexbox gap fallback for older iOS */
+  @supports not (gap: 1rem) {
+    .flex-gap-fallback {
+      margin-left: -0.5rem;
+      margin-right: -0.5rem;
+    }
+    .flex-gap-fallback > * {
+      margin-left: 0.5rem;
+      margin-right: 0.5rem;
+    }
   }
 }

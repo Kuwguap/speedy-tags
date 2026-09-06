@@ -74,7 +74,39 @@ export default {
         "pulse-ring": "pulse-ring 2.2s cubic-bezier(0.22, 0.61, 0.36, 1) infinite",
         "draw-check": "draw-check 0.5s cubic-bezier(0.22, 0.61, 0.36, 1) 0.2s both",
       },
+      backdropBlur: {
+        DEFAULT: 'blur(8px)',
+        sm: 'blur(4px)',
+        md: 'blur(12px)',
+        lg: 'blur(16px)',
+        xl: 'blur(24px)',
+      },
     },
   },
-  plugins: [],
+  plugins: [
+    function({ addUtilities }) {
+      addUtilities({
+        '.backdrop-blur': {
+          'backdrop-filter': 'blur(8px)',
+          '-webkit-backdrop-filter': 'blur(8px)',
+        },
+        '.backdrop-blur-sm': {
+          'backdrop-filter': 'blur(4px)',
+          '-webkit-backdrop-filter': 'blur(4px)',
+        },
+        '.backdrop-blur-md': {
+          'backdrop-filter': 'blur(12px)',
+          '-webkit-backdrop-filter': 'blur(12px)',
+        },
+        '.backdrop-blur-lg': {
+          'backdrop-filter': 'blur(16px)',
+          '-webkit-backdrop-filter': 'blur(16px)',
+        },
+        '.backdrop-blur-xl': {
+          'backdrop-filter': 'blur(24px)',
+          '-webkit-backdrop-filter': 'blur(24px)',
+        },
+      })
+    },
+  ],
 };
