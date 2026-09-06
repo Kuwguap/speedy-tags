@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.next/
+.vercel/
+.turbo/
+*.log
+.env
+.env.*.local
+.DS_Store
+# Keep .env.example tracked
+!.env.example
+# Bundled proprietary fonts are dropped in locally, never committed
+packages/shared/pdf/fonts/*.TTF
+packages/shared/pdf/fonts/*.ttf
+*.tsbuildinfo

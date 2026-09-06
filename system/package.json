@@ -1,0 +1,16 @@
+{
+  "name": "speedy-system",
+  "version": "1.0.0",
+  "private": true,
+  "description": "4-part system: tag site + insurance site (Vercel) and dispatch bot + central bot (Render), sharing one Supabase DB.",
+  "packageManager": "pnpm@9.12.0",
+  "scripts": {
+    "dev:tag": "pnpm --filter @speedy/tag-site dev",
+    "dev:bot": "pnpm --filter @speedy/dispatch-bot dev",
+    "build:tag": "pnpm --filter @speedy/tag-site build",
+    "start:bot": "pnpm --filter @speedy/dispatch-bot start"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -126,11 +126,28 @@ function transactionsTabActive() {
 // the end of its initialization; callers must use optional chaining.
 const adminApi = {};
 
+function trackTabActive() {
+  const p = document.getElementById("panel-track");
+  return !!(p && p.classList.contains("tab-panel-active"));
+}
+
+// Bridge to the recipients loader defined inside setupEvents(); lets
+// top-level code (tab activation, DOMContentLoaded, combined driver card)
+// trigger a refresh without a ReferenceError before setup runs.
+let _refreshRecipientsImpl = null;
+function refreshRecipients() {
+  if (typeof _refreshRecipientsImpl === "function") {
+    return _refreshRecipientsImpl();
+  }
+  return Promise.resolve();
+}
+
 function setupAdminTabs() {
   const strip = document.querySelector(".tab-strip");
   const txnPanel = document.getElementById("panel-transactions");
   const dispatchPanel = document.getElementById("panel-dispatch");
   const issuerPanel = document.getElementById("panel-issuer");
+  const trackPanel = document.getElementById("panel-track");
   if (!strip || !dispatchPanel || !issuerPanel) {
     return () => {};
   }
@@ -153,6 +170,12 @@ function setupAdminTabs() {
     }
     dispatchPanel.classList.toggle("tab-panel-active", id === "dispatch");
     issuerPanel.classList.toggle("tab-panel-active", id === "issuer");
+    if (trackPanel) {
+      trackPanel.classList.toggle("tab-panel-active", id === "track");
+    }
+    if (id !== "track") {
+      stopTrackAutoRefresh();
+    }
     const fresh = Date.now() - (_tabLastLoad[id] || 0) < TAB_STALE_MS;
     if (fresh) return;
     _tabLastLoad[id] = Date.now();
@@ -168,6 +191,9 @@ function setupAdminTabs() {
       try {
         adminApi.refreshDispatchData?.();
       } catch {}
+    } else if (id === "track") {
+      refreshDriverTrack();
+      startTrackAutoRefresh();
     }
   };
 
@@ -295,7 +321,21 @@ function receiptViewHref(url, ref) {
   return u;
 }
 
+function receiptViewUrl(ref) {
+  return `${API_BASE}/issuer-admin/receipts/view?ref=${encodeURIComponent(
+    String(ref || "").trim()
+  )}`;
+}
+
 function receiptLinkHtml(url, ref) {
+  // Prefer the backend proxy: stored Telegram URLs expire (~1h) while
+  // /issuer-admin/receipts/view re-signs them via the permanent file_id.
+  const r = String(ref || "").trim();
+  if (r && r.toUpperCase() !== "N/A") {
+    return `<a href="${escapeHtmlAttr(
+      receiptViewUrl(r)
+    )}" target="_blank" rel="noopener noreferrer">View</a>`;
+  }
   const u = String(url || "").trim();
   // Only show a "View" link when a receipt image was actually uploaded.
   // A reference id alone must not produce a link (nothing to view yet).
@@ -1241,16 +1281,102 @@ function setupWeeklyPerformanceEvents() {
   });
 }
 
+// ==========================================================================
+// Work status (manual per-transaction workflow flag, separate from delivery
+// status). Rendered as a compact <select> under the delivery pill in both the
+// unified Transactions table and the Summary table. Saved via
+// PATCH /transactions/{id}/work-status.
+// ==========================================================================
+
+const WORK_STATUS_OPTIONS = [
+  { value: "", label: "—" },
+  { value: "working_on_it", label: "working on it" },
+  { value: "stuck", label: "stuck" },
+  { value: "in_progress", label: "in progress" },
+  { value: "done", label: "done" },
+];
+
+function workStatusModifierClass(value) {
+  if (value === "done") return "ws-done";
+  if (value === "stuck") return "ws-stuck";
+  if (value === "working_on_it" || value === "in_progress") return "ws-active";
+  return "";
+}
+
+function workStatusSelectHtml(row) {
+  if (!row || row.id == null || String(row.id).trim() === "") return "";
+  const current = String(row.work_status || "");
+  const mod = workStatusModifierClass(current);
+  const opts = WORK_STATUS_OPTIONS.map(
+    (o) =>
+      `<option value="${o.value}"${o.value === current ? " selected" : ""}>${o.label}</option>`
+  ).join("");
+  return (
+    `<select class="work-status-select${mod ? " " + mod : ""}"` +
+    ` data-work-status-id="${escapeHtmlAttr(String(row.id))}"` +
+    ` data-ws-prev="${escapeHtmlAttr(current)}">${opts}</select>`
+  );
+}
+
+function applyWorkStatusTint(sel) {
+  sel.classList.remove("ws-done", "ws-stuck", "ws-active");
+  const mod = workStatusModifierClass(sel.value);
+  if (mod) sel.classList.add(mod);
+}
+
+// Keeps the in-memory row objects in sync so a later re-render (without a
+// refetch) still shows the saved status.
+function updateWorkStatusInRows(id, status) {
+  const idStr = String(id);
+  for (const r of _txnRows || []) {
+    if (r && String(r.id) === idStr) r.work_status = status;
+  }
+  const items = (lastSummary && lastSummary.items) || [];
+  for (const it of items) {
+    if (it && String(it.id) === idStr) it.work_status = status;
+  }
+}
+
+async function commitWorkStatusChange(sel) {
+  const id = sel.getAttribute("data-work-status-id") || "";
+  if (!id) return;
+  const prev = sel.getAttribute("data-ws-prev") || "";
+  const next = sel.value || "";
+  if (next === prev) return;
+  sel.disabled = true;
+  const res = await requestWithAdminJson(
+    `/transactions/${encodeURIComponent(id)}/work-status`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: next || null }),
+    }
+  );
+  sel.disabled = false;
+  // A 2xx with an empty/non-JSON body (e.g. 204) is still a saved write.
+  const saved = res.ok || (res.status >= 200 && res.status < 300);
+  if (saved) {
+    sel.setAttribute("data-ws-prev", next);
+    updateWorkStatusInRows(id, next || null);
+    applyWorkStatusTint(sel);
+  } else {
+    alert("Could not save status");
+    sel.value = prev;
+    applyWorkStatusTint(sel);
+  }
+}
+
 function _txnStatusCell(row) {
   const s = ((row && row.delivery_status) || "").toUpperCase();
-  if (!s) return '<span class="muted">—</span>';
+  const wsSelect = workStatusSelectHtml(row);
+  if (!s) return '<span class="muted">—</span>' + wsSelect;
   const klass =
     s === "DELIVERED"
       ? "delivered"
       : s === "PENDING"
       ? "pending"
       : "failed";
-  return `<span class="pill ${klass}">${escapeIssuerText(s)}</span>`;
+  return `<span class="pill ${klass}">${escapeIssuerText(s)}</span>${wsSelect}`;
 }
 
 function _txnMatches(row, qLower) {
@@ -1820,12 +1946,52 @@ function renderIssuerGroups(groups) {
   });
 }
 
+/** Last drivers list from /issuer-admin/drivers (for Edit prefill). */
+let _issuerDriversCache = [];
+/** When set, the issuer "Add driver" form updates this driver instead. */
+let _issuerEditingDriverId = null;
+
+function setIssuerDriverFormMode(editing) {
+  const btn = document.getElementById("issuer-add-driver-btn");
+  if (btn) {
+    btn.textContent = editing ? "Update driver" : "Add driver";
+  }
+}
+
+function beginIssuerDriverEdit(driverId) {
+  const d = (_issuerDriversCache || []).find(
+    (x) => String(x && x.id) === String(driverId)
+  );
+  if (!d) return;
+  const nameEl = document.getElementById("issuer-driver-name");
+  const tgEl = document.getElementById("issuer-driver-tg-id");
+  const phoneEl = document.getElementById("issuer-driver-phone");
+  if (nameEl) nameEl.value = d.driver_name || "";
+  if (tgEl) tgEl.value = d.driver_telegram_id || "";
+  if (phoneEl) phoneEl.value = d.phone_number || "";
+  _issuerEditingDriverId = String(d.id);
+  setIssuerDriverFormMode(true);
+  if (nameEl && typeof nameEl.focus === "function") nameEl.focus();
+}
+
+function resetIssuerDriverForm() {
+  _issuerEditingDriverId = null;
+  setIssuerDriverFormMode(false);
+  const nameEl = document.getElementById("issuer-driver-name");
+  const tgEl = document.getElementById("issuer-driver-tg-id");
+  const phoneEl = document.getElementById("issuer-driver-phone");
+  if (nameEl) nameEl.value = "";
+  if (tgEl) tgEl.value = "";
+  if (phoneEl) phoneEl.value = "";
+}
+
 function renderIssuerDrivers(drivers) {
   const tb = document.getElementById("issuer-drivers-tbody");
   if (!tb) return;
   _cachedIssuerDrivers = Array.isArray(drivers) ? drivers : [];
   tb.innerHTML = "";
   const list = Array.isArray(drivers) ? drivers : [];
+  _issuerDriversCache = list;
   if (list.length === 0) {
     const tr = document.createElement("tr");
     const td = document.createElement("td");
@@ -1849,12 +2015,27 @@ function renderIssuerDrivers(drivers) {
     const st = document.createElement("td");
     st.textContent = d.is_active === false ? "Inactive" : "Active";
     const act = document.createElement("td");
+    act.style.whiteSpace = "nowrap";
+    const editBtn = document.createElement("button");
+    editBtn.type = "button";
+    editBtn.className = "secondary";
+    editBtn.textContent = "Edit";
+    editBtn.dataset.editDriver = d.id;
+    editBtn.style.marginRight = "0.3rem";
+    act.appendChild(editBtn);
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "btn-danger-issuer";
     btn.textContent = d.is_active === false ? "Activate" : "Deactivate";
     btn.dataset.toggleDriver = d.id;
+    btn.style.marginRight = "0.3rem";
     act.appendChild(btn);
+    const delBtn = document.createElement("button");
+    delBtn.type = "button";
+    delBtn.className = "btn-danger-issuer";
+    delBtn.textContent = "Delete";
+    delBtn.dataset.deleteDriver = d.id;
+    act.appendChild(delBtn);
     tr.appendChild(nm);
     tr.appendChild(tg);
     tr.appendChild(ph);
@@ -2123,7 +2304,19 @@ function renderIssuerSubmitted(rows) {
     const u = r.updated_at || "";
     upd.textContent = u.length >= 19 ? u.slice(0, 19) : u || "—";
     const link = document.createElement("td");
-    link.innerHTML = receiptLinkHtml(r.receipt_image_url, r.reference_id);
+    const refValue =
+      r.reference_id && String(r.reference_id).trim().toUpperCase() !== "N/A"
+        ? String(r.reference_id).trim()
+        : "";
+    let linkHtml = receiptLinkHtml(r.receipt_image_url, refValue);
+    if (refValue) {
+      linkHtml +=
+        `<img src="${escapeHtmlAttr(receiptViewUrl(refValue))}" loading="lazy" ` +
+        `alt="Receipt ${escapeHtmlAttr(refValue)}" ` +
+        `style="max-width:120px;max-height:150px;object-fit:contain;border-radius:6px;` +
+        `border:1px solid var(--border-subtle);display:block;margin-top:4px">`;
+    }
+    link.innerHTML = linkHtml;
     tr.appendChild(ref);
     tr.appendChild(dr);
     tr.appendChild(gr);
@@ -2462,6 +2655,26 @@ function setupIssuerAdminEvents() {
         alert("Driver name and Telegram ID are required.");
         return;
       }
+      if (_issuerEditingDriverId) {
+        const res = await issuerApiJson(
+          "/issuer-admin/drivers/" + encodeURIComponent(_issuerEditingDriverId),
+          {
+            method: "PUT",
+            body: JSON.stringify({
+              driver_name: name,
+              driver_telegram_id: tg,
+              phone_number: phone,
+            }),
+          }
+        );
+        if (!res.ok) {
+          alert(res.error || "Could not update driver");
+          return;
+        }
+        resetIssuerDriverForm();
+        await refreshIssuerAdmin();
+        return;
+      }
       const body = { driver_name: name, driver_telegram_id: tg };
       if (phone) body.phone_number = phone;
       // Public path: allow non-authenticated users on the lock screen to
@@ -2549,6 +2762,35 @@ function setupIssuerAdminEvents() {
   const dtb = document.getElementById("issuer-drivers-tbody");
   if (dtb) {
     dtb.addEventListener("click", async (ev) => {
+      const editBtn = ev.target.closest("[data-edit-driver]");
+      if (editBtn) {
+        beginIssuerDriverEdit(editBtn.getAttribute("data-edit-driver"));
+        return;
+      }
+      const delBtn = ev.target.closest("[data-delete-driver]");
+      if (delBtn) {
+        const id = delBtn.getAttribute("data-delete-driver");
+        if (
+          !confirm(
+            "Delete this driver? If they have lead history the delete is blocked — deactivate instead."
+          )
+        ) {
+          return;
+        }
+        const res = await issuerApiJson(
+          "/issuer-admin/drivers/" + encodeURIComponent(id),
+          { method: "DELETE" }
+        );
+        if (!res.ok) {
+          alert(res.error || "Delete failed");
+          return;
+        }
+        if (_issuerEditingDriverId === String(id)) {
+          resetIssuerDriverForm();
+        }
+        await refreshIssuerAdmin();
+        return;
+      }
       const btn = ev.target.closest("[data-toggle-driver]");
       if (!btn) return;
       const id = btn.getAttribute("data-toggle-driver");
@@ -2678,6 +2920,448 @@ function setupIssuerAdminEvents() {
         await refreshIssuerAdmin();
       }
     });
+  }
+}
+
+// ==========================================================================
+// Driver Track tab — native Leaflet live map (no iframe).
+// Data: GET /issuer-admin/tracking/overview + /issuer-admin/tracking/route.
+// ==========================================================================
+
+let _trackMap = null;
+let _trackMarkers = {}; // driver_id -> L.Marker (pulsing dot)
+let _trackTrails = {}; // driver_id -> L.Polyline (amber trail)
+let _trackDestMarkers = {}; // session token -> L.Marker (🏁)
+let _trackRouteLine = null;
+let _trackSelectedToken = null;
+let _trackLastDrivers = [];
+let _trackTimer = null;
+let _trackDidFit = false;
+let _trackHours = 8;
+let _trackLoading = false;
+
+function setTrackStatus(msg) {
+  const el = document.getElementById("track-status");
+  if (el) el.textContent = msg || "";
+}
+
+function trackDriverIcon() {
+  return L.divIcon({
+    className: "trk-pulse-icon",
+    html: '<div class="trk-pulse"></div>',
+    iconSize: [18, 18],
+    iconAnchor: [9, 9],
+  });
+}
+
+function trackFlagIcon() {
+  return L.divIcon({
+    className: "trk-flag-icon",
+    html: '<div class="trk-flag">🏁</div>',
+    iconSize: [18, 18],
+    iconAnchor: [9, 16],
+  });
+}
+
+function ensureTrackMap() {
+  if (_trackMap) return _trackMap;
+  const el = document.getElementById("track-map");
+  if (!el || typeof L === "undefined") return null;
+  _trackMap = L.map(el, { zoomControl: true }).setView([40.7128, -74.006], 10);
+  const dark = L.tileLayer(
+    "https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png",
+    { maxZoom: 20, attribution: "© OpenStreetMap © CARTO" }
+  );
+  const sat = L.tileLayer(
+    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    { maxZoom: 19, attribution: "© Esri" }
+  );
+  dark.addTo(_trackMap);
+  L.control
+    .layers({ Map: dark, Satellite: sat }, null, {
+      position: "topright",
+      collapsed: false,
+    })
+    .addTo(_trackMap);
+  return _trackMap;
+}
+
+function trackAgoLabel(ts) {
+  if (!ts) return "";
+  const ms = Date.now() - new Date(ts).getTime();
+  if (!Number.isFinite(ms)) return "";
+  const mins = Math.max(0, Math.round(ms / 60000));
+  if (mins < 1) return "now";
+  if (mins < 60) return `${mins}m ago`;
+  const h = Math.floor(mins / 60);
+  return `${h}h ${mins % 60}m ago`;
+}
+
+function trackStatusPillClass(status) {
+  const s = String(status || "").toLowerCase();
+  if (s === "located" || s === "details_sent") return "delivered";
+  if (s === "pending") return "pending";
+  return "failed"; // overridden / cancelled / unknown
+}
+
+function renderTrackDriverList(drivers) {
+  const host = document.getElementById("track-driver-list");
+  if (!host) return;
+  host.innerHTML = "";
+  const list = Array.isArray(drivers) ? drivers : [];
+  if (list.length === 0) {
+    const span = document.createElement("span");
+    span.className = "muted small";
+    span.textContent = "No driver pings in the selected window.";
+    host.appendChild(span);
+    return;
+  }
+  list.forEach((d) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className =
+      "track-chip" +
+      (d.session_token && d.session_token === _trackSelectedToken
+        ? " track-chip-active"
+        : "");
+    const dot = document.createElement("span");
+    dot.className = "trk-live-dot" + (d.live ? " live" : "");
+    btn.appendChild(dot);
+    const label = document.createElement("span");
+    const ago = trackAgoLabel(d.last_ping && d.last_ping.created_at);
+    label.textContent =
+      (d.driver_name || "Driver " + d.driver_id) + (ago ? " · " + ago : "");
+    btn.appendChild(label);
+    btn.addEventListener("click", () => {
+      if (!d.session_token) {
+        setTrackStatus("No tracking session for this driver.");
+        return;
+      }
+      if (_trackSelectedToken === d.session_token) {
+        clearTrackRoute();
+      } else {
+        showTrackRoute(d.session_token);
+      }
+    });
+    host.appendChild(btn);
+  });
+}
+
+function renderTrackSessions(sessions) {
+  const tb = document.getElementById("track-sessions-tbody");
+  if (!tb) return;
+  tb.innerHTML = "";
+  const list = Array.isArray(sessions) ? sessions : [];
+  if (list.length === 0) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 6;
+    td.className = "muted";
+    td.textContent = "No tracking sessions in the last 48h.";
+    tr.appendChild(td);
+    tb.appendChild(tr);
+    return;
+  }
+  list.forEach((s) => {
+    const tr = document.createElement("tr");
+    const ref = document.createElement("td");
+    ref.innerHTML = s.reference_id
+      ? "<code>" + escapeIssuerText(s.reference_id) + "</code>"
+      : '<span class="muted">—</span>';
+    const drv = document.createElement("td");
+    drv.textContent = s.driver_name || "—";
+    const kind = document.createElement("td");
+    kind.textContent = s.kind || "—";
+    const st = document.createElement("td");
+    const pill = document.createElement("span");
+    pill.className = "pill " + trackStatusPillClass(s.status);
+    pill.textContent = String(s.status || "unknown").toUpperCase();
+    st.appendChild(pill);
+    const created = document.createElement("td");
+    created.className = "small";
+    created.textContent = s.created_at ? formatNy(s.created_at) : "—";
+    const located = document.createElement("td");
+    located.className = "small";
+    located.textContent = s.located_at ? formatNy(s.located_at) : "—";
+    tr.appendChild(ref);
+    tr.appendChild(drv);
+    tr.appendChild(kind);
+    tr.appendChild(st);
+    tr.appendChild(created);
+    tr.appendChild(located);
+    tb.appendChild(tr);
+  });
+}
+
+function renderTrackOverview(data) {
+  const map = ensureTrackMap();
+  const drivers = Array.isArray(data && data.drivers) ? data.drivers : [];
+  const trails = (data && data.trails) || {};
+  const sessions = Array.isArray(data && data.sessions) ? data.sessions : [];
+
+  if (map) {
+    // Pulsing driver markers — moved with setLatLng, removed when stale.
+    const seenDrivers = new Set();
+    drivers.forEach((d) => {
+      if (!d || !d.last_ping || d.last_ping.lat == null || d.last_ping.lng == null) {
+        return;
+      }
+      const key = String(d.driver_id);
+      seenDrivers.add(key);
+      const ll = [Number(d.last_ping.lat), Number(d.last_ping.lng)];
+      const name = String(d.driver_name || "Driver " + key);
+      let m = _trackMarkers[key];
+      if (!m) {
+        m = L.marker(ll, { icon: trackDriverIcon() });
+        m.bindTooltip(name, { direction: "top", offset: [0, -10] });
+        m.addTo(map);
+        _trackMarkers[key] = m;
+      } else {
+        m.setLatLng(ll);
+        m.setTooltipContent(name);
+      }
+    });
+    Object.keys(_trackMarkers).forEach((k) => {
+      if (!seenDrivers.has(k)) {
+        map.removeLayer(_trackMarkers[k]);
+        delete _trackMarkers[k];
+      }
+    });
+
+    // Amber movement trails.
+    const seenTrails = new Set();
+    Object.keys(trails).forEach((k) => {
+      const pts = (trails[k] || [])
+        .filter((p) => Array.isArray(p) && p[0] != null && p[1] != null)
+        .map((p) => [Number(p[0]), Number(p[1])]);
+      if (pts.length < 2) return;
+      seenTrails.add(k);
+      let line = _trackTrails[k];
+      if (!line) {
+        line = L.polyline(pts, { color: "#f59e0b", weight: 3, opacity: 0.65 });
+        line.addTo(map);
+        _trackTrails[k] = line;
+      } else {
+        line.setLatLngs(pts);
+      }
+    });
+    Object.keys(_trackTrails).forEach((k) => {
+      if (!seenTrails.has(k)) {
+        map.removeLayer(_trackTrails[k]);
+        delete _trackTrails[k];
+      }
+    });
+
+    // 🏁 destination markers for sessions with resolved coordinates.
+    const seenDest = new Set();
+    sessions.forEach((s) => {
+      if (!s || !s.token || s.dest_lat == null || s.dest_lng == null) return;
+      const key = String(s.token);
+      seenDest.add(key);
+      const ll = [Number(s.dest_lat), Number(s.dest_lng)];
+      const tip =
+        (s.driver_name ? s.driver_name + " → " : "") +
+        (s.delivery_address || s.reference_id || "destination");
+      let m = _trackDestMarkers[key];
+      if (!m) {
+        m = L.marker(ll, { icon: trackFlagIcon() });
+        m.bindTooltip(tip, { direction: "top", offset: [0, -14] });
+        m.addTo(map);
+        _trackDestMarkers[key] = m;
+      } else {
+        m.setLatLng(ll);
+        m.setTooltipContent(tip);
+      }
+    });
+    Object.keys(_trackDestMarkers).forEach((k) => {
+      if (!seenDest.has(k)) {
+        map.removeLayer(_trackDestMarkers[k]);
+        delete _trackDestMarkers[k];
+      }
+    });
+  }
+
+  renderTrackDriverList(drivers);
+  renderTrackSessions(sessions);
+
+  if (map && !_trackDidFit) {
+    const pts = [];
+    Object.values(_trackMarkers).forEach((m) => pts.push(m.getLatLng()));
+    Object.values(_trackDestMarkers).forEach((m) => pts.push(m.getLatLng()));
+    if (pts.length > 0) {
+      map.fitBounds(L.latLngBounds(pts).pad(0.25), { maxZoom: 14 });
+      _trackDidFit = true;
+    }
+  }
+}
+
+function clearTrackRoute() {
+  _trackSelectedToken = null;
+  if (_trackRouteLine && _trackMap) {
+    _trackMap.removeLayer(_trackRouteLine);
+  }
+  _trackRouteLine = null;
+  const card = document.getElementById("track-route-card");
+  if (card) {
+    card.style.display = "none";
+    card.innerHTML = "";
+  }
+  renderTrackDriverList(_trackLastDrivers);
+}
+
+async function showTrackRoute(token) {
+  _trackSelectedToken = token;
+  renderTrackDriverList(_trackLastDrivers);
+  const card = document.getElementById("track-route-card");
+  if (card) {
+    card.style.display = "block";
+    card.innerHTML = '<div class="muted small">Loading route…</div>';
+  }
+  const res = await requestWithAdminJson(
+    "/issuer-admin/tracking/route?token=" + encodeURIComponent(token)
+  );
+  if (_trackSelectedToken !== token) {
+    return; // user picked another driver (or cleared) while loading
+  }
+  if (!res.ok || !res.data || res.data.ok === false) {
+    if (card) {
+      card.innerHTML =
+        '<div class="muted small">Route unavailable (' +
+        escapeIssuerText(res.error || "no data") +
+        ").</div>";
+    }
+    return;
+  }
+  const r = res.data;
+  const fromAddr =
+    (r.from &&
+      (r.from.address ||
+        (r.from.lat != null ? r.from.lat + ", " + r.from.lng : ""))) ||
+    "—";
+  const toAddr =
+    (r.to &&
+      (r.to.address || (r.to.lat != null ? r.to.lat + ", " + r.to.lng : ""))) ||
+    "—";
+  if (card) {
+    card.innerHTML =
+      '<div class="panel-title" style="margin-bottom:0.4rem">' +
+      escapeIssuerText(r.driver_name || "Driver") +
+      (r.reference_id
+        ? ' — <code>' + escapeIssuerText(r.reference_id) + "</code>"
+        : "") +
+      "</div>" +
+      '<div class="small" style="margin-bottom:0.25rem"><strong>FROM</strong> ' +
+      escapeIssuerText(fromAddr) +
+      "</div>" +
+      '<div class="small" style="margin-bottom:0.45rem"><strong>TO</strong> ' +
+      escapeIssuerText(toAddr) +
+      "</div>" +
+      '<div style="display:flex;gap:1.2rem;flex-wrap:wrap;align-items:baseline">' +
+      '<div><div class="metric-label">ETA</div>' +
+      '<div style="font-size:1.5rem;font-weight:700;color:var(--accent)">' +
+      escapeIssuerText(r.eta_label || "—") +
+      "</div></div>" +
+      '<div><div class="metric-label">Distance</div>' +
+      '<div style="font-size:1.1rem;font-weight:600">' +
+      escapeIssuerText(r.distance_label || "—") +
+      "</div></div>" +
+      '<div><div class="metric-label">Status</div><div>' +
+      escapeIssuerText(r.status || "—") +
+      "</div></div>" +
+      "</div>";
+  }
+  const map = ensureTrackMap();
+  if (_trackRouteLine && map) {
+    map.removeLayer(_trackRouteLine);
+    _trackRouteLine = null;
+  }
+  const geom = Array.isArray(r.geometry)
+    ? r.geometry.filter((p) => Array.isArray(p) && p.length >= 2)
+    : [];
+  if (map && geom.length >= 2) {
+    _trackRouteLine = L.polyline(geom, {
+      color: "#6ea3d8",
+      weight: 3,
+      dashArray: "8 10",
+      opacity: 0.9,
+    });
+    _trackRouteLine.addTo(map);
+    map.fitBounds(_trackRouteLine.getBounds().pad(0.2));
+  }
+}
+
+async function refreshDriverTrack() {
+  const map = ensureTrackMap();
+  if (map) {
+    // Panel was display:none when the map initialized — recalc dimensions.
+    setTimeout(() => {
+      try {
+        map.invalidateSize();
+      } catch (_) {
+        // ignore
+      }
+    }, 60);
+  }
+  if (!getStoredPassword()) {
+    setTrackStatus("Unlock to view live tracking.");
+    return;
+  }
+  if (_trackLoading) return;
+  _trackLoading = true;
+  const res = await requestWithAdminJson(
+    "/issuer-admin/tracking/overview?hours=" + encodeURIComponent(_trackHours)
+  );
+  _trackLoading = false;
+  if (!res.ok) {
+    setTrackStatus(
+      res.error === "UNAUTHORIZED" || res.error === "NO_PASSWORD"
+        ? "Unlock to view live tracking."
+        : "Failed to load tracking: " + (res.error || "error")
+    );
+    return;
+  }
+  const data = res.data || {};
+  _trackLastDrivers = Array.isArray(data.drivers) ? data.drivers : [];
+  renderTrackOverview(data);
+  const liveCount = _trackLastDrivers.filter((d) => d && d.live).length;
+  setTrackStatus(
+    `${_trackLastDrivers.length} driver(s) · ${liveCount} live · last ${_trackHours}h`
+  );
+}
+
+function startTrackAutoRefresh() {
+  if (_trackTimer) return;
+  _trackTimer = setInterval(() => {
+    if (!trackTabActive()) {
+      stopTrackAutoRefresh();
+      return;
+    }
+    refreshDriverTrack();
+  }, 10000);
+}
+
+function stopTrackAutoRefresh() {
+  if (_trackTimer) {
+    clearInterval(_trackTimer);
+    _trackTimer = null;
+  }
+}
+
+function setupTrackEvents() {
+  document.querySelectorAll(".track-hours-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const h = parseInt(btn.getAttribute("data-track-hours"), 10);
+      if (!Number.isFinite(h)) return;
+      _trackHours = h;
+      document
+        .querySelectorAll(".track-hours-btn")
+        .forEach((b) => b.classList.toggle("track-hours-active", b === btn));
+      refreshDriverTrack();
+    });
+  });
+  const rf = document.getElementById("track-refresh-btn");
+  if (rf) {
+    rf.addEventListener("click", () => refreshDriverTrack());
   }
 }
 
@@ -3073,6 +3757,170 @@ function clientEmailFor(it) {
   return m ? m[0] : "";
 }
 
+// ==========================================================================
+// Live Count — manual per-driver countdown.
+// The admin types a base count into any summary row's Live Count input; that
+// row becomes the anchor (base_count + anchor_ts stored server-side via
+// PUT /live-counts). Rows of the same driver at/after the anchor timestamp
+// count down chronologically: base, base-1, base-2, … (may go negative).
+// Rows before the anchor, and drivers with no entry, show a blank input.
+// ==========================================================================
+
+/** driver_key → { base_count, anchor_ts } from GET /live-counts; null = none loaded. */
+let _liveCountsByDriver = null;
+/** true when /live-counts was unavailable due to missing/invalid admin password. */
+let _liveCountsLocked = false;
+
+function liveCountDriverKey(name) {
+  return String(name || "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+// One fetch per summary render; sets the module state used by renderSummaryTable.
+async function refreshLiveCountsState() {
+  _liveCountsByDriver = null;
+  _liveCountsLocked = false;
+  const res = await requestWithAdminJson("/live-counts");
+  if (res.ok && res.data && typeof res.data === "object" && !Array.isArray(res.data)) {
+    _liveCountsByDriver = res.data;
+  } else if (res.status === 401 || res.error === "NO_PASSWORD") {
+    _liveCountsLocked = true;
+  }
+}
+
+/**
+ * Map of summary item → number to display in its Live Count input.
+ * Setting a count on any row makes EVERY transaction of that driver show the
+ * base number (existing rows all read e.g. 20); each NEW transaction after
+ * the anchor then subtracts one (19, 18, …). Items missing a driver
+ * name/timestamp, or belonging to a driver with no live-count entry, are
+ * absent from the map (blank input).
+ */
+function computeLiveCountDisplay(items, countsMap) {
+  const result = new Map();
+  if (!countsMap) return result;
+  const byDriver = new Map();
+  for (const it of items || []) {
+    if (!it) continue;
+    const key = liveCountDriverKey(it.recipient_name);
+    if (!key) continue;
+    const ms = parseItemTimeMs(it);
+    if (!Number.isFinite(ms)) continue;
+    if (!byDriver.has(key)) byDriver.set(key, []);
+    byDriver.get(key).push({ it, ms });
+  }
+  for (const [key, rows] of byDriver) {
+    const entry = countsMap[key];
+    if (!entry || entry.base_count == null) continue;
+    const base = Number(entry.base_count);
+    if (!Number.isFinite(base)) continue;
+    const anchorMs = Date.parse(String(entry.anchor_ts || ""));
+    if (!Number.isFinite(anchorMs)) continue;
+    rows.sort((a, b) => a.ms - b.ms);
+    // Preferred: count down from the server's post-anchor transaction list,
+    // which covers ALL of the driver's transactions — not just the rows the
+    // current time-window/table-cap happens to include. Fallback (older
+    // backend without post_anchor_ts): count the rendered rows themselves.
+    const postAnchor = Array.isArray(entry.post_anchor_ts)
+      ? entry.post_anchor_ts.map((s) => Date.parse(String(s))).filter(Number.isFinite).sort((a, b) => a - b)
+      : null;
+    let offset = 0;
+    for (const r of rows) {
+      // 1s tolerance so the anchor row itself lands in the "show base" bucket
+      // even if the stored anchor_ts round-tripped with different precision.
+      if (r.ms <= anchorMs + 1000) {
+        result.set(r.it, base);
+      } else if (postAnchor) {
+        // This row is itself one of the post-anchor transactions, so the
+        // count of entries at-or-before it includes it: first new row = base-1.
+        let n = 0;
+        for (const ms of postAnchor) {
+          if (ms <= r.ms + 1) n += 1;
+          else break;
+        }
+        result.set(r.it, base - Math.max(n, 1));
+      } else {
+        offset += 1;
+        result.set(r.it, base - offset);
+      }
+    }
+  }
+  return result;
+}
+
+let _liveCountLastCommit = null;
+
+async function commitLiveCountEdit(input) {
+  const driver = input.getAttribute("data-live-count-driver") || "";
+  if (!driver) return;
+  const raw = String(input.value || "").trim();
+  let base = null;
+  if (raw !== "") {
+    base = Number(raw);
+    if (!Number.isFinite(base)) return;
+  }
+  // Enter blurs AND commits directly; blur may also fire `change` → a second
+  // commit for the same edit. Swallow the duplicate, allow deliberate repeats.
+  const sig = liveCountDriverKey(driver) + "|" + raw;
+  const nowMs = Date.now();
+  if (_liveCountLastCommit && _liveCountLastCommit.sig === sig && nowMs - _liveCountLastCommit.at < 1500) return;
+  _liveCountLastCommit = { sig, at: nowMs };
+  // Anchor at the moment of the edit — NOT the clicked row's timestamp — so
+  // every transaction that already exists (on any row, old or new) shows the
+  // full base, and only transactions created AFTER this edit count down.
+  const anchorNow = new Date().toISOString();
+  input.disabled = true;
+  const res = await requestWithAdminJson("/live-counts", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ driver, base_count: base, anchor_ts: anchorNow }),
+  });
+  input.disabled = false;
+  // A 2xx with an empty/non-JSON body (e.g. 204) is still a saved write.
+  const saved = res.ok || (res.status >= 200 && res.status < 300);
+  if (saved) {
+    const key = liveCountDriverKey(driver);
+    if (!_liveCountsByDriver) _liveCountsByDriver = {};
+    if (base == null) {
+      delete _liveCountsByDriver[key];
+    } else {
+      // Nothing is post-anchor yet, so every row of this driver shows base.
+      _liveCountsByDriver[key] = { base_count: base, anchor_ts: anchorNow, post_anchor_ts: [] };
+    }
+  } else {
+    alert("Could not save live count");
+  }
+  // Repaint from local state: on success every row of this driver shows the
+  // new base and future transactions count down; on failure this reverts.
+  if (lastSummary) renderSummaryTable(lastSummary);
+}
+
+// Delegated listeners: table bodies are rebuilt via innerHTML on every render,
+// so per-element handlers would be lost. Nothing here fires on render — only
+// on actual user input.
+function setupWorkStatusAndLiveCountEvents() {
+  document.addEventListener("change", (ev) => {
+    const el = ev.target;
+    if (!el || !el.classList) return;
+    if (el.classList.contains("work-status-select")) {
+      void commitWorkStatusChange(el);
+    } else if (el.classList.contains("live-count-input")) {
+      void commitLiveCountEdit(el);
+    }
+  });
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Enter") return;
+    const el = ev.target;
+    if (el && el.classList && el.classList.contains("live-count-input")) {
+      // Commit directly: the browser's `change` event never fires when the
+      // value is unchanged, but re-entering the same number is a deliberate
+      // re-anchor (reset the countdown to the base as of now).
+      ev.preventDefault();
+      el.blur();
+      void commitLiveCountEdit(el);
+    }
+  });
+}
+
 function renderSummaryTable(summary) {
   const tbody = document.getElementById("summary-tbody");
   if (!tbody) return;
@@ -3083,7 +3931,7 @@ function renderSummaryTable(summary) {
   if (items.length === 0) {
     const tr = document.createElement("tr");
     const td = document.createElement("td");
-    td.colSpan = 17;
+    td.colSpan = 18;
     td.className = "muted";
     td.textContent = "No transmissions in this summary window.";
     tr.appendChild(td);
@@ -3098,6 +3946,7 @@ function renderSummaryTable(summary) {
     issuerHandleCounts[handle] = (issuerHandleCounts[handle] || 0) + 1;
   }
   const driverPhoneMap = buildDriverPhoneMap();
+  const liveCountDisplay = computeLiveCountDisplay(sorted, _liveCountsByDriver);
 
   for (let i = 0; i < sorted.length; i += 1) {
     const it = sorted[i];
@@ -3137,6 +3986,29 @@ function renderSummaryTable(summary) {
     tdDriverName.textContent = it.recipient_name || "—";
     tr.appendChild(tdDriverName);
 
+    // Live Count: manual per-driver countdown (see computeLiveCountDisplay).
+    const tdLiveCount = document.createElement("td");
+    const liveInput = document.createElement("input");
+    liveInput.type = "number";
+    liveInput.className = "live-count-input";
+    liveInput.placeholder = "—";
+    const liveDriverName = String(it.recipient_name || "").trim();
+    const liveRowTs = String(it.timestamp_ny || "").trim();
+    if (_liveCountsLocked) {
+      liveInput.disabled = true;
+      liveInput.title = "Unlock to edit";
+    } else if (!liveDriverName) {
+      // The countdown is per driver; a row with no driver name can't set one.
+      liveInput.disabled = true;
+    } else {
+      liveInput.setAttribute("data-live-count-driver", liveDriverName);
+      if (liveRowTs) liveInput.setAttribute("data-live-count-ts", liveRowTs);
+    }
+    const liveVal = liveCountDisplay.get(it);
+    if (liveVal != null) liveInput.value = String(liveVal);
+    tdLiveCount.appendChild(liveInput);
+    tr.appendChild(tdLiveCount);
+
     const tdDriverPhone = document.createElement("td");
     tdDriverPhone.textContent = driverPhoneFor(it, driverPhoneMap) || "—";
     tr.appendChild(tdDriverPhone);
@@ -3168,11 +4040,13 @@ function renderSummaryTable(summary) {
     }
     statusPill.textContent = status || "UNKNOWN";
     tdStatus.appendChild(statusPill);
+    tdStatus.insertAdjacentHTML("beforeend", workStatusSelectHtml(it));
     tr.appendChild(tdStatus);
 
     const tdCount = document.createElement("td");
     const handleKey = normalizeHandle(it.telegram_handle) || "__unknown__";
-    tdCount.textContent = String(issuerHandleCounts[handleKey] || 0);
+    const rawCount = issuerHandleCounts[handleKey] || 0;
+    tdCount.textContent = String(rawCount);
     tr.appendChild(tdCount);
 
     const tdIssuerName = document.createElement("td");
@@ -3475,8 +4349,14 @@ function downloadSummaryCsv() {
   for (let i = 0; i < lastSummary.items.length; i += 1) {
     const it = lastSummary.items[i];
     const receiptUrl = (it.receipt_image_url && String(it.receipt_image_url).trim()) || "";
-    const receiptCsvValue = receiptUrl
-      ? `=HYPERLINK("${receiptUrl.replace(/"/g, '""')}","View")`
+    const receiptRef = (it.reference_id && String(it.reference_id).trim()) || "";
+    const receiptHref = receiptUrl
+      ? receiptRef && receiptRef.toUpperCase() !== "N/A"
+        ? receiptViewUrl(receiptRef)
+        : receiptUrl
+      : "";
+    const receiptCsvValue = receiptHref
+      ? `=HYPERLINK("${receiptHref.replace(/"/g, '""')}","View")`
       : "";
     const priceStr =
       it.price != null && String(it.price).trim() !== ""
@@ -3790,6 +4670,12 @@ async function refreshSummary() {
             : "";
         statusEl.textContent = "Summary generated successfully." + extra;
       }
+    }
+
+    // Live Count anchors (manual per-driver countdown) — one fetch per render.
+    await refreshLiveCountsState();
+    if (!hasAdminPassword()) {
+      return;
     }
 
     renderSummaryTable(data);
@@ -4426,6 +5312,24 @@ function setupEvents() {
   const recipientError = document.getElementById("recipient-error");
   const recipientListWrap = document.getElementById("recipient-list-wrap");
   const recipientsBody = document.getElementById("recipients-body");
+  // When set, saveRecipient PATCHes this recipient instead of POSTing a new one.
+  let editingRecipientId = null;
+
+  function resetRecipientFormMode() {
+    editingRecipientId = null;
+    if (saveRecipientBtn) saveRecipientBtn.textContent = "Save";
+  }
+
+  function beginEditRecipient(r) {
+    editingRecipientId = r && r.id ? String(r.id) : null;
+    if (!editingRecipientId) return;
+    if (recipientForm) recipientForm.style.display = "block";
+    if (recipientNameInput) recipientNameInput.value = r.name || "";
+    if (recipientEmailInput) recipientEmailInput.value = r.email || "";
+    if (saveRecipientBtn) saveRecipientBtn.textContent = "Update";
+    if (recipientError) recipientError.style.display = "none";
+    if (recipientNameInput) recipientNameInput.focus();
+  }
 
   function updateRecipientConfidentialUI() {
     const hasPw = !!getStoredPassword();
@@ -4495,6 +5399,13 @@ function setupEvents() {
       tr.appendChild(tdEmail);
 
       const tdActions = document.createElement("td");
+      const editBtn = document.createElement("button");
+      editBtn.className = "secondary";
+      editBtn.style.fontSize = "0.75rem";
+      editBtn.style.marginRight = "0.3rem";
+      editBtn.textContent = "Edit";
+      editBtn.addEventListener("click", () => beginEditRecipient(r));
+      tdActions.appendChild(editBtn);
       const deleteBtn = document.createElement("button");
       deleteBtn.className = "secondary";
       deleteBtn.style.fontSize = "0.75rem";
@@ -4518,6 +5429,12 @@ function setupEvents() {
       );
       if (!res.ok) {
         throw new Error("HTTP_" + res.status);
+      }
+      if (editingRecipientId === String(id)) {
+        resetRecipientFormMode();
+        recipientNameInput.value = "";
+        recipientEmailInput.value = "";
+        recipientForm.style.display = "none";
       }
       await refreshRecipients();
     } catch (e) {
@@ -4545,14 +5462,19 @@ function setupEvents() {
     recipientError.style.display = "none";
 
     try {
-      const res = await fetch(API_BASE + "/recipients/ui", {
-        method: "POST",
+      const isEdit = !!editingRecipientId;
+      const url = isEdit
+        ? API_BASE + "/recipients/ui/" + encodeURIComponent(editingRecipientId)
+        : API_BASE + "/recipients/ui";
+      const res = await fetch(url, {
+        method: isEdit ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, email }),
       });
       if (!res.ok) {
         throw new Error("HTTP_" + res.status);
       }
+      resetRecipientFormMode();
       recipientNameInput.value = "";
       recipientEmailInput.value = "";
       recipientForm.style.display = "none";
@@ -4565,11 +5487,13 @@ function setupEvents() {
   }
 
   addRecipientBtn.addEventListener("click", () => {
+    resetRecipientFormMode();
     recipientForm.style.display = "block";
     recipientNameInput.focus();
   });
 
   cancelRecipientBtn.addEventListener("click", () => {
+    resetRecipientFormMode();
     recipientForm.style.display = "none";
     recipientNameInput.value = "";
     recipientEmailInput.value = "";
@@ -4589,6 +5513,111 @@ function setupEvents() {
       saveRecipient();
     }
   });
+
+  // Combined driver add (Krab Issuer + Krab Dispatch). Both endpoints are
+  // public (/recipients/ui + /issuer-admin/drivers), so this card works while
+  // the dashboard is locked — required behavior.
+  const combinedAddBtn = document.getElementById("combined-driver-add-btn");
+  if (combinedAddBtn) {
+    const combinedStatus = document.getElementById("combined-driver-status");
+    const setCombinedStatus = (msg, isErr) => {
+      if (!combinedStatus) return;
+      combinedStatus.textContent = msg || "";
+      combinedStatus.style.display = msg ? "block" : "none";
+      combinedStatus.style.color = isErr ? "var(--danger)" : "var(--text-muted)";
+    };
+    combinedAddBtn.addEventListener("click", async () => {
+      const nameEl = document.getElementById("combined-driver-name");
+      const emailEl = document.getElementById("combined-driver-email");
+      const tgEl = document.getElementById("combined-driver-tg-id");
+      const phoneEl = document.getElementById("combined-driver-phone");
+      const name = nameEl ? nameEl.value.trim() : "";
+      const email = emailEl ? emailEl.value.trim() : "";
+      const tg = tgEl ? tgEl.value.trim() : "";
+      const phone = phoneEl ? phoneEl.value.trim() : "";
+      if (!name || !email || !tg) {
+        setCombinedStatus(
+          "Driver name, email, and Telegram ID are required.",
+          true
+        );
+        return;
+      }
+      if (!email.includes("@")) {
+        setCombinedStatus("Please enter a valid email address.", true);
+        return;
+      }
+      combinedAddBtn.disabled = true;
+      setCombinedStatus("Adding driver to both systems…", false);
+
+      // (a) Krab Dispatch email recipient.
+      let dispatchOk = false;
+      let dispatchErr = "";
+      try {
+        const res = await fetch(API_BASE + "/recipients/ui", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, email }),
+        });
+        if (res.ok) {
+          dispatchOk = true;
+        } else {
+          dispatchErr = "HTTP_" + res.status;
+        }
+      } catch (e) {
+        dispatchErr = "network";
+      }
+
+      // (b) Krab Issuer driver (chatID) — email passed through when supported.
+      let issuerOk = false;
+      let issuerErr = "";
+      try {
+        const body = { driver_name: name, driver_telegram_id: tg, email };
+        if (phone) body.phone_number = phone;
+        const res = await fetch(API_BASE + "/issuer-admin/drivers", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (res.ok) {
+          issuerOk = true;
+        } else {
+          try {
+            const j = await res.json();
+            issuerErr =
+              issuerFormatDetail(j && (j.detail ?? j.message ?? j.error)) ||
+              "HTTP_" + res.status;
+          } catch {
+            issuerErr = "HTTP_" + res.status;
+          }
+        }
+      } catch (e) {
+        issuerErr = "network";
+      }
+
+      combinedAddBtn.disabled = false;
+      const parts = [
+        dispatchOk
+          ? "✅ Dispatch (email) added"
+          : "❌ Dispatch (email) failed" + (dispatchErr ? ` (${dispatchErr})` : ""),
+        issuerOk
+          ? "✅ Issuer (chatID) added"
+          : "❌ Issuer (chatID) failed" + (issuerErr ? ` (${issuerErr})` : ""),
+      ];
+      setCombinedStatus(parts.join(" · "), !(dispatchOk && issuerOk));
+      if (dispatchOk && issuerOk) {
+        if (nameEl) nameEl.value = "";
+        if (emailEl) emailEl.value = "";
+        if (tgEl) tgEl.value = "";
+        if (phoneEl) phoneEl.value = "";
+      }
+      if (dispatchOk) {
+        refreshRecipients();
+      }
+      if (issuerOk && getStoredPassword()) {
+        refreshIssuerAdmin();
+      }
+    });
+  }
 
   // Refresh recipients when logged in; Add driver card also loads without password.
   const originalApplyLoggedInUI = applyLoggedInUI;
@@ -4619,9 +5648,15 @@ function setupEvents() {
     }
   };
 
+  // Expose the recipients loader to top-level callers (tab activation,
+  // DOMContentLoaded, combined driver card) via the refreshRecipients bridge.
+  _refreshRecipientsImpl = refreshRecipients;
+
   setupIssuerAdminEvents();
   setupTxnEvents();
   setupWeeklyPerformanceEvents();
+  setupTrackEvents();
+  setupWorkStatusAndLiveCountEvents();
 
   applySummaryZoom(1);
   applyTxZoom(1);

@@ -1,0 +1,64 @@
+# What NOT to upload when deploying tristatetags.com.
+#
+# Vercel uses this INSTEAD of .gitignore once it exists, so everything
+# .gitignore covered has to be repeated here or it would start being uploaded.
+#
+# The build is `npm run build` -> dist/ and it only ever reads src/, public/,
+# api/, index.html and the config files in this directory. Nothing excluded
+# below is part of that.
+#
+# Every file pattern here is ROOT-ANCHORED with a leading slash, deliberately.
+# A bare `*.jpg` also matches src/assets/hero-bg.jpg and public/reviews/*.jpg;
+# a bare `*.mp3` matches src/assets/audio/tokyo-drift.mp3, which
+# src/components/BackgroundMusic.tsx imports -- so the unanchored forms would
+# have stripped the hero image, the review photos, and failed the build.
+
+# --- everything .gitignore already covered ---
+node_modules
+dist
+dist-ssr
+*.local
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+.vscode/*
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+server/data
+.vercel
+
+# --- secrets. Never served, but they have no business in a build upload ---
+.env
+.env.*
+
+# --- other projects that merely share this folder ---
+# Separate deployments with their own pipelines. The tag site's build never
+# reads a line of them, and together they are the bulk of the upload.
+/system/
+/v2/
+/krabinsurancebot/
+/supabase/
+/driver-hiring-kit/
+# NOT /admin/ -- package.json's `prebuild` runs scripts/sync-admin-to-backend.mjs,
+# which copies admin/index.html and admin/app.js into public/backend/. Excluding
+# it fails the build outright, which is exactly what it did the first time.
+
+# --- loose files sitting in the repo root ---
+# Real customers' documents among them; none of it is referenced by the build.
+/*.pdf
+/*.jpg
+/*.mp3
+/*.zip
+/*.code-workspace
+/debug.log
+/.claude/
+/.cursor/

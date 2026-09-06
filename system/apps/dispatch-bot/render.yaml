@@ -1,0 +1,35 @@
+# Render blueprint for the dispatch bot.
+# In the Render dashboard, set Root Directory to apps/dispatch-bot and add the
+# env vars below (values from your .env). Uses pnpm to resolve the workspace
+# @speedy/shared dependency.
+services:
+  - type: web
+    name: speedy-dispatch-bot
+    runtime: node
+    rootDir: apps/dispatch-bot
+    buildCommand: corepack enable && pnpm install --frozen-lockfile
+    startCommand: pnpm start
+    healthCheckPath: /health
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: DISPATCH_PUBLIC_URL
+        sync: false
+      - key: DISPATCH_SHARED_SECRET
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SENDGRID_API_KEY
+        sync: false
+      - key: SENDGRID_FROM
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: APP_URL
+        sync: false
+      - key: FALLBACK_CLAIM_TIMEOUT_MS
+        value: "300000"

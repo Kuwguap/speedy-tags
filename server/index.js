@@ -10,7 +10,7 @@ import jwt from "jsonwebtoken";
 import Stripe from "stripe";
 import { Resend } from "resend";
 import { supabase, useSupabase } from "./db.js";
-import { isKrableadsIngestEnabled, submitLeadToKrableads } from "./krableads-ingest.js";
+import { isKrableadsIngestEnabled, submitLeadToKrableads, attachDocsToKrableads } from "./krableads-ingest.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = join(__dirname, "data");
@@ -1965,8 +1965,26 @@ function buildAbandonedCartEmailHtml(order, stage) {
 
 async function sendAbandonedCartEmail(order, stage) {
   if (!resend) return false;
-  const to = String(order.deliveryEmail || "").trim();
-  if (!to || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) return false;
+  // Normalize: strip wrapping <>/quotes and trailing punctuation people type,
+  // then validate strictly (no commas, no double dots) — addresses that pass
+  // a loose regex but fail Resend's parser otherwise 422 the whole send.
+  let to = String(order.deliveryEmail || "")
+    .trim()
+    .replace(/^<+|>+$/g, "")
+    .replace(/^["']+|["']+$/g, "")
+    .replace(/[.,;:]+$/g, "")
+    .trim();
+  if (
+    !to ||
+    /[,;\s<>"]/.test(to) ||
+    /\.\./.test(to) ||
+    !/^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/.test(to)
+  ) {
+    console.warn(
+      `[AbandonedCart] skipping invalid email ${JSON.stringify(order.deliveryEmail)} (order ${String(order.id).slice(0, 8)})`
+    );
+    return false;
+  }
   const subject = stage === 2 ? "Still need your temporary tag?" : "You left something in your cart";
   try {
     const { error } = await resend.emails.send({
@@ -1977,7 +1995,10 @@ async function sendAbandonedCartEmail(order, stage) {
       headers: { "List-Unsubscribe": `<${unsubscribeUrlForOrder(order)}>` },
     });
     if (error) {
-      console.error("[AbandonedCart] Resend error:", error);
+      console.error(
+        `[AbandonedCart] Resend error for ${to} (order ${String(order.id).slice(0, 8)}):`,
+        error
+      );
       return false;
     }
     console.log(`[AbandonedCart] stage ${stage} → ${to} (order ${String(order.id).slice(0, 8)})`);
@@ -4047,9 +4068,17 @@ app.patch("/api/orders/:id/tag-info", async (req, res) => {
       } else {
         await updateOrder(id, { krableadsIngestError: ingest.error });
         telegramErrors.push({ error: ingest.error, status: ingest.status });
-        console.error("[KrableadsIngest]", id.slice(0, 8), ingest.error);
+        console.error(
+          "[KrableadsIngest]",
+          id.slice(0, 8),
+          ingest.error,
+          "— falling back to legacy Telegram dispatch"
+        );
       }
-    } else {
+    }
+    // Legacy Telegram dispatch: the primary path when ingest is disabled, and
+    // the FALLBACK when an enabled ingest fails — a lead must never strand.
+    if (!telegramSent) {
       const dispatchers = await loadDispatchers();
       if (dispatchers.length > 0 && TELEGRAM_BOT_TOKEN) {
         for (const d of dispatchers) {
@@ -4093,15 +4122,22 @@ app.patch("/api/orders/:id/tag-info", async (req, res) => {
       const alreadyNotified =
         (useSupabase() ? updated?.new_lead_email_sent : updated?.newLeadEmailSent) === true;
       if (!alreadyNotified) {
+        // When krableads ingest is on, the unified krableadsV2 bot owns the
+        // Telegram supervisory 'New Lead' message (sent to the dispatch groups
+        // with the generated tag PDF). Skip our direct Telegram fan-out then so
+        // supervisors don't get the notice twice. Email is unaffected.
+        const telegramOwnedByKrableads = isKrableadsIngestEnabled();
         const [emailSent, tgSent] = await Promise.all([
           sendNewLeadEmail(full).catch((e) => {
             console.error("[LeadEmail] Non-fatal error while sending new-lead email:", e);
             return false;
           }),
-          sendNewLeadTelegramNotifications(full).catch((e) => {
-            console.error("[LeadTelegram] Non-fatal error while sending new-lead DMs:", e);
-            return false;
-          }),
+          telegramOwnedByKrableads
+            ? Promise.resolve(false)
+            : sendNewLeadTelegramNotifications(full).catch((e) => {
+                console.error("[LeadTelegram] Non-fatal error while sending new-lead DMs:", e);
+                return false;
+              }),
         ]);
         if (emailSent || tgSent) {
           await updateOrder(id, { newLeadEmailSent: true });
@@ -4256,7 +4292,23 @@ app.post("/api/orders/:id/documents", upload.fields([
       const updated = await findOrderById(id);
       const full = useSupabase() ? orderRowToApi(updated) : updated;
       Object.assign(full, updates);
-      await sendDocImagesToTelegram(full);
+      // krableads-managed leads: hand the doc URLs to krableadsV2, which
+      // forwards them to the accepting Telegram group and AI-fills any lead
+      // fields the customer left blank. Legacy path stays as fallback.
+      let docsHandled = false;
+      if (isKrableadsIngestEnabled() && (full.krableadsReferenceId || full.krableads_reference_id)) {
+        const attach = await attachDocsToKrableads(full);
+        if (attach.ok) {
+          docsHandled = true;
+          console.log(
+            `[KrableadsIngest] Order ${id.slice(0, 8)} docs attached (${attach.delivered || "queued"}` +
+            `${attach.ai_filled?.length ? `, AI filled: ${attach.ai_filled.join(", ")}` : ""})`,
+          );
+        } else {
+          console.error(`[KrableadsIngest] Order ${id.slice(0, 8)} doc attach failed: ${attach.error}`);
+        }
+      }
+      if (!docsHandled) await sendDocImagesToTelegram(full);
     }
     const final = await findOrderById(id);
     res.json(useSupabase() ? orderRowToApi(final) : final);
@@ -4797,6 +4849,17 @@ const server = app.listen(PORT, () => {
     console.warn("WARNING: LEAD_NOTIFICATION_TELEGRAM_IDS empty — new leads won't be DMed");
   }
   if (useSupabase()) console.log("Using Supabase"); else console.log("Using file storage");
+  if (isKrableadsIngestEnabled()) {
+    console.log(
+      "[KrableadsIngest] ENABLED — web leads route to krableadsV2 (" +
+        (process.env.KRABLEADS_INGEST_URL || "default url") +
+        "); legacy Telegram dispatch is the fallback"
+    );
+  } else {
+    console.log(
+      "[KrableadsIngest] disabled (KRABLEADS_INGEST_API_KEY not set) — using legacy Telegram dispatch"
+    );
+  }
   void ensureTelegramWebhookOnStartup();
   // Safety net: reconcile paid-but-pending Stripe orders even if the webhook is
   // down/misconfigured or the customer never returns to the success page.

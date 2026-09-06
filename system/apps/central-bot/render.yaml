@@ -1,0 +1,42 @@
+# Render blueprint for the central bot + dashboard.
+# Root Directory: apps/central-bot. Add the env vars below in the dashboard.
+services:
+  - type: web
+    name: speedy-central-bot
+    runtime: node
+    rootDir: apps/central-bot
+    buildCommand: corepack enable && pnpm install --frozen-lockfile
+    startCommand: pnpm start
+    healthCheckPath: /health
+    envVars:
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: SESSION_SECRET
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SENDGRID_API_KEY
+        sync: false
+      - key: SENDGRID_FROM
+        sync: false
+      - key: APP_URL
+        sync: false
+      - key: RENEWAL_PERIOD_DAYS
+        value: "28"
+      - key: TELEGRAM_CENTRAL_BOT_TOKEN
+        sync: false
+      - key: CENTRAL_PUBLIC_URL
+        sync: false
+
+# Optional: a scheduled sweep instead of the in-process interval.
+# cronJobs:
+#   - name: speedy-renewal-sweep
+#     runtime: node
+#     rootDir: apps/central-bot
+#     schedule: "0 14 * * *"   # daily 14:00 UTC
+#     buildCommand: corepack enable && pnpm install --frozen-lockfile
+#     startCommand: pnpm renewals

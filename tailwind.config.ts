@@ -8,7 +8,9 @@ export default {
   theme: {
     container: {
       center: true,
-      padding: "2rem",
+      // 1rem on phones, 2rem from sm up. A flat 2rem spent 64px of a 375px
+      // screen on side rails, which is a desktop gutter on a phone.
+      padding: { DEFAULT: "1rem", sm: "2rem" },
       screens: {
         "2xl": "1400px",
       },
@@ -101,7 +103,40 @@ export default {
         "fade-in": "fade-in 0.5s ease-out forwards",
         "car-drive-off": "car-drive-off 10s cubic-bezier(0.22, 0.61, 0.36, 1) forwards",
       },
+      backdropBlur: {
+        DEFAULT: 'blur(8px)',
+        sm: 'blur(4px)',
+        md: 'blur(12px)',
+        lg: 'blur(16px)',
+        xl: 'blur(24px)',
+      },
     },
   },
-  plugins: [tailwindcssAnimate],
+  plugins: [
+    tailwindcssAnimate,
+    function({ addUtilities }) {
+      addUtilities({
+        '.backdrop-blur': {
+          'backdrop-filter': 'blur(8px)',
+          '-webkit-backdrop-filter': 'blur(8px)',
+        },
+        '.backdrop-blur-sm': {
+          'backdrop-filter': 'blur(4px)',
+          '-webkit-backdrop-filter': 'blur(4px)',
+        },
+        '.backdrop-blur-md': {
+          'backdrop-filter': 'blur(12px)',
+          '-webkit-backdrop-filter': 'blur(12px)',
+        },
+        '.backdrop-blur-lg': {
+          'backdrop-filter': 'blur(16px)',
+          '-webkit-backdrop-filter': 'blur(16px)',
+        },
+        '.backdrop-blur-xl': {
+          'backdrop-filter': 'blur(24px)',
+          '-webkit-backdrop-filter': 'blur(24px)',
+        },
+      })
+    },
+  ],
 } satisfies Config;

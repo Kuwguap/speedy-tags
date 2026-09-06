@@ -36,7 +36,7 @@ export default function CheckoutSuccess() {
     return (
       <div className="min-h-screen bg-background">
         <Header />
-        <div className="container max-w-lg py-24 text-center">
+        <div className="container max-w-lg py-10 sm:py-24 text-center">
           <div className="animate-pulse space-y-4">
             <div className="h-16 w-16 rounded-full bg-muted mx-auto" />
             <p className="text-muted-foreground">Verifying your payment...</p>
@@ -50,7 +50,7 @@ export default function CheckoutSuccess() {
     return (
       <div className="min-h-screen bg-background">
         <Header />
-        <div className="container max-w-lg py-24 text-center animate-fade-in">
+        <div className="container max-w-lg py-10 sm:py-24 text-center animate-fade-in">
           <div className="inline-flex h-20 w-20 items-center justify-center rounded-2xl bg-destructive/10 mb-8">
             <XCircle className="h-12 w-12 text-destructive" />
           </div>
@@ -68,7 +68,7 @@ export default function CheckoutSuccess() {
   return (
     <div className="min-h-screen bg-background">
       <Header />
-      <div className="container max-w-lg py-24 text-center animate-fade-in">
+      <div className="container max-w-lg py-10 sm:py-24 text-center animate-fade-in">
         <div className="inline-flex h-20 w-20 items-center justify-center rounded-2xl bg-success/10 mb-8">
           <CheckCircle2 className="h-12 w-12 text-success" />
         </div>

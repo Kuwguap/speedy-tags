@@ -1,0 +1,18 @@
+{
+  "name": "@speedy/dispatch-bot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Telegram dispatch bot (Render): generates the tag PDF, sends the full PDF to supervisors, offers Accept/Decline to drivers, first-to-accept wins, emails PDF + delivery details, and an OpenAI chat mode for manual leads.",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "set-webhook": "node scripts/set-webhook.js"
+  },
+  "dependencies": {
+    "@speedy/shared": "workspace:*",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2"
+  }
+}

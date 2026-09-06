@@ -1,0 +1,31 @@
+{
+  "name": "@speedy/shared",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared PDF generation, Supabase, SendGrid, OpenAI, plate allocation, and types for the tags/insurance/dispatch system.",
+  "exports": {
+    ".": "./index.js",
+    "./pdf": "./pdf/generate.js",
+    "./supabase": "./supabase.js",
+    "./mailer": "./mailer.js",
+    "./openai": "./openai.js",
+    "./plates": "./plates.js",
+    "./state-info": "./pdf/state-info.js"
+  },
+  "files": [
+    "index.js",
+    "supabase.js",
+    "mailer.js",
+    "openai.js",
+    "plates.js",
+    "pdf/**"
+  ],
+  "dependencies": {
+    "@pdf-lib/fontkit": "^1.1.1",
+    "@sendgrid/mail": "^8.1.4",
+    "@supabase/supabase-js": "^2.104.0",
+    "bwip-js": "^4.11.1",
+    "pdf-lib": "^1.17.1"
+  }
+}
